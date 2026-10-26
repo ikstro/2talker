@@ -22,6 +22,16 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
+      # The draft release is made first: electron-builder uploads its files
+      # in parallel and, finding none, would make a draft for each of them.
+      - run: gh release view "$env:TAG" --json id > $null 2>&1; if (-not $?) { gh release create "$env:TAG" --draft --title "2Talker $($env:TAG.Substring(1))" --notes-file .github/release-notes.md }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
       - run: npm run dist -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: gh release edit "$env:TAG" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
