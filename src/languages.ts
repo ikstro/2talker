@@ -148,15 +148,28 @@ const SCRIPT_TESTS: [Script, RegExp][] = [
   ['Thai', /\p{Script=Thai}/u],
 ]
 
+/** The text without its inline code and URLs: what a script is read from. */
+function prose(text: string): string {
+  return text.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/\S+/g, ' ')
+}
+
+/** Whether the prose holds at least two letters of a script. */
+export function hasScript(text: string, script: Script): boolean {
+  const test = SCRIPT_TESTS.find(([name]) => name === script)?.[1]
+  if (!test) return false
+  let letters = 0
+  for (const char of prose(text)) if (test.test(char) && ++letters >= 2) return true
+  return false
+}
+
 /**
  * The script most of the prose is written in, ignoring inline code and URLs;
  * undefined when there are too few letters to tell or no script dominates.
  */
 export function scriptOf(text: string): Script | undefined {
-  const prose = text.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/\S+/g, ' ')
   const counts = new Map<Script, number>()
   let letters = 0
-  for (const char of prose) {
+  for (const char of prose(text)) {
     if (!/\p{L}/u.test(char)) continue
     const script = SCRIPT_TESTS.find(([, test]) => test.test(char))?.[0]
     if (!script) continue

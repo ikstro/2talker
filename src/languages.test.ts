@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { defaultNative, labelCode, langCode, scriptFor, scriptOf, searchLanguages, voiceMatches } from './languages'
+import { defaultNative, hasScript, labelCode, langCode, scriptFor, scriptOf, searchLanguages, voiceMatches } from './languages'
 import { itemAt, locate, wordAt } from './textmap'
 
 describe('languages', () => {
@@ -41,6 +41,8 @@ describe('scripts', () => {
     expect(scriptOf('Open the menu.')).toBe('Latin')
     expect(scriptOf('Ок')).toBeUndefined()
     expect(scriptOf('こんにちは、世界')).toBe('Japanese')
+    expect(hasScript('design-lab build.mjs, раздел', 'Cyrillic')).toBe(true)
+    expect(hasScript('Ctrl+С `Открой`', 'Cyrillic')).toBe(false)
     expect(scriptFor('Ukrainian')).toBe('Cyrillic')
     expect(scriptFor('German')).toBe('Latin')
     expect(scriptFor('Esperanto')).toBeUndefined()

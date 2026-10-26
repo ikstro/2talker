@@ -6,7 +6,7 @@
 // language. Lines, list markers and paragraphs are kept. An English text is
 // split first and shown at once; its translation follows.
 
-import { langCode, scriptFor, scriptOf } from './languages'
+import { hasScript, langCode, scriptFor, scriptOf } from './languages'
 import { lineUnits } from './sentences'
 
 /** One sentence: the English side, on top, and the other side, under it. */
@@ -19,13 +19,18 @@ export type Translate = (sentences: string[], from: string, to: string) => Promi
 
 type Unit = { line: number; index: number; text: string; into: 'en' | 'native' | undefined }
 
-/** Which way a sentence goes, from its script; undefined for a sentence with too few letters to tell. */
+/**
+ * Which way a sentence goes, from its script; undefined for a sentence with
+ * too few letters to tell. Letters of the person's own script, when it is
+ * not Latin, settle it: an English sentence has none, while a Russian one
+ * often carries English words, paths and names (half its letters, in a
+ * screenshot where code is not marked).
+ */
 export function directionOf(sentence: string, native: string): 'en' | 'native' | undefined {
   const own = scriptFor(native)
-  const script = scriptOf(sentence)
-  if (!script || !own) return undefined
-  if (script === own && own !== 'Latin') return 'en'
-  return script === 'Latin' ? 'native' : undefined
+  if (!own) return undefined
+  if (own !== 'Latin' && hasScript(sentence, own)) return 'en'
+  return scriptOf(sentence) === 'Latin' ? 'native' : undefined
 }
 
 /** A text cut into lines and sentences, nothing translated yet: every sentence as it was written. */

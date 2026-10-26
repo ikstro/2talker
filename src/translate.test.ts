@@ -36,6 +36,16 @@ describe('pairText', () => {
     expect(directionOf('Готово', 'Russian')).toBe('en')
     expect(directionOf('Done here', 'Russian')).toBe('native')
   })
+
+  test('a sentence in the person’s script goes into English however many English words it holds', () => {
+    // From a screenshot: the path is not in backticks, and Latin letters are half of them.
+    expect(directionOf('Доска, раунд 3 (сборщик opus high, тот же design-lab/2026-10-25-clubs-review/build/build.mjs, новый раздел наверху)', 'Russian')).toBe('en')
+    expect(directionOf('Run `npm test` in E:/Cursor/tu-talk first.', 'Russian')).toBe('native')
+    // A single stray letter does not make an English sentence Russian.
+    expect(directionOf('Press Ctrl+С twice.', 'Russian')).toBe('native')
+    // A Latin-script native: no way to tell German from English yet.
+    expect(directionOf('Das ist ein Test.', 'German')).toBe('native')
+  })
 })
 
 describe('splitText', () => {

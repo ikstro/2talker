@@ -306,11 +306,16 @@ function renderState(): void {
   }
 }
 
+/** The sentences the English voice reads: those with Latin letters; one left untranslated in another script is skipped. */
+function englishSentences(): HTMLElement[] {
+  return [...body.querySelectorAll<HTMLElement>('span.s')].filter(s => /\p{Script=Latin}/u.test(s.textContent ?? ''))
+}
+
 /** A new translation is read once, when "Read aloud when a card opens" is on. */
 function autoRead(c: CardView): void {
   if (!c.autoRead || state.readId === c.id) return
   state.readId = c.id
-  if (hasVoice()) player.play('card', [...body.querySelectorAll<HTMLElement>('span.s')], { follow: true })
+  if (hasVoice()) player.play('card', englishSentences(), { follow: true })
 }
 
 function updatePlayButtons(): void {
@@ -380,7 +385,7 @@ root.addEventListener('click', event => {
     state.listened = true
     state.naturalJustReady = false
     renderVoiceBanner()
-    if (!hasVoice() || !player.play(key, [...body.querySelectorAll<HTMLElement>('span.s')], { follow: true })) noVoiceHint()
+    if (!hasVoice() || !player.play(key, englishSentences(), { follow: true })) noVoiceHint()
     return
   }
   const sentence = target.closest<HTMLElement>('span.s, span.t')
