@@ -113,7 +113,8 @@ export type ToHost =
   | { type: 'ready' }
   | { type: 'speak'; id: number; items: string[]; lang: string; separator: string }
   /** Reads `items` in a natural voice; `naturalAt` says which of them started playing, so the next ones get made. */
-  | { type: 'speakNatural'; id: number; items: string[]; voice: string; rate: number }
+  /** `ahead`: sentences to make after `items` and keep, not to read (what a step forward will want). */
+  | { type: 'speakNatural'; id: number; items: string[]; voice: string; rate: number; ahead?: string[] }
   | { type: 'naturalAt'; id: number; index: number }
   | { type: 'downloadNatural' }
   /** The person closed the offer of the natural voice. */

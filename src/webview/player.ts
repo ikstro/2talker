@@ -76,6 +76,7 @@ export class Player {
   private endAt = 0
   private follower: number | undefined
   private lastWord = ''
+  private ahead: string[] = []
 
   constructor(
     private readonly post: (message: ToHost) => void,
@@ -85,12 +86,14 @@ export class Player {
 
   /**
    * Starts reading `els`; returns false when there is nothing to read or no
-   * voice to read it with. `system` skips the natural voice.
+   * voice to read it with. `system` skips the natural voice; `ahead` are
+   * made by the natural voice after `els` and kept, for a step forward.
    */
-  play(key: string, els: readonly HTMLElement[], options: { follow?: boolean; system?: boolean } = {}): boolean {
+  play(key: string, els: readonly HTMLElement[], options: { follow?: boolean; system?: boolean; ahead?: readonly HTMLElement[] } = {}): boolean {
     this.stop()
     const items = els.map(textItem).filter(item => item.text.trim().length > 0)
     if (items.length === 0) return false
+    this.ahead = (options.ahead ?? []).map(el => textItem(el).text).filter(text => text.trim().length > 0)
     const natural = options.system ? undefined : this.env.natural()
     const audio = natural ? this.env.audio() : undefined
     const voice = this.env.voice()
@@ -241,7 +244,7 @@ export class Player {
     this.lastWord = ''
     if (audio.state === 'suspended') void audio.resume()
     this.enter(0)
-    this.post({ type: 'speakNatural', id: this.hostId, items: this.items.map(item => item.text), voice, rate: this.env.rate() })
+    this.post({ type: 'speakNatural', id: this.hostId, items: this.items.map(item => item.text), voice, rate: this.env.rate(), ahead: this.ahead })
     this.follower = window.setInterval(() => this.followAudio(), FOLLOW_MS)
   }
 

@@ -475,7 +475,7 @@ function onMessage(message: ToHost): void {
       return
     case 'speakNatural':
       speaker.stop()
-      natural.speak(message.id, message.items, message.voice, message.rate)
+      natural.speak(message.id, message.items, message.voice, message.rate, message.ahead)
       return
     case 'naturalAt':
       natural.at(message.id, message.index)

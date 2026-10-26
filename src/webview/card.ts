@@ -349,7 +349,11 @@ function addParagraphButtons(): void {
   )
 }
 
-/** Starts reading `els`, the first being English sentence `from`; `asked`: the person pressed a button. */
+/**
+ * Starts reading `els`, the first being English sentence `from`; `asked`: the
+ * person pressed a button. The sentence after the reading is made ahead, so a
+ * step forward, or the next paragraph, starts at once.
+ */
 function read(key: string, els: HTMLElement[], from: number, asked: boolean): void {
   if (els.length === 0) return
   if (asked) {
@@ -359,7 +363,8 @@ function read(key: string, els: HTMLElement[], from: number, asked: boolean): vo
   }
   state.readFrom = from
   state.reading = key
-  if (!hasVoice() || !player.play(key, els, { follow: true })) {
+  const after = englishSentences()[from + els.length]
+  if (!hasVoice() || !player.play(key, els, { follow: true, ahead: after ? [after] : [] })) {
     if (asked) noVoiceHint()
   }
 }

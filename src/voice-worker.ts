@@ -92,7 +92,7 @@ async function work(): Promise<void> {
         const { samples, words } = await speak(next.text, next.voice, next.speed)
         send({ type: 'audio', job: next.job, index: next.index, samples, words })
       } catch (error) {
-        send({ type: 'failed', job: next.job, message: error instanceof Error ? error.message : String(error) })
+        send({ type: 'failed', job: next.job, index: next.index, message: error instanceof Error ? error.message : String(error) })
       }
     }
   } finally {
