@@ -1,0 +1,39 @@
+{
+  "name": "2talker",
+  "productName": "2Talker",
+  "version": "0.2.0",
+  "description": "Select a text or snip a piece of the screen: 2Talker translates it offline and reads the English aloud.",
+  "author": "ikstro",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ikstro/2talker"
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "icons": "electron scripts/icons.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "start": "node esbuild.mjs && electron .",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "dist": "node esbuild.mjs && electron-builder --win --x64",
+    "models": "node scripts/build-mt.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vscode/codicons": "^0.0.36",
+    "electron": "45.0.0",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.25.0",
+    "onnxruntime-common": "1.30.0",
+    "onnxruntime-node": "1.30.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11",
+    "koffi": "3.3.4"
+  }
+}

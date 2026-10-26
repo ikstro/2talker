@@ -1,0 +1,37 @@
+2Talker
+Code: MIT License (see LICENSE). Parts of it come from the Language Tutor panel
+(https://github.com/ikstro/cc-translator), MIT License, same author.
+
+Translator (vendor/bergamot, shipped; models downloaded on first use from Mozilla's servers)
+  Firefox Translations by Mozilla: the Bergamot translator built to WebAssembly
+  (https://github.com/mozilla/translations) and its loader from Firefox
+  (toolkit/components/translations, https://github.com/mozilla-firefox/firefox),
+  Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/). The files are shipped unmodified;
+  their source is at the links above. The translation models are Mozilla's, under the same license.
+
+Word dictionary (media/dict/*.json; other languages downloaded from the cc-translator dict-1 release)
+  Built from WikDict (https://www.wikdict.com) by Karl Bartel,
+  data from Wiktionary (https://www.wiktionary.org) via DBnary,
+  licensed under the Creative Commons Attribution-ShareAlike License
+  (https://creativecommons.org/licenses/by-sa/4.0/).
+  The dictionary files are a derived work and are shared under the same license.
+
+Icons: @vscode/codicons, Creative Commons Attribution 4.0 (fonts) / MIT (code).
+
+Common words (media/common-en.txt: the 3000 most frequent English words, for the dotted line under the others)
+  From FrequencyWords by Hermit Dave (https://github.com/hermitdave/FrequencyWords), counted over
+  the OpenSubtitles 2018 corpus (https://opus.nlpl.eu/OpenSubtitles.php), Creative Commons
+  Attribution-ShareAlike 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The list is a
+  derived work and is shared under the same license.
+
+Natural voice (downloaded on request from the cc-translator voice-1 release, not shipped)
+  Kokoro-82M by hexgrad (https://huggingface.co/hexgrad/Kokoro-82M), Apache License 2.0;
+    ONNX export by onnx-community. Text rules in src/kokoro.ts follow kokoro-js (Apache License 2.0).
+  ONNX Runtime by Microsoft (https://onnxruntime.ai), MIT License; 2Talker bundles the
+    JavaScript of onnxruntime-node and downloads its native library.
+  phonemizer.js by Xenova (https://github.com/xenova/phonemizer.js), Apache License 2.0, which
+    contains eSpeak NG (https://github.com/espeak-ng/espeak-ng), GNU General Public License v3.0.
+    It runs as a separate file in the voice process; its source is at the links above.
+
+Electron (https://www.electronjs.org), MIT License; Chromium and Node.js under their own licenses
+(see LICENSES.chromium.html in the installed app). koffi by Niels Martignène, MIT License.

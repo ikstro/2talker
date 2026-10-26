@@ -1,0 +1,8 @@
+node_modules/
+dist/
+media/card.js
+media/codicon.*
+release/
+.cache/
+*.log
+docs/frames/

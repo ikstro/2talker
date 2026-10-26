@@ -1,0 +1,39 @@
+# Windows installer: npm run dist → release/2Talker-Setup-<version>.exe
+appId: com.ikstro.2talker
+productName: 2Talker
+copyright: Copyright © 2026 ikstro
+directories:
+  output: release
+  buildResources: build
+files:
+  - package.json
+  - LICENSE
+  - NOTICE
+  - dist/**
+  - "!dist/**/*.map"
+  - media/**
+  - vendor/**
+# The translator and the voice run as a thread and a process of their own and
+# read the engine from disk: they live outside the archive.
+asarUnpack:
+  - dist/mt-worker.js
+  - dist/voice-worker.js
+  - vendor/**
+# koffi ships prebuilt for Node-API; nothing to rebuild for Electron.
+npmRebuild: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+nsis:
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  artifactName: 2Talker-Setup-${version}.${ext}
+# Releases on GitHub: the updater (src/update.ts) reads latest.yml from there.
+# The installer is not signed (a free app): Windows warns once at install.
+publish:
+  provider: github
+  owner: ikstro
+  repo: 2talker

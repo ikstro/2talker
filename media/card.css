@@ -1,0 +1,515 @@
+/* The card. Every color is a VS Code theme token (theme.css names them), as in
+   the Tutor panel these styles come from. Targets are at least 24px for a pen. */
+
+:root {
+  --fg: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --accent: var(--vscode-focusBorder);
+  --link: var(--vscode-textLink-foreground);
+  --border: var(--vscode-widget-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.35)));
+  --surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --raised: var(--vscode-editorWidget-background, var(--surface));
+  --field: var(--vscode-input-background);
+  --hover: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+  --selected: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.2));
+  --primary-bg: var(--vscode-button-background);
+  --primary-fg: var(--vscode-button-foreground);
+  --primary-hover: var(--vscode-button-hoverBackground);
+  --del: var(--vscode-gitDecoration-deletedResourceForeground, #e06c75);
+  --ins: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+  --shadow: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  --sentence: color-mix(in srgb, var(--accent) 12%, transparent);
+  /* The theme's own selection color: built to keep text readable on it. */
+  --word: var(--vscode-editor-selectionBackground, color-mix(in srgb, var(--accent) 40%, transparent));
+  --radius: 4px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 0 56px;
+  color: var(--fg);
+  background: var(--surface);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.55;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.grow {
+  flex: 1;
+}
+
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------ controls */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--fg);
+  background: var(--vscode-toolbar-hoverBackground, var(--hover));
+}
+
+.icon-btn.is-playing,
+.listen.is-playing {
+  color: var(--link);
+}
+
+.text-btn {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--link);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.text-btn:hover {
+  background: var(--hover);
+}
+
+.primary-btn {
+  flex: none;
+  min-height: 26px;
+  padding: 2px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: var(--radius);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  cursor: pointer;
+}
+
+.primary-btn:hover {
+  background: var(--primary-hover);
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------ header */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+  background: var(--surface);
+}
+
+.toggle {
+  flex: none;
+  min-width: 32px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.toggle[aria-pressed='true'] {
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+
+/* ------------------------------------------------------------ states */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--raised);
+}
+
+.banner-text {
+  flex: 1 1 180px;
+  color: var(--muted);
+}
+
+.empty {
+  padding: 28px 16px 8px;
+}
+
+.empty-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.empty-text {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------ conversation */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 12px 0;
+}
+
+.msg {
+  min-width: 0;
+}
+
+.body > :first-child {
+  margin-top: 0;
+}
+
+.body > :last-child {
+  margin-bottom: 0;
+}
+
+.body p,
+.body ul,
+.body ol {
+  margin: 0.45em 0;
+}
+
+.body ul,
+.body ol {
+  padding-left: 1.4em;
+}
+
+.body h1,
+.body h2,
+.body h3,
+.body h4 {
+  margin: 0.9em 0 0.3em;
+  font-size: 1.05em;
+}
+
+.body pre {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--vscode-textCodeBlock-background);
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-editor-font-size);
+  line-height: 1.45;
+}
+
+.body code {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.95em;
+}
+
+.body :not(pre) > code,
+.body span.s code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background);
+}
+
+.body a {
+  color: var(--link);
+}
+
+.body blockquote {
+  margin: 0.4em 0;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+}
+
+/* A sentence, in English or translated: a click marks it and its other side. */
+span.s,
+span.t {
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 80ms ease-out;
+}
+
+span.s:hover,
+span.t:hover {
+  background: var(--hover);
+}
+
+span.s.speaking,
+span.s.speaking:hover,
+.pair,
+.pair:hover {
+  background: var(--sentence);
+}
+
+::highlight(tutor-word) {
+  background-color: var(--word);
+  color: var(--vscode-editor-foreground, var(--fg));
+}
+
+/* The translation: the lower half, dimmer, under a rule. */
+.translation {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.translation > :last-child {
+  margin-bottom: 0;
+}
+
+body.no-translation .translation {
+  display: none;
+}
+
+.msg-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+
+.listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  margin-left: -4px;
+  padding: 0 6px 0 4px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.92em;
+  cursor: pointer;
+}
+
+.listen:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+body.no-voice [data-play] {
+  opacity: 0.45;
+}
+
+/* Word card: hover any English word for its dictionary meanings. */
+::highlight(tutor-hover) {
+  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.word-card {
+  position: fixed;
+  z-index: 45;
+  padding: 6px 8px 8px 10px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border));
+  border-radius: 6px;
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  background: var(--vscode-editorHoverWidget-background, var(--raised));
+  box-shadow: 0 4px 14px var(--shadow);
+  font-size: 0.95em;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.wc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.word-card .wc-word {
+  font-weight: 600;
+  cursor: default;
+}
+
+.word-card .wc-word:hover {
+  background: transparent;
+}
+
+.wc-form,
+.wc-ipa {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+/* Opened by a click, the card takes clicks itself: say the word, keep it. */
+.word-card.clicked {
+  pointer-events: auto;
+}
+
+.wc-head .icon-btn {
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
+}
+
+/* A word outside the most common 3000: a hint of what to click. */
+::highlight(rare-word) {
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 3px;
+}
+
+.wc-sense {
+  overflow-wrap: anywhere;
+}
+
+.wc-pos {
+  color: var(--muted);
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.wc-note {
+  color: var(--muted);
+}
+
+.wc-also {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ floating */
+
+
+.toast {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 40;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation-duration: 0s !important;
+  }
+}
+
+/* ------------------------------------------------------------ card */
+
+/* A frameless window: the header is its handle, the border its edge. The
+   window is as tall as the body (card.ts), so the border sits on the page. */
+html {
+  height: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: hidden;
+}
+
+body {
+  padding: 0 0 12px;
+}
+
+.bar {
+  -webkit-app-region: drag;
+  user-select: none;
+  min-height: 36px;
+  padding: 4px 6px 4px 12px;
+}
+
+.bar button {
+  -webkit-app-region: no-drag;
+}
+
+.card-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
+.icon-btn[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.list {
+  padding: 12px 14px 0;
+  line-height: 1.6;
+}
+
+.body p,
+.translation p {
+  margin: 0 0 0.6em;
+}
+
+.empty {
+  padding: 16px 14px 4px;
+}
+
+.empty p + p {
+  margin-top: 8px;
+}
