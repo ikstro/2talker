@@ -30,6 +30,34 @@ export function watchClipboard(window: BrowserWindow, onChange: () => void): () 
   }
 }
 
+const keybd_event = user32.func('void __stdcall keybd_event(uint8_t vk, uint8_t scan, uint32_t flags, uintptr_t extra)')
+const KEYEVENTF_KEYUP = 0x0002
+const VK_SHIFT = 0x10
+const VK_MENU = 0x12
+const VK_LWIN = 0x5b
+const VK_RWIN = 0x5c
+const VK_C = 0x43
+
+function held(vk: number): boolean {
+  return (Number(GetAsyncKeyState(vk)) & 0x8000) !== 0
+}
+
 export function ctrlHeld(): boolean {
-  return (Number(GetAsyncKeyState(VK_CONTROL)) & 0x8000) !== 0
+  return held(VK_CONTROL)
+}
+
+/**
+ * Presses Ctrl+C in the program in front, as the person would: once the
+ * shortcut's own keys are let go (an Alt still down would make it Ctrl+Alt+C),
+ * or after `maxWaitMs` regardless.
+ */
+export async function pressCopy(maxWaitMs = 1500): Promise<void> {
+  const until = Date.now() + maxWaitMs
+  while ([VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN].some(held) && Date.now() < until) {
+    await new Promise(resolve => setTimeout(resolve, 15))
+  }
+  keybd_event(VK_CONTROL, 0, 0, 0)
+  keybd_event(VK_C, 0, 0, 0)
+  keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
+  keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 }

@@ -20,7 +20,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, Tray, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, Tray, type MenuItemConstructorOptions, type Rectangle } from 'electron'
 
 import { DoubleCopy } from './clipboard'
 import { DictionaryStore } from './dictstore'
@@ -32,9 +32,9 @@ import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel, systemVoiceName, type Nat
 import { recognize } from './ocr'
 import { paragraphsOf } from './ocrtext'
 import { placeNear, resize, type Point } from './placement'
-import type { AppView, CardKind, CardState, GlossMissing, HostVoice, ToHost, ToView, TranslationState, ViewConfig } from './protocol'
+import type { AppTab, AppView, CardKind, CardState, GlossMissing, HostVoice, ToHost, ToView, TranslationState, ViewConfig } from './protocol'
 import { englishHtml, translationHtml } from './render'
-import { normalize, TARGET, type Settings } from './settings'
+import { CARD_WIDTH, normalize, RATES, TARGET, type Settings, type ThemeMode } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { NaturalSpeaker } from './synth'
 import { englishReady, splitText, translateLines } from './translate'
@@ -42,19 +42,22 @@ import type { Translator } from './translator'
 import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
-import { ctrlHeld, watchClipboard } from './winclip'
+import { ctrlHeld, pressCopy, watchClipboard } from './winclip'
 import { ankiTsv, WordStore, wordsText } from './words'
 
-const CARD_WIDTH = 440
 const CARD_MIN = 96
-const CARD_MAX = 560
+/** Without a height set by hand, a card grows to this share of the screen. */
+const CARD_AUTO_SHARE = 0.7
 /** The offline translator takes a few hundred ms a sentence: a longer text is cut. */
 const MAX_TEXT_CHARS = 6000
 /** How long after the snip shortcut a picture on the clipboard counts as the snip. */
 const SNIP_WAIT_MS = 120_000
 /** Programs put a copy on the clipboard in steps; it is read once they are done. */
 const SETTLE_MS = 60
-const RATES = [0.75, 0.9, 1, 1.15, 1.3]
+/** How long after the selection shortcut presses Ctrl+C its copy may come. */
+const SELECT_WAIT_MS = 600
+/** The links the About tab may open. */
+const LINKS = new Set(['https://ikstro.com', 'https://github.com/ikstro/2talker', 'https://github.com/ikstro/2talker/releases', 'https://github.com/ikstro/2talker/blob/main/NOTICE'])
 
 const userDir = () => app.getPath('userData')
 const settingsFile = () => path.join(userDir(), 'settings.json')
@@ -78,7 +81,14 @@ const copies = new DoubleCopy()
 let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
-let snipKeyOk = true
+let keysOk = { snip: true, select: true }
+/** The selection shortcut pressed Ctrl+C: the next copy is the selection, read by the pointer. */
+let copyWanted: { since: number; at: Point } | undefined
+/** The card's bounds when its edge began to be dragged; the content's height, which the card follows otherwise. */
+let resizeFrom: Rectangle | undefined
+let contentHeight = 160
+/** The tab the app window opens on, once its page is ready. */
+let pendingTab: AppTab | undefined
 let words: WordStore
 let updater: Updater
 /** The most common English words, for the card's dotted lines; read once. */
@@ -124,7 +134,8 @@ function saveSettings(patch: Partial<Settings>): void {
     console.warn('2Talker: could not save the settings', error)
   }
   if ('startWithWindows' in patch) applyLoginItem()
-  if ('snipKey' in patch) registerSnipKey()
+  if ('snipKey' in patch || 'selectKey' in patch) registerShortcuts()
+  if ('theme' in patch) applyTheme()
   refreshTray()
   if (shown) postCard()
   postApp()
@@ -136,7 +147,15 @@ function applyLoginItem(): void {
 }
 
 function config(): ViewConfig {
-  return { voice: settings.voice, rate: settings.rate, wordHint: settings.wordHint, rareWords: settings.rareWords }
+  return { voice: settings.voice, rate: settings.rate, wordHint: settings.wordHint, rareWords: settings.rareWords, oneAtATime: settings.oneAtATime }
+}
+
+const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#202020' : '#f8f8f8')
+
+/** Light, dark or as Windows is: both pages follow `prefers-color-scheme`, which this sets. */
+function applyTheme(): void {
+  nativeTheme.themeSource = settings.theme
+  for (const win of [card, appWin]) if (win && !win.isDestroyed()) win.setBackgroundColor(windowColor())
 }
 
 // ---------------------------------------------------------------- speech and words
@@ -241,18 +260,21 @@ async function exportWords(): Promise<void> {
 
 function createCard(): BrowserWindow {
   const win = new BrowserWindow({
-    width: CARD_WIDTH,
+    width: settings.cardWidth,
     height: 160,
+    minWidth: CARD_WIDTH.min,
+    minHeight: CARD_MIN,
     show: false,
     frame: false,
-    resizable: false,
+    // Its edges drag like any window's; the size is kept for the next cards.
+    resizable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     title: '2Talker',
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#202020' : '#f8f8f8',
+    backgroundColor: windowColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -261,6 +283,21 @@ function createCard(): BrowserWindow {
       spellcheck: false,
       backgroundThrottling: false,
     },
+  })
+  // A drag of an edge (never the card's own growing) sets the width, or how tall a card may grow.
+  win.on('will-resize', () => {
+    resizeFrom ??= win.getBounds()
+  })
+  win.on('resized', () => {
+    const from = resizeFrom
+    resizeFrom = undefined
+    if (!from) return
+    const to = win.getBounds()
+    const patch: Partial<Settings> = {}
+    if (to.width !== from.width) patch.cardWidth = to.width
+    if (to.height !== from.height) patch.cardHeight = to.height
+    if (Object.keys(patch).length > 0) saveSettings(patch)
+    fitCard()
   })
   win.setAlwaysOnTop(true, 'pop-up-menu')
   win.removeMenu()
@@ -302,7 +339,7 @@ function appView(): AppView {
       .map(l => ({ name: l.name, native: l.native })),
     words: words.list(),
     update: updater.status,
-    snipKeyOk,
+    keysOk,
   }
 }
 
@@ -320,7 +357,7 @@ function createAppWindow(): BrowserWindow {
     title: '2Talker',
     icon: path.join(app.getAppPath(), 'media', 'icon.png'),
     autoHideMenuBar: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#202020' : '#f8f8f8',
+    backgroundColor: windowColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -351,8 +388,13 @@ function createAppWindow(): BrowserWindow {
   return win
 }
 
-function openApp(): void {
+/** Shows the app window, on `tab` if one is named. */
+function openApp(tab?: AppTab): void {
   if (!appWin || appWin.isDestroyed()) appWin = createAppWindow()
+  if (tab) {
+    if (appReady) appWin.webContents.send('to-view', { type: 'appTab', tab } satisfies ToView)
+    else pendingTab = tab
+  }
   if (appWin.isMinimized()) appWin.restore()
   appWin.show()
   appWin.focus()
@@ -378,7 +420,7 @@ function openCard(kind: CardKind, state: CardState, at: Point): number {
   if (!win) return id
   if (!win.isVisible()) {
     const area = screen.getDisplayNearestPoint(at).workArea
-    win.setBounds(placeNear(at, { width: CARD_WIDTH, height: Math.max(CARD_MIN, win.getBounds().height) }, area))
+    win.setBounds(placeNear(at, { width: settings.cardWidth, height: Math.max(CARD_MIN, win.getBounds().height) }, area))
     shownAt = Date.now()
     win.show()
   }
@@ -401,13 +443,21 @@ function hideCard(): void {
   card?.hide()
 }
 
-function setCardHeight(px: number): void {
+/** The card is as tall as its content, up to the height set by hand or most of the screen; never while its edge is dragged. */
+function fitCard(): void {
   const win = card
-  if (!win || win.isDestroyed()) return
+  if (!win || win.isDestroyed() || resizeFrom) return
   const bounds = win.getBounds()
-  const height = Math.round(Math.min(CARD_MAX, Math.max(CARD_MIN, px)))
+  const area = screen.getDisplayMatching(bounds).workArea
+  const cap = settings.cardHeight || Math.round(area.height * CARD_AUTO_SHARE)
+  const height = Math.round(Math.min(cap, Math.max(CARD_MIN, contentHeight)))
   if (height === bounds.height) return
-  win.setBounds(resize(bounds, height, screen.getDisplayMatching(bounds).workArea))
+  win.setBounds(resize(bounds, height, area))
+}
+
+function setCardHeight(px: number): void {
+  contentHeight = px
+  fitCard()
 }
 
 function onMessage(message: ToHost): void {
@@ -470,6 +520,8 @@ function onMessage(message: ToHost): void {
     case 'appReady':
       appReady = true
       postApp()
+      if (pendingTab) appWin?.webContents.send('to-view', { type: 'appTab', tab: pendingTab } satisfies ToView)
+      pendingTab = undefined
       return
     case 'saveSettings':
       saveSettings(message.patch)
@@ -486,6 +538,9 @@ function onMessage(message: ToHost): void {
       return
     case 'checkUpdates':
       updater.check()
+      return
+    case 'openLink':
+      if (LINKS.has(message.url)) void shell.openExternal(message.url)
       return
   }
 }
@@ -574,7 +629,20 @@ function snip(): void {
 async function translateClipboard(): Promise<void> {
   const text = (await clipboard.readText()).trim()
   if (text) translateText(text, 'selection', screen.getCursorScreenPoint())
-  else tray?.displayBalloon({ title: '2Talker', content: 'The clipboard holds no text. Select a text and press Ctrl+C twice.' })
+  else tray?.displayBalloon({ title: '2Talker', content: 'The clipboard holds no text. Select a text and copy it first.' })
+}
+
+/** The selection shortcut: 2Talker presses Ctrl+C in the program in front and translates what it copies. */
+async function translateSelection(): Promise<void> {
+  const at = screen.getCursorScreenPoint()
+  await pressCopy()
+  const since = Date.now()
+  copyWanted = { since, at }
+  setTimeout(() => {
+    if (copyWanted?.since !== since) return
+    copyWanted = undefined
+    tray?.displayBalloon({ title: '2Talker', content: 'Nothing was copied. Select a text, then press the shortcut.' })
+  }, SELECT_WAIT_MS)
 }
 
 /** The picture on the clipboard as PNG, if there is one. */
@@ -603,8 +671,17 @@ function onClipboardChange(): void {
     })
     return
   }
+  if (copyWanted && now - copyWanted.since < SELECT_WAIT_MS) {
+    const at = copyWanted.at
+    copyWanted = undefined
+    afterSettling(async () => {
+      const text = (await clipboard.readText()).trim()
+      if (text) translateText(text, 'selection', at)
+    })
+    return
+  }
   // Copying from the card itself is not a request.
-  if (card?.isFocused()) return
+  if (card?.isFocused() || !settings.doubleCopy) return
   if (!copies.change(now, ctrlHeld())) return
   const at = screen.getCursorScreenPoint()
   afterSettling(async () => {
@@ -613,20 +690,26 @@ function onClipboardChange(): void {
   })
 }
 
-function registerSnipKey(): void {
+function registerShortcuts(): void {
   globalShortcut.unregisterAll()
-  let ok = false
-  try {
-    ok = globalShortcut.register(settings.snipKey, snip)
-  } catch {
-    ok = false
+  const register = (accelerator: string, run: () => void): boolean => {
+    if (!accelerator) return true
+    try {
+      return globalShortcut.register(accelerator, run)
+    } catch {
+      return false
+    }
   }
-  snipKeyOk = ok
+  keysOk = {
+    snip: register(settings.snipKey, snip),
+    select: register(settings.selectKey, () => void translateSelection().catch(error => console.warn('2Talker: could not copy the selection', error))),
+  }
+  const taken = [!keysOk.snip && settings.snipKey, !keysOk.select && settings.selectKey].filter((k): k is string => !!k)
   // The settings window shows the trouble itself; the balloon is for a start without it.
-  if (!ok && !(appWin?.isVisible() ?? false)) {
+  if (taken.length > 0 && !(appWin?.isVisible() ?? false)) {
     tray?.displayBalloon({
       title: '2Talker',
-      content: `${keyLabel(settings.snipKey)} is taken by another program. Choose another in the settings, or snip from the tray menu.`,
+      content: `${taken.map(keyLabel).join(' and ')} ${taken.length > 1 ? 'are' : 'is'} taken by another program. Choose another in the settings.`,
     })
   }
 }
@@ -666,13 +749,28 @@ function languageMenu(): MenuItemConstructorOptions[] {
     .map(l => ({ label: `${l.native} · ${l.name}`, type: 'radio', checked: settings.native === l.name, click: () => saveSettings({ native: l.name }) }))
 }
 
+/** A menu label with its shortcut on the right, when there is one. */
+function withKey(label: string, accelerator: string): string {
+  return accelerator ? `${label}\t${keyLabel(accelerator)}` : label
+}
+
+function themeMenu(): MenuItemConstructorOptions[] {
+  const themes: [ThemeMode, string][] = [
+    ['system', 'As Windows'],
+    ['light', 'Light'],
+    ['dark', 'Dark'],
+  ]
+  return themes.map(([theme, label]) => ({ label, type: 'radio', checked: settings.theme === theme, click: () => saveSettings({ theme }) }))
+}
+
 function refreshTray(): void {
   if (!tray) return
   const menu = Menu.buildFromTemplate([
-    { label: 'Open 2Talker…', click: openApp },
+    { label: 'Open 2Talker…', click: () => openApp() },
     { type: 'separator' },
-    { label: `Translate a piece of the screen\t${keyLabel(settings.snipKey)}`, click: snip },
-    { label: 'Translate the copied text\tCtrl+C, C', click: () => afterSettling(translateClipboard) },
+    ...(settings.selectKey ? [{ label: withKey('Translate the selection', settings.selectKey), click: () => void translateSelection() }] : []),
+    { label: withKey('Translate the copied text', settings.doubleCopy ? 'Ctrl+C, C' : ''), click: () => afterSettling(translateClipboard) },
+    { label: withKey('Translate a piece of the screen', settings.snipKey), click: snip },
     { type: 'separator' },
     { label: 'Read aloud when a card opens', type: 'checkbox', checked: settings.autoRead, click: item => saveSettings({ autoRead: item.checked }) },
     { label: 'Voice', submenu: voiceMenu() },
@@ -681,24 +779,32 @@ function refreshTray(): void {
       submenu: RATES.map(rate => ({ label: rate === 1 ? 'Normal' : `${rate}×`, type: 'radio', checked: settings.rate === rate, click: () => saveSettings({ rate }) })),
     },
     { label: 'Your language', submenu: languageMenu() },
+    { label: 'Theme', submenu: themeMenu() },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: settings.startWithWindows, click: item => saveSettings({ startWithWindows: item.checked }) },
+    { label: 'About 2Talker…', click: () => openApp('about') },
     { label: 'Quit 2Talker', click: () => app.quit() },
   ])
   tray.setContextMenu(menu)
+  tray.setToolTip(tooltip())
+}
+
+function tooltip(): string {
+  const ways = [
+    settings.doubleCopy ? 'Ctrl+C twice' : '',
+    settings.selectKey ? keyLabel(settings.selectKey) : '',
+  ].filter(Boolean)
+  const text = ways.length ? `${ways.join(' or ')} to translate a text` : ''
+  const screenKey = settings.snipKey ? `${keyLabel(settings.snipKey)} for a piece of the screen` : ''
+  return ['2Talker', text, screenKey].filter(Boolean).join(' · ')
 }
 
 function createTray(): Tray {
   const icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'media', 'icon.png')).resize({ width: 32, height: 32, quality: 'best' })
   const t = new Tray(icon)
-  t.setToolTip(`2Talker · Ctrl+C twice to translate a text · ${keyLabel(settings.snipKey)} for a piece of the screen`)
   t.on('click', () => t.popUpContextMenu())
-  t.on('double-click', openApp)
+  t.on('double-click', () => openApp())
   return t
-}
-
-function howTo(): string {
-  return `Select a text anywhere and press Ctrl+C twice. Press ${keyLabel(settings.snipKey)} to translate a piece of the screen.`
 }
 
 /**
@@ -724,6 +830,7 @@ function start(): void {
   const firstRun = !fs.existsSync(settingsFile())
   settings = readSettings()
   if (firstRun) saveSettings({})
+  applyTheme()
   applyLoginItem()
   setUpSpeech()
   words = new WordStore(path.join(userDir(), 'words.json'))
@@ -737,7 +844,7 @@ function start(): void {
   })
   tray = createTray()
   refreshTray()
-  registerSnipKey()
+  registerShortcuts()
   card = createCard()
   ipcMain.on('to-host', (_event, message: ToHost) => onMessage(message))
   try {
@@ -748,7 +855,7 @@ function start(): void {
   void sendHostVoices()
   updater.start()
   // The first start opens the window on "How to use".
-  if (firstRun) openApp()
+  if (firstRun) openApp('howto')
   runCommand(process.argv)
 }
 

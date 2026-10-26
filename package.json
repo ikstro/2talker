@@ -3,7 +3,10 @@
   "productName": "2Talker",
   "version": "0.2.0",
   "description": "Select a text or snip a piece of the screen: 2Talker translates it offline and reads the English aloud.",
-  "author": "ikstro",
+  "author": {
+    "name": "Yevhen Peshynskyi",
+    "url": "https://ikstro.com"
+  },
   "license": "MIT",
   "private": true,
   "main": "dist/main.js",

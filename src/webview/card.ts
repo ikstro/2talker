@@ -1,8 +1,10 @@
 // The card: one picked text or one snipped piece of the screen, in English
 // on top and translated under it. Listen highlights the spoken sentence and
-// word; a click on an English word shows its meanings (Shift+hover too), and
-// a click on a sentence marks its other side. The HTML of both halves
-// arrives rendered from the main process.
+// word, from a cursor the arrows move; "one by one" reads a sentence and
+// waits; each paragraph has its own play button in the margin. A click on an
+// English word shows its meanings (Shift+hover too), and a click on a
+// sentence marks its other side. The HTML of both halves arrives rendered
+// from the main process.
 
 import { labelCode, langCode, voiceMatches } from '../languages'
 import { chosenNatural } from '../natural'
@@ -23,7 +25,7 @@ const post = (message: ToHost) => window.tutorHost.post(message)
 
 const state = {
   card: undefined as CardView | undefined,
-  config: { voice: '', rate: 1, wordHint: 'shift', rareWords: true } as ViewConfig,
+  config: { voice: '', rate: 1, wordHint: 'shift', rareWords: true, oneAtATime: false } as ViewConfig,
   /** The most common English words: the others get a dotted line. */
   common: new Set<string>(),
   pinned: false,
@@ -40,6 +42,10 @@ const state = {
   /** The card whose text is on screen, and the last one read aloud by itself. */
   shownId: -1,
   readId: -1,
+  /** The English sentence Listen starts from, and the first sentence of the reading under way (-1: a word, not the text). */
+  cursor: 0,
+  readFrom: -1,
+  reading: '' as string,
 }
 
 // ---------------------------------------------------------------- voices
@@ -93,6 +99,16 @@ const player = new Player(
     natural: naturalVoice,
     audio: () => openAudio(),
     naturalFailed: message => showHint([`The natural voice stopped (${message}). A system voice reads on.`], 10_000),
+    entered: index => {
+      if (state.readFrom < 0) return
+      state.cursor = state.readFrom + index
+      markCursor()
+    },
+    // The whole text read through: Listen starts over. One by one, the cursor stays for a repeat.
+    finished: () => {
+      if (state.reading === 'card' && !state.config.oneAtATime) state.cursor = 0
+      markCursor()
+    },
   },
   () => updatePlayButtons(),
 )
@@ -128,9 +144,13 @@ const voiceBanner = el('div', { class: 'banner voice-banner', hidden: true }, vo
 const stateView = el('div', { class: 'empty', hidden: true })
 const body = el('div', { class: 'body' })
 const listenButton = el('button', { class: 'listen', 'data-play': 'message', 'data-key': 'card' }, icon('play'), el('span', { class: 'listen-label' }, 'Listen'))
+const prevButton = el('button', { class: 'icon-btn', title: 'Previous sentence (←)', 'aria-label': 'Previous sentence', onclick: () => step(-1) }, icon('chevron-left'))
+const nextButton = el('button', { class: 'icon-btn', title: 'Next sentence (→)', 'aria-label': 'Next sentence', onclick: () => step(1) }, icon('chevron-right'))
+const oneButton = el('button', { class: 'chip', 'aria-pressed': 'false', onclick: () => toggleOneAtATime() }, 'One by one')
 const note = el('span', { class: 'status-line' })
 const translation = el('div', { class: 'translation' })
-const article = el('article', { class: 'msg assistant' }, body, el('footer', { class: 'msg-foot' }, listenButton, note), translation)
+const remote = el('div', { class: 'remote' }, prevButton, listenButton, nextButton, oneButton)
+const article = el('article', { class: 'msg assistant' }, body, el('footer', { class: 'msg-foot' }, remote, note), translation)
 const list = el('main', { class: 'list', hidden: true }, article)
 const hint = el('div', { class: 'toast', role: 'status', hidden: true })
 
@@ -145,6 +165,8 @@ const hover = new WordHover({
   mode: () => state.config.wordHint,
   // A word alone, read by the same voice as the text; the text's reading stops for it.
   speak: word => {
+    state.readFrom = -1
+    state.reading = 'word'
     if (!hasVoice() || !player.play('word', [el('span', {}, word)])) noVoiceHint()
   },
 })
@@ -206,6 +228,8 @@ function renderChrome(): void {
   pinButton.title = state.pinned ? 'Unpin: close when another window is clicked' : 'Pin: keep open'
   setIcon(pinButton.querySelector('.codicon'), state.pinned ? 'pinned' : 'pin')
   document.body.classList.toggle('no-translation', !state.showTranslation)
+  oneButton.setAttribute('aria-pressed', String(state.config.oneAtATime))
+  oneButton.title = state.config.oneAtATime ? 'Listen reads one sentence and waits; ← → step' : 'Read one sentence at a time'
   document.body.classList.toggle('no-voice', !hasVoice())
   renderVoiceBanner()
   updatePlayButtons()
@@ -262,6 +286,7 @@ function renderState(): void {
       if (player.reads(body)) player.stop()
       body.replaceChildren(html(s.html))
       body.dataset.html = s.html
+      addParagraphButtons()
       hover.refresh()
     }
     renderTranslation(c, s.translation)
@@ -311,11 +336,79 @@ function englishSentences(): HTMLElement[] {
   return [...body.querySelectorAll<HTMLElement>('span.s')].filter(s => /\p{Script=Latin}/u.test(s.textContent ?? ''))
 }
 
+/** With two paragraphs or more, each gets a play button in the margin, outside its words. */
+function addParagraphButtons(): void {
+  const paragraphs = [...body.querySelectorAll<HTMLElement>(':scope > p')]
+  const several = paragraphs.length > 1
+  list.classList.toggle('paragraphs', several)
+  if (!several) return
+  paragraphs.forEach((p, i) =>
+    p.prepend(
+      el('button', { class: 'icon-btn para-play', 'data-play': 'paragraph', 'data-key': `p:${i}`, title: 'Listen to this paragraph', 'aria-label': 'Listen to this paragraph' }, icon('play')),
+    ),
+  )
+}
+
+/** Starts reading `els`, the first being English sentence `from`; `asked`: the person pressed a button. */
+function read(key: string, els: HTMLElement[], from: number, asked: boolean): void {
+  if (els.length === 0) return
+  if (asked) {
+    state.listened = true
+    state.naturalJustReady = false
+    renderVoiceBanner()
+  }
+  state.readFrom = from
+  state.reading = key
+  if (!hasVoice() || !player.play(key, els, { follow: true })) {
+    if (asked) noVoiceHint()
+  }
+}
+
+/** Listen: from the cursor to the end, or the cursor's sentence alone, one by one. */
+function listen(asked = true): void {
+  const all = englishSentences()
+  if (all.length === 0) return
+  state.cursor = Math.min(Math.max(0, state.cursor), all.length - 1)
+  const at = all[state.cursor]
+  read('card', state.config.oneAtATime && at ? [at] : all.slice(state.cursor), state.cursor, asked)
+}
+
+/** The previous or the next sentence, read at once. */
+function step(by: number): void {
+  const all = englishSentences()
+  if (all.length === 0) return
+  state.cursor = Math.min(Math.max(0, state.cursor + by), all.length - 1)
+  markCursor()
+  listen()
+}
+
+function readParagraph(p: Element | null): void {
+  if (!p) return
+  const all = englishSentences()
+  const els = all.filter(s => p.contains(s))
+  const first = els[0]
+  if (first) read(`p:${[...body.querySelectorAll(':scope > p')].indexOf(p)}`, els, all.indexOf(first), true)
+}
+
+/** One by one, the sentence Listen reads next is marked. */
+function markCursor(): void {
+  for (const marked of body.querySelectorAll('span.s.at')) marked.classList.remove('at')
+  if (state.config.oneAtATime) englishSentences()[state.cursor]?.classList.add('at')
+}
+
+function toggleOneAtATime(): void {
+  state.config = { ...state.config, oneAtATime: !state.config.oneAtATime }
+  post({ type: 'saveSettings', patch: { oneAtATime: state.config.oneAtATime } })
+  renderChrome()
+  markCursor()
+}
+
 /** A new translation is read once, when "Read aloud when a card opens" is on. */
 function autoRead(c: CardView): void {
   if (!c.autoRead || state.readId === c.id) return
   state.readId = c.id
-  if (hasVoice()) player.play('card', englishSentences(), { follow: true })
+  state.cursor = 0
+  listen(false)
 }
 
 function updatePlayButtons(): void {
@@ -378,14 +471,9 @@ root.addEventListener('click', event => {
   if (playButton) {
     event.stopPropagation()
     const key = playButton.dataset.key ?? ''
-    if (player.key === key) {
-      player.stop()
-      return
-    }
-    state.listened = true
-    state.naturalJustReady = false
-    renderVoiceBanner()
-    if (!hasVoice() || !player.play(key, englishSentences(), { follow: true })) noVoiceHint()
+    if (player.key === key) player.stop()
+    else if (playButton.dataset.play === 'paragraph') readParagraph(playButton.closest('p'))
+    else listen()
     return
   }
   const sentence = target.closest<HTMLElement>('span.s, span.t')
@@ -393,9 +481,19 @@ root.addEventListener('click', event => {
   hover.showAt(event.clientX, event.clientY)
 })
 
-// Esc puts the card away, and the voice with it.
+// Esc puts the card away, and the voice with it. Space plays or stops, the arrows step through the sentences.
 window.addEventListener('keydown', event => {
-  if (event.key === 'Escape') post({ type: 'close' })
+  if (event.key === 'Escape') return post({ type: 'close' })
+  if (list.hidden || event.ctrlKey || event.altKey || event.metaKey) return
+  if (event.target instanceof Element && event.target.closest('button, input, select, textarea')) return
+  if (event.key === ' ') {
+    event.preventDefault()
+    if (player.key === 'card') player.stop()
+    else listen()
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    step(event.key === 'ArrowLeft' ? -1 : 1)
+  }
 })
 
 for (const kind of ['wheel', 'touchmove']) window.addEventListener(kind, () => player.userScrolled(), { passive: true })
@@ -408,8 +506,11 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
   switch (m.type) {
     case 'card': {
       const changedPair = state.card !== undefined && state.card.native !== m.card.native
-      // A new text: whatever was being read stops.
-      if (state.card && state.card.id !== m.card.id) player.stop()
+      // A new text: whatever was being read stops, and Listen starts from the top.
+      if (state.card && state.card.id !== m.card.id) {
+        player.stop()
+        state.cursor = 0
+      }
       state.card = m.card
       state.config = m.config
       state.pinned = m.pinned
@@ -417,6 +518,7 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
       renderChrome()
       renderState()
       markRareWords()
+      markCursor()
       updatePlayButtons()
       return
     }

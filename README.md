@@ -20,14 +20,19 @@ The first translation downloads the translator for your language (about 85 MB fo
 | | |
 |---|---|
 | **Ctrl+C, Ctrl+C** | translate the selected text |
+| your shortcut | copy the selection and translate it (set it in the settings) |
 | **Ctrl+Alt+S** | translate a piece of the screen (changeable in the settings) |
 | **Esc** | close the card and stop the voice |
+| **Space** · **←** **→** | play or stop · the previous or next sentence |
+| One by one | Listen reads one sentence and waits |
+| ▶ in the margin | read one paragraph |
 | click a word | its meanings · say it · save it |
 | click a sentence | mark its translation |
+| drag an edge | make the card wider or taller; it keeps the size |
 | **RU** (your language's code) | hide or show the translation |
 | pin | keep the card open when another window is clicked |
 
-The tray icon opens the menu: snip, translate the copied text, read aloud, voice, speed, your language. **Open 2Talker…** (or a double click) opens the window with your saved words, the settings and how to use.
+The tray icon opens the menu: snip, translate the copied text, read aloud, voice, speed (up to 1.5×), your language, theme (as Windows, light, dark). **Open 2Talker…** (or a double click) opens the window with your saved words, the settings and how to use.
 
 From a launcher or a mouse button: `2Talker.exe --clipboard` translates the copied text, `2Talker.exe --snip` starts a snip.
 
@@ -55,4 +60,4 @@ A tag `v<version>` builds the installer in GitHub Actions and publishes the rele
 
 ## Author
 
-[ikstro](https://ikstro.com). MIT License; third-party parts in [NOTICE](NOTICE).
+Yevhen Peshynskyi, design automation engineer — [ikstro.com](https://ikstro.com). MIT License; third-party parts in [NOTICE](NOTICE).

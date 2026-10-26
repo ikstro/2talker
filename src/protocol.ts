@@ -49,7 +49,10 @@ export type CardView = {
 /** When the word card shows: while Shift is held over a word, on any hover, or never. */
 export type WordHintMode = 'shift' | 'hover' | 'off'
 
-export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean }
+export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
+
+/** The app window's tabs. */
+export type AppTab = 'words' | 'settings' | 'howto' | 'about'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -69,8 +72,8 @@ export type AppView = {
   languages: { name: string; native: string }[]
   words: SavedWord[]
   update: UpdateStatus
-  /** The snip shortcut is registered (false: another program holds it). */
-  snipKeyOk: boolean
+  /** Each shortcut is registered (false: another program holds it). */
+  keysOk: { snip: boolean; select: boolean }
 }
 
 /**
@@ -98,6 +101,8 @@ export type ToView =
   | { type: 'dictReady' }
   /** The app window's whole state. */
   | { type: 'app'; view: AppView }
+  /** Show this tab of the app window (the tray's "About 2Talker…"). */
+  | { type: 'appTab'; tab: AppTab }
   | { type: 'natural'; state: NaturalState }
   /** One sentence of reading `id` in the natural voice: 24 kHz audio and when each of its words is spoken. */
   | { type: 'naturalAudio'; id: number; index: number; samples: Float32Array; words: WordTime[] }
@@ -135,3 +140,5 @@ export type ToHost =
   | { type: 'exportWords' }
   | { type: 'copyWords' }
   | { type: 'checkUpdates' }
+  /** Open one of the About tab's links in the browser. */
+  | { type: 'openLink'; url: string }

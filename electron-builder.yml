@@ -1,7 +1,7 @@
 # Windows installer: npm run dist → release/2Talker-Setup-<version>.exe
 appId: com.ikstro.2talker
 productName: 2Talker
-copyright: Copyright © 2026 ikstro
+copyright: Copyright © 2026 Yevhen Peshynskyi
 directories:
   output: release
   buildResources: build

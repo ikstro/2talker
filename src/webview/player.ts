@@ -32,6 +32,10 @@ export type PlayerEnv = {
   audio: () => AudioContext | undefined
   /** The natural voice failed; the rest is read by a system voice. */
   naturalFailed: (message: string) => void
+  /** Element `index` of the reading starts being read. */
+  entered?: (index: number) => void
+  /** The reading came to its end by itself (not stopped). */
+  finished?: () => void
 }
 
 function textItem(el: HTMLElement): Item {
@@ -185,6 +189,7 @@ export class Player {
   private finish(): void {
     this.reset()
     this.utterance = undefined
+    this.env.finished?.()
     this.onChange()
   }
 
@@ -195,6 +200,7 @@ export class Player {
     const item = this.items[index]
     if (!item) return
     item.el.classList.add('speaking')
+    this.env.entered?.(index)
     if (this.follow) {
       const rect = item.el.getBoundingClientRect()
       if (rect.top < 48 || rect.bottom > window.innerHeight - 24) item.el.scrollIntoView({ block: 'center', behavior: 'smooth' })
