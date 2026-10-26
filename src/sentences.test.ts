@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { lineUnits, splitSentences } from './sentences'
+import { lineUnits, splitSentences, unwrapLines } from './sentences'
 
 describe('sentences', () => {
   test('splits a line into sentences, keeps a list item whole', () => {
@@ -12,6 +12,18 @@ describe('sentences', () => {
   test('does not split after e.g. or т.е.', () => {
     expect(splitSentences('Use a tool, e.g. Victoria. It works.')).toEqual(['Use a tool, e.g. Victoria.', 'It works.'])
     expect(splitSentences('Возьми диск, т.е. Новый. Потом жди.')).toEqual(['Возьми диск, т.е. Новый.', 'Потом жди.'])
+  })
+
+  test('a line broken in the middle of a sentence is joined back; any other line break is a new paragraph', () => {
+    expect(unwrapLines(['The quick brown fox', 'jumps over the lazy dog.'])).toEqual(['The quick brown fox jumps over the lazy dog.'])
+    expect(unwrapLines(['It is a well-', 'known fact, and', 'it holds.'])).toEqual(['It is a wellknown fact, and it holds.'])
+    expect(unwrapLines(['Горячие клавиши:', 'Ctrl+C дважды можно выключить.', 'клавишу скриншота можно поменять.'])).toEqual([
+      'Горячие клавиши:',
+      'Ctrl+C дважды можно выключить.',
+      'клавишу скриншота можно поменять.',
+    ])
+    expect(unwrapLines(['Size: drag an edge', 'Listen to parts'])).toEqual(['Size: drag an edge', 'Listen to parts'])
+    expect(unwrapLines(['- first item', 'continues here', '', 'next paragraph', 'goes on'])).toEqual(['- first item', 'continues here', '', 'next paragraph goes on'])
   })
 
   test('an empty line has no sentences', () => {

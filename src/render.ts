@@ -6,23 +6,16 @@ export function escapeHtml(s: string): string {
 
 /**
  * One half of the card as plain paragraphs (a picked text is not markdown):
- * lines of a paragraph keep their breaks, list markers stay, everything is
- * escaped. Every sentence is a span carrying its number across the text, so
- * a sentence and its other side find each other.
+ * every line is a paragraph (lines broken mid-sentence were joined back by
+ * `unwrapLines`), list markers stay, everything is escaped. Every sentence is
+ * a span carrying its number across the text, so a sentence and its other
+ * side find each other.
  */
 function halfHtml(lines: readonly Line[], sentence: (pair: Pair, i: number) => string): string {
-  const paragraphs: string[][] = [[]]
   let i = 0
-  for (const line of lines) {
-    if (line.pairs.length === 0) {
-      paragraphs.push([])
-      continue
-    }
-    paragraphs[paragraphs.length - 1]?.push(escapeHtml(line.prefix) + line.pairs.map(p => sentence(p, i++)).join(' '))
-  }
-  return paragraphs
-    .filter(p => p.length > 0)
-    .map(p => `<p>${p.join('<br>')}</p>`)
+  return lines
+    .filter(line => line.pairs.length > 0)
+    .map(line => `<p>${escapeHtml(line.prefix)}${line.pairs.map(p => sentence(p, i++)).join(' ')}</p>`)
     .join('')
 }
 

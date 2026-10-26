@@ -64,15 +64,22 @@ describe('splitText', () => {
 })
 
 describe('englishHtml, translationHtml', () => {
-  test('two halves: paragraphs, line breaks, escaped sides, sentences numbered across the text', async () => {
+  test('two halves: every line a paragraph, escaped sides, sentences numbered across the text', async () => {
     const lines = await pairText('Use <b>.\nСтоп.\n\n- Next', 'Russian', fake)
     expect(englishHtml(lines)).toBe(
-      '<p><span class="s" data-i="0" dir="auto">Use &lt;b&gt;.</span><br><span class="s" data-i="1" dir="auto">[ru&gt;en] Стоп.</span></p>' +
+      '<p><span class="s" data-i="0" dir="auto">Use &lt;b&gt;.</span></p><p><span class="s" data-i="1" dir="auto">[ru&gt;en] Стоп.</span></p>' +
         '<p>- <span class="s" data-i="2" dir="auto">Next</span></p>',
     )
     expect(translationHtml(lines)).toBe(
-      '<p><span class="t" data-i="0" dir="auto">[en&gt;ru] Use &lt;b&gt;.</span><br><span class="t" data-i="1" dir="auto">Стоп.</span></p>' +
+      '<p><span class="t" data-i="0" dir="auto">[en&gt;ru] Use &lt;b&gt;.</span></p><p><span class="t" data-i="1" dir="auto">Стоп.</span></p>' +
         '<p>- <span class="t" data-i="2" dir="auto">[en&gt;ru] Next</span></p>',
     )
+  })
+
+  test('a chat’s single line breaks are paragraphs; a sentence broken across lines is one', async () => {
+    const chat = 'Card size: drag an edge.\nListen to parts: the remote.\nHotkeys:\nCtrl+C twice can be turned off.'
+    expect(englishHtml(await pairText(chat, 'Russian', fake)).match(/<p>/g)).toHaveLength(4)
+    const pdf = 'The quick brown fox\njumps over the lazy dog.'
+    expect(englishHtml(await pairText(pdf, 'Russian', fake))).toBe('<p><span class="s" data-i="0" dir="auto">The quick brown fox jumps over the lazy dog.</span></p>')
   })
 })

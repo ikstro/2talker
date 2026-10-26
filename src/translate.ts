@@ -7,7 +7,7 @@
 // split first and shown at once; its translation follows.
 
 import { hasScript, langCode, scriptFor, scriptOf } from './languages'
-import { lineUnits } from './sentences'
+import { lineUnits, unwrapLines } from './sentences'
 
 /** One sentence: the English side, on top, and the other side, under it. */
 export type Pair = { en: string; other?: string }
@@ -39,7 +39,7 @@ export type Split = { lines: Line[]; units: Unit[] }
 export function splitText(text: string, native: string): Split {
   const lines: Line[] = []
   const units: Unit[] = []
-  for (const raw of text.replace(/\r\n?/g, '\n').split('\n')) {
+  for (const raw of unwrapLines(text.replace(/\r\n?/g, '\n').split('\n'))) {
     const { prefix, sentences } = lineUnits(raw)
     // Several empty lines in a row are one paragraph break.
     if (sentences.length === 0 && (lines.length === 0 || lines[lines.length - 1]?.pairs.length === 0)) continue
