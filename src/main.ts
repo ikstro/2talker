@@ -281,7 +281,7 @@ function post(message: ToView): void {
 function commonWords(): string[] {
   if (!common) {
     try {
-      common = fs.readFileSync(path.join(app.getAppPath(), 'media', 'common-en.txt'), 'utf8').split('\n').filter(Boolean)
+      common = fs.readFileSync(path.join(app.getAppPath(), 'media', 'common-en.txt'), 'utf8').split(/\r?\n/).filter(Boolean)
     } catch {
       common = []
     }
