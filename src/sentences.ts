@@ -28,8 +28,9 @@ export function splitPrefix(raw: string): { prefix: string; body: string } {
  * Joins back lines broken in the middle of a sentence (a PDF, an email, a
  * terminal): the line before ends in a letter, digit, comma or hyphen, not
  * at a sentence's end, and the next starts in lower case. A word broken with
- * a hyphen is joined back into one. List items and quotes stay apart; any
- * other single line break starts a new paragraph, as in chats and web pages.
+ * a hyphen is joined back into one. A list item or quote broken so goes on
+ * in the next line too, which never starts a new item; any other single line
+ * break starts a new paragraph, as in chats and web pages.
  */
 export function unwrapLines(lines: readonly string[]): string[] {
   const out: string[] = []
@@ -50,8 +51,8 @@ export function unwrapLines(lines: readonly string[]): string[] {
     } else {
       out.push(line)
     }
-    // A list item or quote is never continued; an empty line ends the paragraph.
-    open = next.length > 0 && !splitPrefix(line).prefix
+    // An empty line ends the paragraph.
+    open = next.length > 0
   }
   return out
 }

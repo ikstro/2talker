@@ -6,7 +6,7 @@
 // language. Lines, list markers and paragraphs are kept. An English text is
 // split first and shown at once; its translation follows.
 
-import { hasScript, langCode, scriptFor, scriptOf } from './languages'
+import { hasScript, langCode, scriptFor, scriptOf, type Script } from './languages'
 import { lineUnits, unwrapLines } from './sentences'
 
 /** One sentence: the English side, on top, and the other side, under it. */
@@ -79,4 +79,82 @@ export async function translateLines({ lines, units }: Split, native: string, tr
 
 export async function pairText(text: string, native: string, translate: Translate): Promise<Line[]> {
   return translateLines(splitText(text, native), native, translate)
+}
+
+// ---------------------------------------------------------------- a text as it is
+
+/** The language a script is written in, where one is. */
+const SCRIPT_LANGUAGE: Partial<Record<Script, string>> = { Greek: 'el', Hebrew: 'he', Devanagari: 'hi', Han: 'zh', Japanese: 'ja', Hangul: 'ko', Thai: 'th', Georgian: 'ka', Armenian: 'hy' }
+
+/** Letters only one language of its script has, in the order they are looked for (Kazakh has і and ы too). */
+const OWN_LETTERS: readonly [RegExp, string][] = [
+  [/[қғүұһәө]/iu, 'kk'],
+  [/[їєґі]/iu, 'uk'],
+  [/[ђћџљњј]/iu, 'sr'],
+  [/[ыэё]/iu, 'ru'],
+  [/[پچژگ]/u, 'fa'],
+]
+
+/**
+ * What tells languages of one script apart: the most common words of each
+ * (media/lang-words.json), and all English words (media/layout/en.txt) for a
+ * text too short to hold common ones.
+ */
+export type LanguageWords = { common: Readonly<Record<string, ReadonlySet<string>>>; english: ReadonlySet<string> }
+
+/**
+ * The language a text seems to be in, by code: a script only one language
+ * is written in; letters only one language has; else the language most of
+ * whose common words the text holds (the person's own, then English, win a
+ * tie). A short text without them is English when it has an English word,
+ * or in the person's language when it is written in its script. A guess:
+ * the card lets it be changed.
+ */
+export function languageOf(text: string, native: string, words: LanguageWords): string {
+  const own = langCode(native)
+  const script = scriptOf(text)
+  if (!script) return 'en'
+  const only = SCRIPT_LANGUAGE[script]
+  if (only) return only
+  for (const [letters, code] of OWN_LETTERS) if (scriptFor(code) === script && letters.test(text)) return code
+  const tokens = text.toLowerCase().replace(/[’ʼ]/g, "'").match(/\p{L}+(?:'\p{L}+)*/gu) ?? []
+  let best: { code: string; score: number } | undefined
+  for (const [code, common] of Object.entries(words.common)) {
+    if (scriptFor(code) !== script) continue
+    const score = tokens.filter(t => common.has(t)).length
+    const wins = !best || score > best.score || (score === best.score && (code === own || (code === 'en' && best.code !== own)))
+    if (score > 0 && wins) best = { code, score }
+  }
+  if (best) return best.code
+  if (script === 'Latin' && tokens.some(t => words.english.has(t))) return 'en'
+  if (scriptFor(native) === script) return own
+  return script === 'Cyrillic' ? 'ru' : script === 'Arabic' ? 'ar' : 'en'
+}
+
+/** The language a text is translated into: English from the person's own, the person's own from any other. */
+export function targetFor(from: string, native: string): string {
+  const own = langCode(native)
+  return from === own ? 'en' : own
+}
+
+/**
+ * A text translated from one language into another, by codes: through
+ * English when neither is English, as the translator only goes to and from
+ * it. Lines, list markers and empty lines are kept.
+ */
+export async function translatePlain(text: string, from: string, to: string, translate: Translate): Promise<string> {
+  const lines = unwrapLines(text.replace(/\r\n?/g, '\n').split('\n')).map(lineUnits)
+  const all = lines.flatMap(l => l.sentences)
+  let done: (string | undefined)[] = all
+  if (from !== to && all.length > 0) {
+    const english = from === 'en' ? all : (await translate(all, from, 'en')).map((s, i) => s?.trim() || all[i])
+    done = to === 'en' ? english : await translate(english as string[], 'en', to)
+  }
+  let i = 0
+  const next = () => {
+    const out = done[i]?.trim() || all[i] || ''
+    i++
+    return out
+  }
+  return lines.map(line => line.prefix + line.sentences.map(next).join(' ')).join('\n')
 }

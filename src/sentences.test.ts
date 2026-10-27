@@ -23,7 +23,17 @@ describe('sentences', () => {
       'клавишу скриншота можно поменять.',
     ])
     expect(unwrapLines(['Size: drag an edge', 'Listen to parts'])).toEqual(['Size: drag an edge', 'Listen to parts'])
-    expect(unwrapLines(['- first item', 'continues here', '', 'next paragraph', 'goes on'])).toEqual(['- first item', 'continues here', '', 'next paragraph goes on'])
+    expect(unwrapLines(['- first item', 'continues here', '', 'next paragraph', 'goes on'])).toEqual(['- first item continues here', '', 'next paragraph goes on'])
+  })
+
+  test('a list item broken mid-sentence goes on; the next item, or a line in capitals, stays apart', () => {
+    expect(unwrapLines(['- Кнопка в образце реальна (возврат – тумблер в новом', 'сборка). Чтобы проверить, нажмите.', '- Настоящая рассылка'])).toEqual([
+      '- Кнопка в образце реальна (возврат – тумблер в новом сборка). Чтобы проверить, нажмите.',
+      '- Настоящая рассылка',
+    ])
+    expect(unwrapLines(['- one item', '- another item'])).toEqual(['- one item', '- another item'])
+    expect(unwrapLines(['- one item', 'A new line'])).toEqual(['- one item', 'A new line'])
+    expect(unwrapLines(['> a quote broken', 'in two'])).toEqual(['> a quote broken in two'])
   })
 
   test('an empty line has no sentences', () => {

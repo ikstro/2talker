@@ -6,6 +6,8 @@
 import type { BrowserWindow } from 'electron'
 import koffi from 'koffi'
 
+import { MAIN_KEYS } from './winkbd'
+
 const WM_CLIPBOARDUPDATE = 0x031d
 const VK_CONTROL = 0x11
 
@@ -23,10 +25,11 @@ function handleOf(window: BrowserWindow): bigint {
 export function watchClipboard(window: BrowserWindow, onChange: () => void): () => void {
   const hwnd = handleOf(window)
   window.hookWindowMessage(WM_CLIPBOARDUPDATE, () => onChange())
-  if (!AddClipboardFormatListener(hwnd)) throw new Error('Windows did not let 2Talker watch the clipboard')
+  if (!AddClipboardFormatListener(hwnd)) throw new Error('Windows did not let Altype watch the clipboard')
   return () => {
     RemoveClipboardFormatListener(hwnd)
-    window.unhookWindowMessage(WM_CLIPBOARDUPDATE)
+    // On quitting, the window may be gone already.
+    if (!window.isDestroyed()) window.unhookWindowMessage(WM_CLIPBOARDUPDATE)
   }
 }
 
@@ -37,6 +40,9 @@ const VK_MENU = 0x12
 const VK_LWIN = 0x5b
 const VK_RWIN = 0x5c
 const VK_C = 0x43
+const VK_V = 0x56
+const VK_RETURN = 0x0d
+const MODIFIERS = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN]
 
 function held(vk: number): boolean {
   return (Number(GetAsyncKeyState(vk)) & 0x8000) !== 0
@@ -52,12 +58,35 @@ export function ctrlHeld(): boolean {
  * or after `maxWaitMs` regardless.
  */
 export async function pressCopy(maxWaitMs = 1500): Promise<void> {
+  await pressWithCtrl(VK_C, maxWaitMs)
+}
+
+/** Presses Ctrl+V in the program in front, the same way. */
+export async function pressPaste(maxWaitMs = 1500): Promise<void> {
+  await pressWithCtrl(VK_V, maxWaitMs)
+}
+
+/** Resolves once none of `keys` is held, or after `maxWaitMs` regardless. */
+async function letGo(keys: readonly number[], maxWaitMs: number): Promise<void> {
   const until = Date.now() + maxWaitMs
-  while ([VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN].some(held) && Date.now() < until) {
+  while (keys.some(held) && Date.now() < until) {
     await new Promise(resolve => setTimeout(resolve, 15))
   }
-  keybd_event(VK_CONTROL, 0, 0, 0)
-  keybd_event(VK_C, 0, 0, 0)
-  keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
-  keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+}
+
+/**
+ * Resolves once Enter and the modifiers are let go: a key still down when
+ * another window comes to the front reaches that window (an Enter held there
+ * sends a chat message).
+ */
+export function keysLetGo(maxWaitMs = 1500): Promise<void> {
+  return letGo([VK_RETURN, ...MODIFIERS], maxWaitMs)
+}
+
+async function pressWithCtrl(vk: number, maxWaitMs: number): Promise<void> {
+  await letGo(MODIFIERS, maxWaitMs)
+  keybd_event(VK_CONTROL, 0, 0, MAIN_KEYS)
+  keybd_event(vk, 0, 0, MAIN_KEYS)
+  keybd_event(vk, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
+  keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
 }

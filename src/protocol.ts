@@ -8,8 +8,23 @@ import type { SavedWord } from './words'
 
 export type { Gloss, NaturalState, SavedWord, Settings, WordTime }
 
-/** Where the text came from: copied twice in any program, or read from a snipped piece of the screen. */
-export type CardKind = 'selection' | 'screenshot'
+/**
+ * What the card is for, and where the text came from. To listen to it, in
+ * English with its translation under it: `selection` (copied or selected in
+ * any program), `screenshot` (read from a snipped piece of the screen). To
+ * translate it, shown as it is with its translation, From and To, like
+ * DeepL: `translate` (selected), `text` (read from the screen).
+ */
+export type CardKind = 'selection' | 'screenshot' | 'translate' | 'text'
+
+/** The translation under a text shown as it is (a `translate` or `text` card), asked for with `translateText`. */
+export type TextResult =
+  | { status: 'none' }
+  | { status: 'translating' }
+  /** The translator for `language` (a code) is downloading, once. */
+  | { status: 'downloading'; language: string; progress: number; size: number }
+  | { status: 'ready'; text: string; from: string; to: string }
+  | { status: 'failed'; message: string }
 
 /** The card's lower half: the translation, or what keeps it. */
 export type TranslationState =
@@ -28,6 +43,13 @@ export type CardState =
   | { status: 'translating' }
   | { status: 'downloading'; progress: number; size: number }
   | { status: 'done'; html: string; translation: TranslationState; note?: string }
+  /**
+   * The translator's text, as it is: `from` is the language it seems to be
+   * in and `to` the one it is translated into (codes, out of `languages`,
+   * those the translator has); `canPaste`: it was selected in a window the
+   * translation can be pasted into, over the selection.
+   */
+  | { status: 'text'; text: string; from: string; to: string; languages: string[]; result: TextResult; canPaste?: boolean }
   /** The snipped piece of the screen holds no text. */
   | { status: 'empty' }
   /** Windows has no text recognition installed for any language the card could use. */
@@ -44,6 +66,11 @@ export type CardView = {
   native: string
   /** Read the English aloud as soon as the card has it. */
   autoRead: boolean
+  /**
+   * The key that called the card, lit in its header (hotkey.ts notation;
+   * "Control+C*2" for Ctrl+C pressed twice); none when it came from the tray.
+   */
+  via?: string
 }
 
 /** When the word card shows: while Shift is held over a word, on any hover, or never. */
@@ -51,8 +78,8 @@ export type WordHintMode = 'shift' | 'hover' | 'off'
 
 export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
 
-/** The app window's tabs. */
-export type AppTab = 'words' | 'settings' | 'howto' | 'about'
+/** The app window's places: Home (always first), its action pages, and Words, Settings, About; 'howto' is the old name of Home. */
+export type AppTab = 'home' | 'listen' | 'translate' | 'screen' | 'dictate' | 'keyboard' | 'words' | 'settings' | 'about' | 'howto'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -61,6 +88,9 @@ export type UpdateStatus =
   | { status: 'dev' | 'idle' | 'checking' | 'none' | 'downloading' }
   | { status: 'ready'; version: string }
   | { status: 'failed'; message: string }
+
+/** A keyboard layout Windows has: `id` as settings.ts keeps it ("04090409"), `name` as Windows calls its language. */
+export type KeyboardLayout = { id: string; name: string; short: string }
 
 /** Everything the app window shows, sent whole whenever any of it changes. */
 export type AppView = {
@@ -73,8 +103,35 @@ export type AppView = {
   words: SavedWord[]
   update: UpdateStatus
   /** Each shortcut is registered (false: another program holds it). */
-  keysOk: { snip: boolean; select: boolean }
+  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean }
+  /** The translator between English and the person's language: here, downloading, or to be downloaded on the first translation. */
+  translator: 'absent' | 'downloading' | 'ready' | 'failed' | 'unsupported'
+  /** The keyboard layouts Windows has, in its order. */
+  layouts: KeyboardLayout[]
+  /** Why the keyboard helper does not run, when it should. */
+  keyboardTrouble?: string
+  /** The program typed in last (its .exe name), to keep words in it as typed. */
+  lastApp?: string
+  /** Other layout switchers running now (EveryLang, Punto Switcher): they would fix words twice. */
+  rivals: string[]
+  /** Other programs known to watch the keyboard, running now (AutoHotkey, WhisperTyping…): no harm, named so the person knows. */
+  keyboardApps: string[]
+  /** Some program pressed keys by itself since the keyboard helper started; Altype ignores those. */
+  foreignKeys: boolean
 }
+
+/** What the tray's panel shows, sent whole whenever any of it changes. */
+export type TrayView = {
+  /** The keys of its commands, hotkey.ts notation ("Control+C*2" for Ctrl+C twice); empty when there is none. */
+  keys: { listenCopied: string; snipListen: string; snipTranslate: string }
+  autoFix: boolean
+  /** The translator between English and the person's language (as `AppView.translator`). */
+  translator: AppView['translator']
+  native: string
+}
+
+/** What the tray's panel can do; each puts the panel away first. */
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 'translateScreen' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -101,8 +158,12 @@ export type ToView =
   | { type: 'dictReady' }
   /** The app window's whole state. */
   | { type: 'app'; view: AppView }
-  /** Show this tab of the app window (the tray's "About 2Talker…"). */
+  /** Show this tab of the app window (the tray's "About Altype…"). */
   | { type: 'appTab'; tab: AppTab }
+  /** The tray's panel's whole state. */
+  | { type: 'tray'; view: TrayView }
+  /** The tray's panel was just shown: focus its first command. */
+  | { type: 'trayShown' }
   | { type: 'natural'; state: NaturalState }
   /** One sentence of reading `id` in the natural voice: 24 kHz audio and when each of its words is spoken. */
   | { type: 'naturalAudio'; id: number; index: number; samples: Float32Array; words: WordTime[] }
@@ -130,6 +191,11 @@ export type ToHost =
   | { type: 'close' }
   /** Translate the last text again, after a failure. */
   | { type: 'retry' }
+  /** Translate a text card's text (as it stands, maybe edited) from one language into another, by codes. */
+  | { type: 'translateText'; id: number; text: string; from: string; to: string }
+  | { type: 'copyText'; text: string }
+  /** Paste a translation over the selection it was made from, in the window it was selected in. */
+  | { type: 'pasteText'; id: number; text: string }
   /** Put a word into the notebook, with the sentence it was met in, or take it out. */
   | { type: 'saveWord'; word: string; sentence: string }
   | { type: 'unsaveWord'; word: string }
@@ -143,3 +209,12 @@ export type ToHost =
   | { type: 'checkUpdates' }
   /** Open one of the About tab's links in the browser. */
   | { type: 'openLink'; url: string }
+  /** The app window's own buttons: it has no Windows frame. Close hides it, as Altype lives in the tray. */
+  | { type: 'window'; action: 'minimize' | 'close' }
+  // The tray's panel.
+  | { type: 'trayReady' }
+  /** The panel's content is this tall, in CSS pixels; the window follows. */
+  | { type: 'trayHeight'; px: number }
+  | { type: 'tray'; command: TrayCommand }
+  /** Esc, or a click outside it. */
+  | { type: 'trayClose' }

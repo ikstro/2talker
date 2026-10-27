@@ -1,8 +1,8 @@
 {
-  "name": "2talker",
-  "productName": "2Talker",
-  "version": "0.2.0",
-  "description": "Select a text or snip a piece of the screen: 2Talker translates it offline and reads the English aloud.",
+  "name": "altype",
+  "productName": "Altype",
+  "version": "0.4.0",
+  "description": "Your language. Your shortcut. Listen to English, translate, fix keyboard layouts: offline, from any program.",
   "author": {
     "name": "Yevhen Peshynskyi",
     "url": "https://ikstro.com"

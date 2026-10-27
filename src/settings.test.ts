@@ -25,6 +25,16 @@ describe('normalize', () => {
     expect(normalize({ cardWidth: 'wide' }).cardWidth).toBe(440)
   })
 
+  test('the keyboard helper is off at first; its lists keep only what they may hold', () => {
+    expect(normalize({})).toMatchObject({ switchKey: '', fixKey: '', autoFix: false, layoutBadge: false, layouts: [], translateKey: '', textKey: 'Control+Alt+T' })
+    expect(normalize({ layouts: ['04090409', 'f0a80422', 'nonsense', 5, '04090409'], fixApps: [' Code.EXE ', ''], keepWords: ['jwt', 'jwt'] })).toMatchObject({
+      layouts: ['04090409', 'F0A80422'],
+      fixApps: ['code.exe'],
+      keepWords: ['jwt'],
+    })
+    expect(normalize({ translateKey: ' LeftShift*2 ' }).translateKey).toBe('LeftShift*2')
+  })
+
   test('English is the learned language, never the native one', () => {
     expect(normalize({ native: 'English' }).native).toBe('Russian')
   })

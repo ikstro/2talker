@@ -1,0 +1,222 @@
+// The keyboard helper's own thread: Windows' low-level keyboard and mouse
+// hooks, with a message loop of their own, so a busy main process never holds
+// up typing (Windows drops a hook that answers late). What is done with each
+// key is typist.ts's; this file lends it Windows. workerData: the port to the
+// main process, which wakes the loop with a thread message after each message
+// it posts.
+
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { receiveMessageOnPort, workerData, type MessagePort } from 'node:worker_threads'
+
+import koffi from 'koffi'
+
+import { lexiconOf, type KeyTable, type Lexicon } from './layoutfix'
+import { MASK_KEYS, Typist, type KbdIn, type KbdOut } from './typist'
+import { capsLockOf, caretOf, exeOf, foreground, installedLayouts, layoutId, layoutOf, layoutTable, MAIN_KEYS, OWN_KEYS, press, REPLAY_KEYS, switchLayout } from './winkbd'
+
+const port = (workerData as { port: MessagePort }).port
+const send = (message: KbdOut) => port.postMessage(message)
+
+const user32 = koffi.load('user32.dll')
+const kernel32 = koffi.load('kernel32.dll')
+
+const KBDLLHOOKSTRUCT = koffi.struct('KbdHookInfo', { vkCode: 'uint32', scanCode: 'uint32', flags: 'uint32', time: 'uint32', dwExtraInfo: 'uintptr' })
+const MSLLHOOKSTRUCT = koffi.struct('KbdMouseInfo', { x: 'int32', y: 'int32', mouseData: 'uint32', flags: 'uint32', time: 'uint32', dwExtraInfo: 'uintptr' })
+const MSG = koffi.struct('KbdMsg', { hwnd: 'intptr', message: 'uint32', wParam: 'uintptr', lParam: 'intptr', time: 'uint32', x: 'int32', y: 'int32', lPrivate: 'uint32' })
+const HookProc = koffi.proto('intptr __stdcall KbdHookProc(int code, uintptr wParam, void *lParam)')
+const SetWindowsHookExW = user32.func('intptr __stdcall SetWindowsHookExW(int id, KbdHookProc *proc, intptr module, uint32 tid)')
+const UnhookWindowsHookEx = user32.func('bool __stdcall UnhookWindowsHookEx(intptr hook)')
+const CallNextHookEx = user32.func('intptr __stdcall CallNextHookEx(intptr hook, int code, uintptr wParam, void *lParam)')
+const GetMessageW = user32.func('int __stdcall GetMessageW(_Out_ KbdMsg *msg, intptr hwnd, uint32 min, uint32 max)')
+const PostThreadMessageW = user32.func('bool __stdcall PostThreadMessageW(uint32 tid, uint32 msg, uintptr w, intptr l)')
+const SetTimer = user32.func('uintptr __stdcall SetTimer(intptr hwnd, uintptr id, uint32 ms, void *proc)')
+const KillTimer = user32.func('bool __stdcall KillTimer(intptr hwnd, uintptr id)')
+const GetDoubleClickTime = user32.func('uint32 __stdcall GetDoubleClickTime()')
+const GetModuleHandleW = kernel32.func('intptr __stdcall GetModuleHandleW(const char16_t *name)')
+const GetCurrentThreadId = kernel32.func('uint32 __stdcall GetCurrentThreadId()')
+
+const WH_KEYBOARD_LL = 13
+const WH_MOUSE_LL = 14
+const WM_KEYDOWN = 0x0100
+const WM_SYSKEYDOWN = 0x0104
+const WM_TIMER = 0x0113
+const WM_LBUTTONDOWN = 0x0201
+const WM_LBUTTONUP = 0x0202
+const WM_RBUTTONDOWN = 0x0204
+const WM_MBUTTONDOWN = 0x0207
+const WM_XBUTTONDOWN = 0x020b
+const WM_XBUTTONUP = 0x020c
+const WM_MOUSEWHEEL = 0x020a
+const WM_MOUSEHWHEEL = 0x020e
+/** The main process posted a message. */
+const WM_APP_PORT = 0x8000
+/** A fix decided in the hook is typed once the hook has answered. */
+const WM_APP_FIX = 0x8001
+const LLKHF_INJECTED = 0x10
+/** How often the layout in front is looked at, for the badge. */
+const BADGE_MS = 150
+
+const tid = GetCurrentThreadId() as number
+
+/** Each layout Windows has: its handle, language and what its keys type, read once. */
+const layouts = new Map<string, { hkl: bigint; lang: string; table: KeyTable }>()
+function readLayouts(): void {
+  for (const l of installedLayouts()) {
+    if (!layouts.has(l.id)) layouts.set(l.id, { hkl: l.hkl, lang: l.tag.split('-')[0]?.toLowerCase() ?? '', table: layoutTable(l.hkl) })
+  }
+}
+function layout(id: string) {
+  if (!layouts.has(id)) readLayouts()
+  return layouts.get(id)
+}
+
+const typist = new Typist(
+  {
+    now: () => Date.now(),
+    foreground,
+    layoutOf: thread => layoutId(layoutOf(thread)),
+    layout,
+    installed: () => {
+      readLayouts()
+      return [...layouts.keys()]
+    },
+    exeOf,
+    ownExe: path.win32.basename(process.execPath).toLowerCase(),
+    switchLayout: (hwnd, id) => {
+      const info = layout(id)
+      if (info) switchLayout(hwnd, info.hkl)
+    },
+    press,
+    later: () => PostThreadMessageW(tid, WM_APP_FIX, 0, 0),
+    caretOf,
+    capsOf: capsLockOf,
+    send,
+    doubleClickMs: GetDoubleClickTime() as number,
+  },
+)
+
+// ---------------------------------------------------------------- messages
+
+const lexicons: Record<string, Lexicon> = {}
+let timer = 0
+let running = true
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function drainPort(): void {
+  for (let m = receiveMessageOnPort(port); m; m = receiveMessageOnPort(port)) {
+    const message = m.message as KbdIn
+    if (message.type === 'quit') running = false
+    else if (message.type === 'switchTo') typist.switchTo(message.layout)
+    else {
+      const config = message.config
+      readLayouts()
+      typist.configure(config, lexicons)
+      // The word lists of the cycle's languages, for fixing; read once.
+      if (config.autoFix || config.keys.fix) {
+        for (const lang of new Set(typist.cycle().map(id => layout(id)?.lang ?? ''))) {
+          const file = config.words[lang]
+          if (lexicons[lang] || !file) continue
+          try {
+            lexicons[lang] = lexiconOf(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean))
+          } catch (error) {
+            send({ type: 'error', message: `the ${lang} word list did not load: ${messageOf(error)}` })
+          }
+        }
+      }
+      if (config.badge && !timer) {
+        timer = Number(SetTimer(0, 0, BADGE_MS, null))
+        typist.forgetLayout()
+        typist.lookAtLayout()
+      } else if (!config.badge && timer) {
+        KillTimer(0, timer)
+        timer = 0
+      }
+    }
+  }
+}
+
+let failures = 0
+function guarded<T>(fallback: T, body: () => T): T {
+  try {
+    return body()
+  } catch (error) {
+    if (failures++ < 5) send({ type: 'error', message: messageOf(error) })
+    return fallback
+  }
+}
+
+// ---------------------------------------------------------------- hooks and the loop
+
+type KeyInfo = { vkCode: number; scanCode: number; flags: number; dwExtraInfo: number | bigint }
+let foreignSeen = false
+
+const keyboardProc = koffi.register((code: number, wParam: number | bigint, lParam: unknown) => {
+  if (code >= 0) {
+    const swallow = guarded(false, () => {
+      const info = koffi.decode(lParam, KBDLLHOOKSTRUCT) as KeyInfo
+      const message = Number(wParam)
+      const injected = (info.flags & LLKHF_INJECTED) !== 0
+      const mark = Number(info.dwExtraInfo)
+      // Altype's own keys; the person's keys pressed again after a fix count as theirs; any other program's are foreign.
+      const own = injected && mark === OWN_KEYS
+      const foreign = injected && mark !== OWN_KEYS && mark !== REPLAY_KEYS
+      // The settings say so once when another program presses keys by itself (the main process's copy and paste are Altype's).
+      if (foreign && !foreignSeen && mark !== MAIN_KEYS && !MASK_KEYS.has(info.vkCode)) {
+        foreignSeen = true
+        send({ type: 'foreignKeys' })
+      }
+      return typist.key(info.vkCode, info.scanCode, message === WM_KEYDOWN || message === WM_SYSKEYDOWN, own, foreign)
+    })
+    if (swallow) return 1
+  }
+  return CallNextHookEx(0, code, wParam, lParam)
+}, koffi.pointer(HookProc))
+
+const MOUSE: Record<number, Parameters<Typist['mouse']>[0]> = {
+  [WM_LBUTTONDOWN]: 'left-down',
+  [WM_LBUTTONUP]: 'left-up',
+  [WM_RBUTTONDOWN]: 'other-down',
+  [WM_MBUTTONDOWN]: 'other-down',
+  [WM_XBUTTONDOWN]: 'x-down',
+  [WM_XBUTTONUP]: 'x-up',
+  [WM_MOUSEWHEEL]: 'wheel',
+  [WM_MOUSEHWHEEL]: 'wheel',
+}
+
+const mouseProc = koffi.register((code: number, wParam: number | bigint, lParam: unknown) => {
+  const event = MOUSE[Number(wParam)]
+  if (code >= 0 && event) {
+    const swallow = guarded(false, () => {
+      const info = koffi.decode(lParam, MSLLHOOKSTRUCT) as { x: number; y: number; mouseData: number; time: number }
+      // A side button's number is the high word of mouseData.
+      return typist.mouse(event, info.x, info.y, info.time, (info.mouseData >>> 16) & 0xffff)
+    })
+    if (swallow) return 1
+  }
+  return CallNextHookEx(0, code, wParam, lParam)
+}, koffi.pointer(HookProc))
+
+drainPort()
+const module = GetModuleHandleW(null)
+const keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardProc, module, 0)
+const mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouseProc, module, 0)
+if (!keyboardHook || !mouseHook) send({ type: 'error', message: 'Windows did not let Altype watch the keyboard' })
+// The main process learns where to wake this thread.
+send({ type: 'thread', tid })
+
+const msg: Record<string, unknown> = {}
+while (running && (GetMessageW(msg, 0, 0, 0) as number) > 0) {
+  const message = msg.message as number
+  if (message === WM_APP_PORT) guarded(undefined, drainPort)
+  else if (message === WM_APP_FIX) guarded(undefined, () => typist.typeFix())
+  else if (message === WM_TIMER) guarded(undefined, () => typist.lookAtLayout())
+}
+if (timer) KillTimer(0, timer)
+UnhookWindowsHookEx(keyboardHook)
+UnhookWindowsHookEx(mouseHook)
+koffi.unregister(keyboardProc)
+koffi.unregister(mouseProc)

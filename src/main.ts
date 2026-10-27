@@ -1,16 +1,21 @@
-// 2Talker's main process. It lives in the tray and waits for a text:
-//   - Ctrl+C twice in any program: the copied text;
-//   - the snip shortcut (Ctrl+Alt+S): Windows' own snipping overlay opens,
-//     and the piece of the screen it puts on the clipboard is read with the
-//     OCR built into Windows.
+// Altype's main process. It lives in the tray and waits for a text:
+//   - Ctrl+C twice in any program, or the listen key: the selected text;
+//   - the snip key (Ctrl+Alt+S): Windows' own snipping overlay opens, and the
+//     piece of the screen it puts on the clipboard is read with the OCR built
+//     into Windows.
 // The text is translated offline and shown in the card, a small window by the
 // pointer: the text in English on top, read aloud by the natural voice or a
 // system one, and its translation under it. Closing the card silences it.
+// The translate keys (the selection, Ctrl+Alt+T for a piece of the screen)
+// show the same card as a translator instead: the text as it is and its
+// translation, from the language it is in into the person's own (from theirs
+// into English), the two languages to change or swap.
 //
 // The app window (media/app.html) holds the notebook of saved words, the
-// settings and how to use; the tray menu has the quick switches.
+// settings and how to use; the tray menu has the quick switches. The keyboard
+// helper (keyboard.ts, kbd-worker.ts) switches and fixes layouts as one types.
 //
-// %APPDATA%\2Talker\
+// %APPDATA%\Altype\ (moved over from 2Talker's or tu-talk's folder, once)
 //   settings.json   see settings.ts
 //   words.json      the word notebook (words.ts)
 //   voice\          the natural voice, downloaded on request
@@ -20,29 +25,36 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, Tray, type MenuItemConstructorOptions, type Rectangle } from 'electron'
+import { execFile } from 'node:child_process'
+
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
 
 import { DoubleCopy } from './clipboard'
 import { DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { createTranslator, NATIVES } from './engine'
-import { defaultNative, findLanguage, langCode, scriptFor, voiceMatches } from './languages'
+import { hotkeyLabel, isAccelerator } from './hotkey'
+import { KeyboardHelper, keyboardLayouts } from './keyboard'
+import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
+import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { lookup, type Dictionary } from './lemma'
-import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel, systemVoiceName, type NaturalState } from './natural'
+import { systemVoiceName, type NaturalState } from './natural'
 import { recognize } from './ocr'
+import { adoptOldFolders } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
-import { placeNear, resize, type Point } from './placement'
-import type { AppTab, AppView, CardKind, CardState, GlossMissing, HostVoice, ToHost, ToView, TranslationState, ViewConfig } from './protocol'
+import { placeByTray, placeNear, resize, type Point } from './placement'
+import type { AppTab, AppView, CardKind, CardState, GlossMissing, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, translationHtml } from './render'
-import { CARD_WIDTH, normalize, RATES, TARGET, type Settings, type ThemeMode } from './settings'
+import { CARD_WIDTH, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { NaturalSpeaker } from './synth'
-import { englishReady, splitText, translateLines } from './translate'
+import { englishReady, languageOf, splitText, targetFor, translateLines, translatePlain, type LanguageWords } from './translate'
 import type { Translator } from './translator'
 import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
-import { ctrlHeld, pressCopy, watchClipboard } from './winclip'
+import { ctrlHeld, keysLetGo, pressCopy, pressPaste, watchClipboard } from './winclip'
+import { focusWindow, foreground, installedLayouts, layoutTable } from './winkbd'
 import { ankiTsv, WordStore, wordsText } from './words'
 
 const CARD_MIN = 96
@@ -56,6 +68,30 @@ const SNIP_WAIT_MS = 120_000
 const SETTLE_MS = 60
 /** How long after the selection shortcut presses Ctrl+C its copy may come. */
 const SELECT_WAIT_MS = 600
+/** How long after Altype's own write to the clipboard a change is still taken for that write. */
+const OWN_CLIPBOARD_MS = 300
+/** Layout switchers that would fix words a second time, by their .exe name. */
+const RIVALS: Record<string, string> = { 'everylang.exe': 'EveryLang', 'punto.exe': 'Punto Switcher' }
+/** Other programs that watch the keyboard, by their .exe name: no harm, named on the Keyboard page. */
+const KEYBOARD_APPS: Record<string, string> = {
+  'autohotkey.exe': 'AutoHotkey',
+  'autohotkey64.exe': 'AutoHotkey',
+  'autohotkey32.exe': 'AutoHotkey',
+  'autohotkeyu64.exe': 'AutoHotkey',
+  'autohotkeyu32.exe': 'AutoHotkey',
+  'whispertyping.exe': 'WhisperTyping',
+  'powertoys.keyboardmanagerengine.exe': 'PowerToys Keyboard Manager',
+  'listary.exe': 'Listary',
+  'qtranslate.exe': 'QTranslate',
+  'logioptionsplus_agent.exe': 'Logitech Options+',
+}
+/** The tray's panel: its width; a click on the tray icon this soon after the panel hid on that click's blur only closes it. */
+const TRAY_WIDTH = 300
+const TRAY_REOPEN_MS = 300
+/** Ctrl+C pressed twice, as a card's header draws the key that called it. */
+const DOUBLE_COPY = 'Control+C*2'
+/** The settings that are keys of actions. */
+const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'switchKey', 'fixKey']
 /** The links the About tab may open. */
 const LINKS = new Set(['https://ikstro.com', 'https://github.com/ikstro/2talker', 'https://github.com/ikstro/2talker/releases', 'https://github.com/ikstro/2talker/blob/main/NOTICE'])
 
@@ -72,18 +108,42 @@ let pinned = false
 let shownAt = 0
 /** The card on screen; a newer text replaces it. */
 let seq = 0
-let shown: { id: number; kind: CardKind; state: CardState } | undefined
+let shown: { id: number; kind: CardKind; state: CardState; via?: string } | undefined
 let last: { id: number; text: string; kind: CardKind; note?: string } | undefined
 let snipSince = 0
+/** What the snip is for: the card to listen to, or the translator; the key that asked for it. */
+let snipFor: Purpose = 'listen'
+let snipVia: string | undefined
+/** Altype is using the clipboard itself (converting a selection, pasting, putting it back): its changes are no requests. */
+let clipboardBusy = false
+/** Its last write is announced a moment later, until then. */
+let ownClipboardUntil = 0
 let stopWatching: (() => void) | undefined
 let hostVoices: HostVoice[] | undefined
 const copies = new DoubleCopy()
 let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
-let keysOk = { snip: true, select: true }
-/** The selection shortcut pressed Ctrl+C: the next copy is the selection, read by the pointer. */
-let copyWanted: { since: number; at: Point } | undefined
+let keysOk = { snip: true, select: true, translate: true, text: true }
+let keyboard: KeyboardHelper
+let keyboardTrouble: string | undefined
+let lastApp: string | undefined
+let rivals: string[] = []
+let keyboardApps: string[] = []
+let foreignKeys = false
+let trayPanel: BrowserWindow | undefined
+let trayReady = false
+let trayHeight = 320
+let trayShownAt = 0
+let trayHiddenAt = 0
+/**
+ * A selection key pressed Ctrl+C: the next copy is the selection, shown by
+ * the pointer to listen to or translate; the window it was selected in, and
+ * the clipboard as it was, to put back.
+ */
+let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; saved: Record<string, Blob>[]; via?: string } | undefined
+/** The translator open on a selection: the window to paste its translation into. */
+let pasteTarget: { id: number; window: bigint } | undefined
 /** The card's bounds when its edge began to be dragged; the content's height, which the card follows otherwise. */
 let resizeFrom: Rectangle | undefined
 let contentHeight = 160
@@ -102,19 +162,7 @@ function systemNative(): string {
 
 /** The app was called tu-talk at first: its settings, translator and voice move over, once. */
 function adoptOldFolder(): void {
-  const old = path.join(app.getPath('appData'), 'tu-talk')
-  if (!fs.existsSync(old)) return
-  for (const name of ['settings.json', 'models', 'voice', 'dict']) {
-    const from = path.join(old, name)
-    const to = path.join(userDir(), name)
-    if (!fs.existsSync(from) || fs.existsSync(to)) continue
-    try {
-      fs.mkdirSync(userDir(), { recursive: true })
-      fs.renameSync(from, to)
-    } catch (error) {
-      console.warn(`2Talker: could not move ${from}`, error)
-    }
-  }
+  adoptOldFolders(app.getPath('appData'), userDir(), (message, error) => console.warn(message, error))
 }
 
 function readSettings(): Settings {
@@ -131,10 +179,12 @@ function saveSettings(patch: Partial<Settings>): void {
     fs.mkdirSync(userDir(), { recursive: true })
     fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2) + '\n', 'utf8')
   } catch (error) {
-    console.warn('2Talker: could not save the settings', error)
+    console.warn('Altype: could not save the settings', error)
   }
   if ('startWithWindows' in patch) applyLoginItem()
-  if ('snipKey' in patch || 'selectKey' in patch) registerShortcuts()
+  // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
+  if (ACTION_KEYS.some(k => k in patch)) registerShortcuts()
+  if ([...ACTION_KEYS, 'layouts', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
   if ('theme' in patch) applyTheme()
   refreshTray()
   if (shown) postCard()
@@ -143,19 +193,27 @@ function saveSettings(patch: Partial<Settings>): void {
 
 function applyLoginItem(): void {
   // A development run would register electron.exe itself.
-  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: settings.startWithWindows })
+  if (!app.isPackaged) return
+  // Registered under the app's id, the one 2Talker used too: this replaces its entry.
+  app.setLoginItemSettings({ openAtLogin: settings.startWithWindows })
+  // tu-talk's entry had its own name and points at a program long gone.
+  app.setLoginItemSettings({ openAtLogin: false, name: 'com.ikstro.tu-talk' })
 }
 
 function config(): ViewConfig {
   return { voice: settings.voice, rate: settings.rate, wordHint: settings.wordHint, rareWords: settings.rareWords, oneAtATime: settings.oneAtATime }
 }
 
-const windowColor = () => (nativeTheme.shouldUseDarkColors ? '#202020' : '#f8f8f8')
+/** What a window shows before its page paints: the card's surface, the app window's ground (theme.css). */
+const cardColor = () => (nativeTheme.shouldUseDarkColors ? '#22272e' : '#ffffff')
+const appColor = () => (nativeTheme.shouldUseDarkColors ? '#1c2128' : '#f6f8fa')
 
 /** Light, dark or as Windows is: both pages follow `prefers-color-scheme`, which this sets. */
 function applyTheme(): void {
   nativeTheme.themeSource = settings.theme
-  for (const win of [card, appWin]) if (win && !win.isDestroyed()) win.setBackgroundColor(windowColor())
+  if (card && !card.isDestroyed()) card.setBackgroundColor(cardColor())
+  if (appWin && !appWin.isDestroyed()) appWin.setBackgroundColor(appColor())
+  if (trayPanel && !trayPanel.isDestroyed()) trayPanel.setBackgroundColor(appColor())
 }
 
 // ---------------------------------------------------------------- speech and words
@@ -250,7 +308,7 @@ function unsaveWord(word: string): void {
 async function exportWords(): Promise<void> {
   const { filePath } = await dialog.showSaveDialog(appWin ?? ({} as BrowserWindow), {
     title: 'Save the words for Anki',
-    defaultPath: path.join(app.getPath('documents'), '2Talker words.txt'),
+    defaultPath: path.join(app.getPath('documents'), 'Altype words.txt'),
     filters: [{ name: 'Text for Anki', extensions: ['txt'] }],
   })
   if (filePath) fs.writeFileSync(filePath, ankiTsv(words.list()) + '\n', 'utf8')
@@ -273,8 +331,8 @@ function createCard(): BrowserWindow {
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    title: '2Talker',
-    backgroundColor: windowColor(),
+    title: 'Altype',
+    backgroundColor: cardColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -315,6 +373,29 @@ function post(message: ToView): void {
   if (card && cardReady && !card.isDestroyed()) card.webContents.send('to-view', message)
 }
 
+/** What a text is picked for: the card that reads its English aloud, or the translator. */
+type Purpose = 'listen' | 'translate'
+
+let languageWordsRead: LanguageWords | undefined
+/** The words that tell a text's language, read once. */
+function languageWords(): LanguageWords {
+  if (!languageWordsRead) {
+    const read = (file: string) => {
+      try {
+        return fs.readFileSync(path.join(app.getAppPath(), 'media', file), 'utf8')
+      } catch {
+        return ''
+      }
+    }
+    const lists = JSON.parse(read('lang-words.json') || '{}') as Record<string, string[]>
+    languageWordsRead = {
+      common: Object.fromEntries(Object.entries(lists).map(([code, words]) => [code, new Set(words)])),
+      english: new Set(read(path.join('layout', 'en.txt')).split('\n')),
+    }
+  }
+  return languageWordsRead
+}
+
 function commonWords(): string[] {
   if (!common) {
     try {
@@ -340,6 +421,13 @@ function appView(): AppView {
     words: words.list(),
     update: updater.status,
     keysOk,
+    translator: translator.state(langCode(settings.native)).status,
+    layouts: keyboardLayouts(),
+    ...(keyboardTrouble ? { keyboardTrouble } : {}),
+    ...(lastApp ? { lastApp } : {}),
+    rivals,
+    keyboardApps,
+    foreignKeys,
   }
 }
 
@@ -354,10 +442,11 @@ function createAppWindow(): BrowserWindow {
     minWidth: 480,
     minHeight: 400,
     show: false,
-    title: '2Talker',
+    // The page draws its own bar (the mark, the pills, minimize and close); the edges still resize.
+    frame: false,
+    title: 'Altype',
     icon: path.join(app.getAppPath(), 'media', 'icon.png'),
-    autoHideMenuBar: true,
-    backgroundColor: windowColor(),
+    backgroundColor: appColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -371,10 +460,10 @@ function createAppWindow(): BrowserWindow {
   win.webContents.on('will-navigate', event => event.preventDefault())
   // A run from source shows the page's errors in the terminal.
   if (!app.isPackaged) {
-    win.webContents.on('console-message', m => console.warn(`2Talker app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
-    win.webContents.on('did-fail-load', (_event, code, description) => console.warn(`2Talker app window did not load: ${code} ${description}`))
+    win.webContents.on('console-message', m => console.warn(`Altype app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
+    win.webContents.on('did-fail-load', (_event, code, description) => console.warn(`Altype app window did not load: ${code} ${description}`))
   }
-  // Closing hides: 2Talker lives in the tray.
+  // Closing hides: Altype lives in the tray.
   win.on('close', event => {
     if (quitting) return
     event.preventDefault()
@@ -391,6 +480,7 @@ function createAppWindow(): BrowserWindow {
 /** Shows the app window, on `tab` if one is named. */
 function openApp(tab?: AppTab): void {
   if (!appWin || appWin.isDestroyed()) appWin = createAppWindow()
+  findRivals()
   if (tab) {
     if (appReady) appWin.webContents.send('to-view', { type: 'appTab', tab } satisfies ToView)
     else pendingTab = tab
@@ -411,9 +501,9 @@ function postCard(): void {
 }
 
 /** Starts a new card by the pointer (or where a pinned card stands) and returns its id. */
-function openCard(kind: CardKind, state: CardState, at: Point): number {
+function openCard(kind: CardKind, state: CardState, at: Point, via?: string): number {
   const id = ++seq
-  shown = { id, kind, state }
+  shown = { id, kind, state, ...(via ? { via } : {}) }
   stopSpeaking()
   postCard()
   const win = card
@@ -481,7 +571,7 @@ function onMessage(message: ToHost): void {
       natural.at(message.id, message.index)
       return
     case 'downloadNatural':
-      voiceStore.download().catch(error => console.warn('2Talker: the natural voice did not download', error))
+      voiceStore.download().catch(error => console.warn('Altype: the natural voice did not download', error))
       return
     case 'dismissNatural':
       saveSettings({ naturalDismissed: true })
@@ -508,6 +598,15 @@ function onMessage(message: ToHost): void {
     case 'retry':
       if (last && shown?.id === last.id) void translateInto(last.id, last.text, last.kind, last.note)
       return
+    case 'translateText':
+      void translateTextCard(message.id, message.text, message.from, message.to)
+      return
+    case 'copyText':
+      void clipboard.writeText(message.text)
+      return
+    case 'pasteText':
+      pasteTranslation(message.id, message.text).catch(error => console.warn('Altype: could not paste the translation', error))
+      return
     case 'lookup':
       lookupWord(message.word)
       return
@@ -531,7 +630,7 @@ function onMessage(message: ToHost): void {
       postApp()
       return
     case 'exportWords':
-      exportWords().catch(error => console.warn('2Talker: could not save the words', error))
+      exportWords().catch(error => console.warn('Altype: could not save the words', error))
       return
     case 'copyWords':
       clipboard.writeText(wordsText(words.list()))
@@ -541,6 +640,25 @@ function onMessage(message: ToHost): void {
       return
     case 'openLink':
       if (LINKS.has(message.url)) void shell.openExternal(message.url)
+      return
+    case 'window':
+      if (message.action === 'minimize') appWin?.minimize()
+      else appWin?.hide()
+      return
+    case 'trayReady':
+      trayReady = true
+      refreshTray()
+      return
+    case 'trayHeight':
+      trayHeight = Math.ceil(message.px)
+      if (trayPanel?.isVisible()) placeTrayPanel()
+      return
+    case 'trayClose':
+      hideTrayPanel()
+      return
+    case 'tray':
+      hideTrayPanel()
+      runTrayCommand(message.command)
       return
   }
 }
@@ -591,57 +709,156 @@ async function translateInto(id: number, text: string, kind: CardKind, note?: st
   }
 }
 
-function translateText(text: string, kind: CardKind, at: Point): void {
-  const id = openCard(kind, { status: 'translating' }, at)
+function translateText(text: string, kind: CardKind, at: Point, via?: string): void {
+  const id = openCard(kind, { status: 'translating' }, at, via)
   void translateInto(id, text, kind)
 }
 
-/** Reads a snipped picture with Windows OCR, then translates what it says. */
-async function readScreenshot(png: Buffer): Promise<void> {
-  const id = openCard('screenshot', { status: 'reading' }, screen.getCursorScreenPoint())
+/**
+ * Reads a snipped picture with Windows OCR into card `id`: the text, and
+ * whether Windows lacked the person's language (an English engine reads
+ * Cyrillic or Greek letters as Latin look-alikes); undefined when there is no
+ * text, the card showing why.
+ */
+async function recognizeSnip(id: number, png: Buffer): Promise<{ text: string; misread: boolean } | undefined> {
   const file = path.join(app.getPath('temp'), `2talker-${process.pid}-${id}.png`)
   try {
     fs.writeFileSync(file, png)
     const native = langCode(settings.native)
     const result = await recognize(file, native === 'en' ? ['en'] : [native, 'en'])
-    if (!result.lang) return setState(id, { status: 'no-ocr' })
+    if (!result.lang) return void setState(id, { status: 'no-ocr' })
     const text = paragraphsOf(result.lines)
-    if (!text.trim()) return setState(id, { status: 'empty' })
-    // An English engine reads Cyrillic or Greek letters as Latin look-alikes.
-    const misread = scriptFor(settings.native) !== 'Latin' && result.lang.split('-')[0]?.toLowerCase() !== native
-    const note = misread
-      ? `Windows has no text recognition for ${settings.native}, so ${settings.native} words may come out wrong. Add it in Settings → Language.`
-      : undefined
-    await translateInto(id, text, 'screenshot', note)
-  } catch (error) {
-    setState(id, { status: 'failed', message: messageOf(error) })
+    if (!text.trim()) return void setState(id, { status: 'empty' })
+    return { text, misread: scriptFor(settings.native) !== 'Latin' && result.lang.split('-')[0]?.toLowerCase() !== native }
   } finally {
     fs.rmSync(file, { force: true })
   }
 }
 
-function snip(): void {
+/** Reads a snipped picture with Windows OCR, then translates what it says. */
+async function readScreenshot(png: Buffer, via?: string): Promise<void> {
+  const id = openCard('screenshot', { status: 'reading' }, screen.getCursorScreenPoint(), via)
+  try {
+    const read = await recognizeSnip(id, png)
+    if (!read) return
+    const note = read.misread
+      ? `Windows has no text recognition for ${settings.native}, so ${settings.native} words may come out wrong. Add it in Settings → Language.`
+      : undefined
+    await translateInto(id, read.text, 'screenshot', note)
+  } catch (error) {
+    setState(id, { status: 'failed', message: messageOf(error) })
+  }
+}
+
+/** The translator's state of a text: from the language it seems to be in, into the person's own (from theirs, into English). */
+function textState(text: string): Extract<CardState, { status: 'text' }> {
+  const from = languageOf(text, settings.native, languageWords())
+  return { status: 'text', text, from, to: targetFor(from, settings.native), languages: ['en', ...NATIVES], result: { status: 'none' } }
+}
+
+/** Opens the translator by the pointer with a picked text, translating it at once; `window`: where it was selected, to paste back into. */
+function translateWindow(text: string, at: Point, window?: bigint, via?: string): void {
+  const state = { ...textState(text), canPaste: !!window }
+  const id = openCard('translate', state, at, via)
+  pasteTarget = window ? { id, window } : undefined
+  void translateTextCard(id, text, state.from, state.to)
+}
+
+/**
+ * Paste: once Enter (pressed for it) is let go, the window the text was
+ * selected in comes to the front (while the card still is, as Windows
+ * allows), the card goes away, and the translation is pasted over the
+ * selection through the clipboard, which is put back after.
+ */
+async function pasteTranslation(id: number, text: string): Promise<void> {
+  const target = pasteTarget
+  if (!target || target.id !== id || !text) return
+  pasteTarget = undefined
+  await keysLetGo()
+  focusWindow(target.window)
   hideCard()
+  const saved = await saveClipboard()
+  await ownClipboard(async () => {
+    await clipboard.writeText(text)
+    await pressPaste()
+  })
+  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+}
+
+/** Reads a snipped picture with Windows OCR and translates the text in the translator, where it can be fixed and copied. */
+async function readScreenText(png: Buffer, via?: string): Promise<void> {
+  const id = openCard('text', { status: 'reading' }, screen.getCursorScreenPoint(), via)
+  try {
+    const read = await recognizeSnip(id, png)
+    if (!read) return
+    const state = textState(read.text)
+    setState(id, state)
+    await translateTextCard(id, read.text, state.from, state.to)
+  } catch (error) {
+    setState(id, { status: 'failed', message: messageOf(error) })
+  }
+}
+
+/** The latest translation asked of a text card: an older one, still running, is not shown. */
+let textAsked = 0
+
+/** Translates the translator's text, as it stands, from one language into another. */
+async function translateTextCard(id: number, text: string, from: string, to: string): Promise<void> {
+  const set = (result: TextResult) => {
+    if (shown?.id === id && shown.state.status === 'text') setState(id, { ...shown.state, text, from, to, result })
+  }
+  const asked = ++textAsked
+  const current = () => asked === textAsked
+  try {
+    set({ status: 'translating' })
+    for (const code of [from, to]) {
+      if (code === 'en' || translator.state(code).status === 'ready') continue
+      await translator.prepare(code, state => {
+        if (current() && state.status === 'downloading') set({ status: 'downloading', language: code, progress: state.progress, size: state.size })
+      })
+      if (current()) set({ status: 'translating' })
+    }
+    const out = await translatePlain(text.slice(0, MAX_TEXT_CHARS), from, to, translator.translate)
+    if (current()) set({ status: 'ready', text: out, from, to })
+  } catch (error) {
+    if (current()) set({ status: 'failed', message: messageOf(error) })
+  }
+}
+
+/** Opens Windows' snipping overlay; the text of the picture it puts on the clipboard is shown to listen to, or translated. */
+function snip(purpose: Purpose = 'listen', via?: string): void {
+  hideCard()
+  snipFor = purpose
+  snipVia = via
   snipSince = Date.now()
   void shell.openExternal('ms-screenclip:')
 }
 
-async function translateClipboard(): Promise<void> {
-  const text = (await clipboard.readText()).trim()
-  if (text) translateText(text, 'selection', screen.getCursorScreenPoint())
-  else tray?.displayBalloon({ title: '2Talker', content: 'The clipboard holds no text. Select a text and copy it first.' })
+/** Shows a picked text by the pointer: the card to listen to, or the translator; `window`: where it was selected. */
+function showText(text: string, purpose: Purpose, at: Point, window?: bigint, via?: string): void {
+  if (purpose === 'translate') translateWindow(text, at, window, via)
+  else translateText(text, 'selection', at, via)
 }
 
-/** The selection shortcut: 2Talker presses Ctrl+C in the program in front and translates what it copies. */
-async function translateSelection(): Promise<void> {
+async function useClipboard(purpose: Purpose): Promise<void> {
+  const text = (await clipboard.readText()).trim()
+  if (text) showText(text, purpose, screen.getCursorScreenPoint())
+  else tray?.displayBalloon({ title: 'Altype', content: 'The clipboard holds no text. Select a text and copy it first.' })
+}
+
+/** A selection key: Altype presses Ctrl+C in the program in front and shows what it copies; the clipboard is put back after. */
+async function useSelection(purpose: Purpose, via?: string): Promise<void> {
   const at = screen.getCursorScreenPoint()
+  const window = foreground().hwnd
+  const saved = await saveClipboard()
   await pressCopy()
   const since = Date.now()
-  copyWanted = { since, at }
+  copyWanted = { since, at, purpose, window, saved, ...(via ? { via } : {}) }
   setTimeout(() => {
     if (copyWanted?.since !== since) return
     copyWanted = undefined
-    tray?.displayBalloon({ title: '2Talker', content: 'Nothing was copied. Select a text, then press the shortcut.' })
+    void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error))
+    tray?.displayBalloon({ title: 'Altype', content: 'Nothing was copied. Select a text, then press the shortcut.' })
   }, SELECT_WAIT_MS)
 }
 
@@ -657,26 +874,28 @@ async function clipboardPng(): Promise<Buffer | undefined> {
 
 /** Reads the clipboard once the program that changed it is done. */
 function afterSettling(read: () => Promise<void>): void {
-  setTimeout(() => read().catch(error => console.warn('2Talker: could not read the clipboard', error)), SETTLE_MS)
+  setTimeout(() => read().catch(error => console.warn('Altype: could not read the clipboard', error)), SETTLE_MS)
 }
 
 function onClipboardChange(): void {
   const now = Date.now()
+  if (clipboardBusy || now < ownClipboardUntil) return
   if (snipSince && now - snipSince < SNIP_WAIT_MS) {
     afterSettling(async () => {
       const png = await clipboardPng()
       if (!png || !snipSince) return
       snipSince = 0
-      await readScreenshot(png)
+      await (snipFor === 'translate' ? readScreenText(png, snipVia) : readScreenshot(png, snipVia))
     })
     return
   }
   if (copyWanted && now - copyWanted.since < SELECT_WAIT_MS) {
-    const at = copyWanted.at
+    const { at, purpose, window, saved, via } = copyWanted
     copyWanted = undefined
     afterSettling(async () => {
       const text = (await clipboard.readText()).trim()
-      if (text) translateText(text, 'selection', at)
+      await restoreClipboard(saved)
+      if (text) showText(text, purpose, at, window, via)
     })
     return
   }
@@ -686,14 +905,19 @@ function onClipboardChange(): void {
   const at = screen.getCursorScreenPoint()
   afterSettling(async () => {
     const text = (await clipboard.readText()).trim()
-    if (text) translateText(text, 'selection', at)
+    if (text) translateText(text, 'selection', at, DOUBLE_COPY)
   })
+}
+
+function selection(purpose: Purpose, via?: string): void {
+  useSelection(purpose, via).catch(error => console.warn('Altype: could not copy the selection', error))
 }
 
 function registerShortcuts(): void {
   globalShortcut.unregisterAll()
+  // A key Electron cannot hold (a double tap of Ctrl, a mouse button) is the keyboard thread's: applyKeyboard().
   const register = (accelerator: string, run: () => void): boolean => {
-    if (!accelerator) return true
+    if (!accelerator || !isAccelerator(accelerator)) return true
     try {
       return globalShortcut.register(accelerator, run)
     } catch {
@@ -701,123 +925,288 @@ function registerShortcuts(): void {
     }
   }
   keysOk = {
-    snip: register(settings.snipKey, snip),
-    select: register(settings.selectKey, () => void translateSelection().catch(error => console.warn('2Talker: could not copy the selection', error))),
+    snip: register(settings.snipKey, () => snip('listen', settings.snipKey)),
+    select: register(settings.selectKey, () => selection('listen', settings.selectKey)),
+    translate: register(settings.translateKey, () => selection('translate', settings.translateKey)),
+    text: register(settings.textKey, () => snip('translate', settings.textKey)),
   }
-  const taken = [!keysOk.snip && settings.snipKey, !keysOk.select && settings.selectKey].filter((k): k is string => !!k)
+  const taken = [
+    !keysOk.snip && settings.snipKey,
+    !keysOk.select && settings.selectKey,
+    !keysOk.translate && settings.translateKey,
+    !keysOk.text && settings.textKey,
+  ].filter((k): k is string => !!k)
   // The settings window shows the trouble itself; the balloon is for a start without it.
   if (taken.length > 0 && !(appWin?.isVisible() ?? false)) {
     tray?.displayBalloon({
-      title: '2Talker',
+      title: 'Altype',
       content: `${taken.map(keyLabel).join(' and ')} ${taken.length > 1 ? 'are' : 'is'} taken by another program. Choose another in the settings.`,
     })
   }
 }
 
+// ---------------------------------------------------------------- the keyboard
+
+function applyKeyboard(): void {
+  keyboardTrouble = undefined
+  try {
+    keyboard.apply(settings)
+  } catch (error) {
+    keyboardTrouble = messageOf(error)
+  }
+}
+
+/** What each key types in each layout, read from Windows once. */
+const tables = new Map<string, KeyTable>()
+function tableFor(id: string): KeyTable | undefined {
+  if (!tables.has(id)) for (const l of installedLayouts()) if (!tables.has(l.id)) tables.set(l.id, layoutTable(l.hkl))
+  return tables.get(id)
+}
+
+/** The clipboard as it is, every kind of thing on it, to put back. */
+async function saveClipboard(): Promise<Record<string, Blob>[]> {
+  const saved: Record<string, Blob>[] = []
+  for (const item of await clipboard.read()) {
+    const entry: Record<string, Blob> = {}
+    for (const type of item.types) {
+      try {
+        entry[type] = (await item.getType(type)) as Blob
+      } catch {
+        // A kind the clipboard announces but will not give is left behind.
+      }
+    }
+    saved.push(entry)
+  }
+  return saved
+}
+
+/** Runs Altype's own use of the clipboard; the changes it makes, until a moment after, are not taken for requests. */
+async function ownClipboard<T>(work: () => Promise<T>): Promise<T> {
+  clipboardBusy = true
+  try {
+    return await work()
+  } finally {
+    clipboardBusy = false
+    ownClipboardUntil = Date.now() + OWN_CLIPBOARD_MS
+  }
+}
+
+function restoreClipboard(saved: Record<string, Blob>[]): Promise<void> {
+  return ownClipboard(async () => {
+    if (saved.length === 0) clipboard.clear()
+    else await clipboard.write(saved.map(entry => new ClipboardItem(entry)))
+  })
+}
+
+/**
+ * The fix key with a selection: Altype copies it, types it again in the
+ * next layout of `cycle` (the one after the layout it was typed in), pastes
+ * it over the selection, switches the layout and puts the clipboard back.
+ */
+async function convertSelection(cycle: string[]): Promise<void> {
+  const saved = await saveClipboard()
+  const restore = await ownClipboard(() => convertOver(cycle))
+  if (restore === 'now') return restoreClipboard(saved)
+  // The program reads the clipboard when it gets Ctrl+V: the old content goes back after.
+  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+}
+
+/** Copies the selection, pastes it converted; 'now' when nothing was pasted and the clipboard can go back at once. */
+async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
+  const marker = `Altype ${Date.now()}`
+  await clipboard.writeText(marker)
+  await pressCopy()
+  let text = ''
+  for (let i = 0; i < 25 && !text; i++) {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const now = await clipboard.readText()
+    if (now !== marker) text = now
+  }
+  const layouts = cycle.map(id => ({ id, table: tableFor(id) })).filter((l): l is { id: string; table: KeyTable } => !!l.table)
+  const from = text ? sourceLayout(text, layouts) : undefined
+  const to = nextLayout(cycle, from)
+  const fromTable = from ? tableFor(from) : undefined
+  const toTable = to ? tableFor(to) : undefined
+  if (!fromTable || !toTable || !to || from === to) return 'now'
+  await clipboard.writeText(convertText(text, fromTable, toTable))
+  await pressPaste()
+  keyboard.switchTo(to)
+  return 'later'
+}
+
+/** Other layout switchers running now, for the settings' warning, and the other programs that watch the keyboard. */
+function findRivals(): void {
+  execFile('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true }, (error, stdout) => {
+    if (error) return
+    const running = new Set(stdout.split(/\r?\n/).map(line => (line.split(',')[0] ?? '').replace(/"/g, '').toLowerCase()))
+    const named = (list: Record<string, string>) => [
+      ...new Set(
+        Object.entries(list)
+          .filter(([exe]) => running.has(exe))
+          .map(([, name]) => name),
+      ),
+    ]
+    const found = named(RIVALS)
+    const apps = named(KEYBOARD_APPS)
+    if (found.join() === rivals.join() && apps.join() === keyboardApps.join()) return
+    rivals = found
+    keyboardApps = apps
+    postApp()
+  })
+}
+
 // ---------------------------------------------------------------- tray
 
-function keyLabel(accelerator: string): string {
-  return accelerator.replace(/CommandOrControl|CmdOrCtrl|Control/g, 'Ctrl')
+function keyLabel(hotkey: string): string {
+  return hotkeyLabel(hotkey)
 }
 
-function voiceMenu(): MenuItemConstructorOptions[] {
-  const choose = (voice: string) => () => saveSettings({ voice })
-  const items: MenuItemConstructorOptions[] = [{ label: 'Automatic', type: 'radio', checked: settings.voice === '', click: choose('') }]
-  const v = voiceStore.state
-  if (v.status === 'ready') {
-    for (const voice of NATURAL_VOICES) {
-      const value = NATURAL_PREFIX + voice.id
-      items.push({ label: naturalLabel(voice), type: 'radio', checked: settings.voice === value, click: choose(value) })
-    }
-  } else if (v.status === 'downloading') {
-    items.push({ label: `Downloading the natural voice… ${Math.round(v.progress * 100)}%`, enabled: false })
-  } else if (v.status !== 'unsupported') {
-    items.push({
-      label: `Download the natural voice (${v.size} MB)`,
-      click: () => voiceStore.download().catch(error => console.warn('2Talker: the natural voice did not download', error)),
-    })
+/** What the tray's panel shows. */
+function trayView(): TrayView {
+  return {
+    keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', snipListen: settings.snipKey, snipTranslate: settings.textKey },
+    autoFix: settings.autoFix,
+    translator: translator.state(langCode(settings.native)).status,
+    native: settings.native,
   }
-  const system = (hostVoices ?? []).filter(h => voiceMatches(h.lang, 'en'))
-  if (system.length > 0) items.push({ type: 'separator' })
-  for (const h of system) items.push({ label: h.name, type: 'radio', checked: settings.voice === h.name, click: choose(h.name) })
-  return items
-}
-
-function languageMenu(): MenuItemConstructorOptions[] {
-  return NATIVES.map(code => findLanguage(code))
-    .filter(l => l !== undefined)
-    .map(l => ({ label: `${l.native} · ${l.name}`, type: 'radio', checked: settings.native === l.name, click: () => saveSettings({ native: l.name }) }))
-}
-
-/** A menu label with its shortcut on the right, when there is one. */
-function withKey(label: string, accelerator: string): string {
-  return accelerator ? `${label}\t${keyLabel(accelerator)}` : label
-}
-
-function themeMenu(): MenuItemConstructorOptions[] {
-  const themes: [ThemeMode, string][] = [
-    ['system', 'As Windows'],
-    ['light', 'Light'],
-    ['dark', 'Dark'],
-  ]
-  return themes.map(([theme, label]) => ({ label, type: 'radio', checked: settings.theme === theme, click: () => saveSettings({ theme }) }))
 }
 
 function refreshTray(): void {
   if (!tray) return
-  const menu = Menu.buildFromTemplate([
-    { label: 'Open 2Talker…', click: () => openApp() },
-    { type: 'separator' },
-    ...(settings.selectKey ? [{ label: withKey('Translate the selection', settings.selectKey), click: () => void translateSelection() }] : []),
-    { label: withKey('Translate the copied text', settings.doubleCopy ? 'Ctrl+C, C' : ''), click: () => afterSettling(translateClipboard) },
-    { label: withKey('Translate a piece of the screen', settings.snipKey), click: snip },
-    { type: 'separator' },
-    { label: 'Read aloud when a card opens', type: 'checkbox', checked: settings.autoRead, click: item => saveSettings({ autoRead: item.checked }) },
-    { label: 'Voice', submenu: voiceMenu() },
-    {
-      label: 'Speed',
-      submenu: RATES.map(rate => ({ label: rate === 1 ? 'Normal' : `${rate}×`, type: 'radio', checked: settings.rate === rate, click: () => saveSettings({ rate }) })),
-    },
-    { label: 'Your language', submenu: languageMenu() },
-    { label: 'Theme', submenu: themeMenu() },
-    { type: 'separator' },
-    { label: 'Start with Windows', type: 'checkbox', checked: settings.startWithWindows, click: item => saveSettings({ startWithWindows: item.checked }) },
-    { label: 'About 2Talker…', click: () => openApp('about') },
-    { label: 'Quit 2Talker', click: () => app.quit() },
-  ])
-  tray.setContextMenu(menu)
   tray.setToolTip(tooltip())
+  if (trayPanel && trayReady && !trayPanel.isDestroyed()) trayPanel.webContents.send('to-view', { type: 'tray', view: trayView() } satisfies ToView)
 }
 
 function tooltip(): string {
-  const ways = [
-    settings.doubleCopy ? 'Ctrl+C twice' : '',
-    settings.selectKey ? keyLabel(settings.selectKey) : '',
-  ].filter(Boolean)
-  const text = ways.length ? `${ways.join(' or ')} to translate a text` : ''
-  const screenKey = settings.snipKey ? `${keyLabel(settings.snipKey)} for a piece of the screen` : ''
-  return ['2Talker', text, screenKey].filter(Boolean).join(' · ')
+  const ways = [settings.doubleCopy ? 'Ctrl+C twice' : '', settings.selectKey ? keyLabel(settings.selectKey) : ''].filter(Boolean)
+  const listen = ways.length ? `${ways.join(' or ')} to listen` : ''
+  const translate = settings.translateKey ? `${keyLabel(settings.translateKey)} to translate` : ''
+  return ['Altype', listen, translate].filter(Boolean).join(' · ')
 }
 
 function createTray(): Tray {
-  const icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'media', 'icon.png')).resize({ width: 32, height: 32, quality: 'best' })
-  const t = new Tray(icon)
-  t.on('click', () => t.popUpContextMenu())
-  t.on('double-click', () => openApp())
+  // tray.png is the 16 px mark set pixel by pixel; Electron takes tray@2x.png on a screen at 200 %.
+  const t = new Tray(nativeImage.createFromPath(path.join(app.getAppPath(), 'media', 'tray.png')))
+  // Either button opens Altype's own panel: Windows' menu cannot take Altype's look.
+  t.on('click', () => toggleTrayPanel())
+  t.on('right-click', () => toggleTrayPanel())
   return t
 }
 
+/** The tray's panel: a window of Altype's own by the tray icon, made once and hidden between uses. */
+function createTrayPanel(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: TRAY_WIDTH,
+    height: trayHeight,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    title: 'Altype',
+    backgroundColor: appColor(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      spellcheck: false,
+    },
+  })
+  win.setAlwaysOnTop(true, 'pop-up-menu')
+  win.removeMenu()
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', event => event.preventDefault())
+  if (!app.isPackaged) win.webContents.on('console-message', m => console.warn(`Altype tray panel: ${m.message} (${m.sourceId}:${m.lineNumber})`))
+  // A click anywhere else puts it away, as a menu goes.
+  win.on('blur', () => {
+    if (Date.now() - trayShownAt > 200) hideTrayPanel()
+  })
+  win.on('closed', () => {
+    trayPanel = undefined
+    trayReady = false
+  })
+  void win.loadFile(path.join(app.getAppPath(), 'media', 'tray.html'))
+  return win
+}
+
+function toggleTrayPanel(): void {
+  if (trayPanel?.isVisible()) return hideTrayPanel()
+  // The click on the icon took the focus from the open panel, which hid: that click only closes it.
+  if (Date.now() - trayHiddenAt < TRAY_REOPEN_MS) return
+  showTrayPanel()
+}
+
+function showTrayPanel(): void {
+  if (!trayPanel || trayPanel.isDestroyed()) trayPanel = createTrayPanel()
+  refreshTray()
+  placeTrayPanel()
+  trayShownAt = Date.now()
+  trayPanel.show()
+  trayPanel.focus()
+  if (trayReady) trayPanel.webContents.send('to-view', { type: 'trayShown' } satisfies ToView)
+}
+
+/** By the tray icon, as tall as its content. */
+function placeTrayPanel(): void {
+  if (!tray || !trayPanel || trayPanel.isDestroyed()) return
+  const icon = tray.getBounds()
+  trayPanel.setBounds(placeByTray(icon, { width: TRAY_WIDTH, height: trayHeight }, screen.getDisplayMatching(icon).workArea))
+}
+
+function hideTrayPanel(): void {
+  if (!trayPanel || trayPanel.isDestroyed() || !trayPanel.isVisible()) return
+  trayHiddenAt = Date.now()
+  trayPanel.hide()
+}
+
+function runTrayCommand(command: TrayCommand): void {
+  switch (command) {
+    case 'listenCopied':
+      afterSettling(() => useClipboard('listen'))
+      return
+    case 'translateCopied':
+      afterSettling(() => useClipboard('translate'))
+      return
+    case 'listenScreen':
+      snip('listen')
+      return
+    case 'translateScreen':
+      snip('translate')
+      return
+    case 'open':
+      openApp()
+      return
+    case 'quit':
+      app.quit()
+      return
+  }
+}
+
 /**
- * `2Talker --clipboard` translates the copied text and `2Talker --snip`
- * snips, for a mouse button or a launcher; true when the arguments held one.
+ * For a mouse button or a launcher: `Altype --clipboard` listens to the
+ * copied text and `--translate` translates it; `--snip` snips to listen,
+ * `--text` to translate. True when the arguments held one.
  */
 function runCommand(argv: readonly string[]): boolean {
   if (argv.includes('--clipboard')) {
-    afterSettling(translateClipboard)
+    afterSettling(() => useClipboard('listen'))
+    return true
+  }
+  if (argv.includes('--translate')) {
+    afterSettling(() => useClipboard('translate'))
     return true
   }
   if (argv.includes('--snip')) {
     snip()
+    return true
+  }
+  if (argv.includes('--text')) {
+    snip('translate')
     return true
   }
   return false
@@ -836,26 +1225,53 @@ function start(): void {
   words = new WordStore(path.join(userDir(), 'words.json'))
   updater = new Updater({
     change: () => postApp(),
-    ready: version => tray?.displayBalloon({ title: '2Talker', content: `Version ${version} is ready. It installs when 2Talker quits.` }),
+    ready: version => tray?.displayBalloon({ title: 'Altype', content: `Version ${version} is ready. It installs when Altype quits.` }),
   })
   translator = createTranslator(path.join(userDir(), 'models'), unpacked('dist', 'mt-worker.js'), {
     loader: unpacked('vendor', 'bergamot', 'bergamot-translator.js'),
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
   })
   tray = createTray()
+  // Made now, so the first click on the tray icon opens it at once.
+  trayPanel = createTrayPanel()
   refreshTray()
   registerShortcuts()
+  keyboard = new KeyboardHelper(unpacked('dist', 'kbd-worker.js'), path.join(app.getAppPath(), 'media', 'layout'), {
+    keep: word => saveSettings({ keepWords: [...settings.keepWords, word] }),
+    selection: cycle => void convertSelection(cycle).catch(error => console.warn('Altype: could not convert the selection', error)),
+    hotkey: action => {
+      if (action === 'select') selection('listen', settings.selectKey)
+      else if (action === 'translate') selection('translate', settings.translateKey)
+      else if (action === 'text') snip('translate', settings.textKey)
+      else snip('listen', settings.snipKey)
+    },
+    app: exe => {
+      lastApp = exe
+      postApp()
+    },
+    foreignKeys: () => {
+      foreignKeys = true
+      findRivals()
+      postApp()
+    },
+    failed: message => {
+      keyboardTrouble = message
+      console.warn(`Altype keyboard: ${message}`)
+      postApp()
+    },
+  })
+  applyKeyboard()
   card = createCard()
   ipcMain.on('to-host', (_event, message: ToHost) => onMessage(message))
   try {
     stopWatching = watchClipboard(card, onClipboardChange)
   } catch (error) {
-    tray.displayBalloon({ title: '2Talker', content: `Ctrl+C twice will not work: ${messageOf(error)}. Use the tray menu.` })
+    tray.displayBalloon({ title: 'Altype', content: `Ctrl+C twice will not work: ${messageOf(error)}. Use the tray menu.` })
   }
   void sendHostVoices()
   updater.start()
   // The first start opens the window on "How to use".
-  if (firstRun) openApp('howto')
+  if (firstRun) openApp('home')
   runCommand(process.argv)
 }
 
@@ -872,14 +1288,25 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true
   })
-  // The card is hidden, never closed: 2Talker keeps running in the tray.
+  // The card is hidden, never closed: Altype keeps running in the tray.
   app.on('window-all-closed', () => undefined)
+  // Each part is put away on its own: one that fails must not keep the app from quitting.
   app.on('will-quit', () => {
-    globalShortcut.unregisterAll()
-    updater?.dispose()
-    stopWatching?.()
-    natural?.dispose()
-    translator?.dispose()
+    const steps: [string, () => void][] = [
+      ['shortcuts', () => globalShortcut.unregisterAll()],
+      ['updater', () => updater?.dispose()],
+      ['clipboard', () => stopWatching?.()],
+      ['voice', () => natural?.dispose()],
+      ['translator', () => translator?.dispose()],
+      ['keyboard', () => keyboard?.dispose()],
+    ]
+    for (const [name, step] of steps) {
+      try {
+        step()
+      } catch (error) {
+        console.warn(`Altype: could not put away the ${name}`, error)
+      }
+    }
   })
   void app.whenReady().then(start)
 }

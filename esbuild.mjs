@@ -44,6 +44,10 @@ const voice = { ...node, entryPoints: ['src/voice-worker.ts'], outfile: 'dist/vo
 /** @type {import('esbuild').BuildOptions} */
 const translator = { ...node, entryPoints: ['src/mt-worker.ts'], outfile: 'dist/mt-worker.js' }
 
+/** The keyboard helper's thread: Windows' keyboard hooks through koffi. */
+/** @type {import('esbuild').BuildOptions} */
+const keyboard = { ...node, entryPoints: ['src/kbd-worker.ts'], external: ['koffi'], outfile: 'dist/kbd-worker.js' }
+
 /** @type {import('esbuild').BuildOptions} */
 const card = {
   entryPoints: ['src/webview/card.ts'],
@@ -58,7 +62,10 @@ const card = {
 /** The app window: the notebook, the settings and how to use. */
 const appWindow = { ...card, entryPoints: ['src/webview/app.ts'], outfile: 'media/app.js' }
 
-const all = [main, preload, voice, translator, card, appWindow]
+/** The tray's panel, in place of Windows' menu. */
+const trayPanel = { ...card, entryPoints: ['src/webview/tray.ts'], outfile: 'media/tray.js' }
+
+const all = [main, preload, voice, translator, keyboard, card, appWindow, trayPanel]
 if (watch) {
   const contexts = await Promise.all(all.map(o => context(o)))
   await Promise.all(contexts.map(c => c.watch()))
