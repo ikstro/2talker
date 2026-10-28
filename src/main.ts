@@ -66,8 +66,8 @@ import type { Translator } from './translator'
 import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
-import { ctrlHeld, keysLetGo, pressCopy, pressPaste, watchClipboard } from './winclip'
-import { focusWindow, foreground, installedLayouts, layoutTable } from './winkbd'
+import { allowForeground, ctrlHeld, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, watchClipboard } from './winclip'
+import { exeOf, focusWindow, foreground, installedLayouts, layoutTable } from './winkbd'
 import { ankiTsv, WordStore, wordsText } from './words'
 
 const CARD_MIN = 96
@@ -133,6 +133,15 @@ const userDir = () => app.getPath('userData')
 const settingsFile = () => path.join(userDir(), 'settings.json')
 /** A file the packaged app keeps outside its archive: the workers run as separate processes. */
 const unpacked = (...parts: string[]) => path.join(app.getAppPath(), ...parts).replace(/app\.asar([\\/])/, 'app.asar.unpacked$1')
+
+/**
+ * uv's own download cache on this computer, as uv finds it (UV_CACHE_DIR, else %LOCALAPPDATA%\uv\cache),
+ * when it is there: the speech engine's packages already in it are taken from it, not downloaded again.
+ */
+function sharedUvCache(): string | undefined {
+  const dir = process.env.UV_CACHE_DIR || (process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'uv', 'cache') : '')
+  return dir && fs.existsSync(dir) ? dir : undefined
+}
 
 let settings: Settings
 let tray: Tray | undefined
@@ -1510,6 +1519,24 @@ async function typeText(text: string): Promise<void> {
   setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
 }
 
+/**
+ * Types an address into the browser window in front: Ctrl+L, the address pasted (a pasted address is not
+ * completed into another one, as typed letters may be), Enter; the clipboard put back after.
+ */
+async function typeAddress(url: string): Promise<void> {
+  const saved = await saveClipboard()
+  const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+  await ownClipboard(async () => {
+    await clipboard.writeText(url)
+    await pressAddressBar()
+    await pause(120)
+    await pressPaste()
+    await pause(120)
+    pressEnter()
+  })
+  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+}
+
 function balloon(title: string, content: string, click?: () => void): void {
   balloonClick = click
   tray?.displayBalloon({ title, content })
@@ -1521,6 +1548,7 @@ function setUpSpeechEngine(): void {
     userDir: userDir(),
     engineDir: unpacked('engine'),
     extensionDir: unpacked('extension'),
+    sharedCache: sharedUvCache(),
     port: speechPort,
     open: url => openStream(url),
     ...(TEST_HOME ? { testHome: TEST_HOME } : {}),
@@ -1580,8 +1608,11 @@ async function hostCall(request: HostCall): Promise<unknown> {
     case 'copy':
       clipboard.writeText(request.text)
       return null
-    case 'openChrome':
-      return openInChrome(request.url)
+    case 'openChrome': {
+      const opened = await openInChrome(request.url, { front: foreground, exeOf, allowFront: allowForeground, typeAddress })
+      log(`chrome: ${request.url} ${opened}`)
+      return opened
+    }
   }
 }
 

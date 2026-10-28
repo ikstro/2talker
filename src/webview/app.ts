@@ -25,7 +25,7 @@ import { lucide, type LucideName } from './lucide'
 import { aside, bad, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, warn } from './ui'
 import { seconds } from '../speechplan'
 import { resetSetup, setupNodes } from './setup'
-import { api, cardNote, computerRows, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, speakerRows, testOffer, toast } from './speech'
+import { api, cardNote, computerRows, DEVICE_NAMES, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, size as speechSize, speakerRows, testOffer, toast } from './speech'
 import { backToList, enterTranscripts, leaveTranscripts, newRows, openTranscript, setTranscriptHooks, transcriptsBody, transcriptsCap } from './transcripts'
 
 declare global {
@@ -869,7 +869,7 @@ const SUBS: Record<SubId, Sub> = {
   recent: { title: 'Recent phrases', cap: () => 'kept 30 days on this computer', body: recentPage },
   model: { title: 'Speech model', body: modelPage, valid: running },
   meet: { title: 'Google Meet', cap: () => 'the Altype extension for Chrome', body: meetPage },
-  speakers: { title: 'Speakers', cap: () => 'who spoke when', body: speakerRows, valid: v => hasPart(v, 'speakers') && running(v) },
+  speakers: { title: 'Who spoke when', cap: () => 'the voices told apart', body: speakerRows, valid: installed },
   layouts: { title: 'Layouts', cap: () => 'in the order the keys go through them', body: layoutsPage },
   programs: { title: 'Programs left out', body: programsPage },
   kept: { title: 'Kept as typed', body: keptPage },
@@ -1417,24 +1417,50 @@ function ago(epochSeconds: number): string {
   return `${d.getDate()} ${d.toLocaleDateString('en-GB', { month: 'short' })}`
 }
 
-/** Chrome opens its own page, started by Altype; without Chrome the address is copied to paste into its bar. */
+/**
+ * Chrome's own page: Altype opens a new Chrome window and types the address into it. When the window did not
+ * come to the front, or there is no Chrome, the address is copied for the person to paste.
+ */
 function openChrome(url: string): void {
-  void window.tutorHost.call({ call: 'openChrome', url }).then(
-    ok => {
-      if (ok) return
-      void window.tutorHost.call({ call: 'copy', text: url }).then(() => toast(`Chrome was not found. The address is copied: paste it into Chrome’s address bar.`), fault)
-    },
-    fault,
-  )
+  void window.tutorHost.call({ call: 'openChrome', url }).then(opened => {
+    if (opened === 'typed') return
+    const say = opened === 'opened' ? 'Chrome is open: the address is copied, paste it into its address bar and press Enter.' : 'Chrome was not found. The address is copied: paste it into Chrome’s address bar.'
+    void window.tutorHost.call({ call: 'copy', text: url }).then(() => toast(say), fault)
+  }, fault)
 }
 
 /** The extension as the engine last saw it: it says hello when Chrome starts it, and every quarter of an hour. */
 const extensionSeen = (v: AppView) => v.speech.health?.extension ?? null
 
+/** 0.2.0 before 0.2.1: the version parts compared as numbers. */
+function olderVersion(a: string, b: string): boolean {
+  const x = a.split('.').map(Number)
+  const y = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0)
+    if (d) return d < 0
+  }
+  return false
+}
+
+/** Chrome runs an older copy of the extension than the one in Altype's folder: Reload brings the new one in. */
+const extensionStale = (v: AppView) => {
+  const ext = extensionSeen(v)
+  return !!ext && !!v.speech.extensionShipped && olderVersion(ext.version, v.speech.extensionShipped)
+}
+
+/** The extensions page, at Altype's own card when Chrome has told its id. */
+const extensionsPage = (v: AppView) => {
+  const id = extensionSeen(v)?.id
+  return id && /^[a-p]{32}$/.test(id) ? `chrome://extensions/?id=${id}` : 'chrome://extensions/'
+}
+
 /** The card that opens the Google Meet page: whether the extension is in Chrome. */
 function meetCard(v: AppView): HTMLElement {
   const ext = extensionSeen(v)
-  return navCard('video', 'Google Meet', 'record a call in Chrome with the Altype extension', ext ? `Installed · v${ext.version}` : 'set up in Chrome', () => openSub('meet'), 'meet', !!ext)
+  const stale = extensionStale(v)
+  const value = !ext ? 'set up in Chrome' : stale ? `Reload in Chrome · v${ext.version} → v${v.speech.extensionShipped}` : `Installed · v${ext.version}`
+  return navCard('video', 'Google Meet', 'record a call in Chrome with the Altype extension', value, () => openSub('meet'), 'meet', !!ext && !stale)
 }
 
 /** How to record a Google Meet call: the Chrome extension, loaded from Altype's folder, and whether it is there. */
@@ -1442,9 +1468,11 @@ function meetPage(v: AppView): HTMLElement[] {
   const dir = v.speech.extensionDir
   const ext = extensionSeen(v)
   const offer = engineRows(v, 'Google Meet')
-  const status = ext
-    ? card('circle-check', `Installed in Chrome · v${ext.version}`, [el('small', { class: 'ok' }, `seen ${ago(ext.seen)} · the call’s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY))
-    : card('video', 'Not set up yet', [running(v) ? 'three steps in Chrome, once; this line says when the extension is in' : 'the speech engine must run for the extension to work'], null)
+  const status = !ext
+    ? card('video', 'Not set up yet', [running(v) ? 'three steps in Chrome, once; this line says when the extension is in' : 'the speech engine must run for the extension to work'], null)
+    : extensionStale(v)
+      ? card('rotate-cw', `Chrome runs v${ext.version}; Altype has v${v.speech.extensionShipped}`, ['press Reload on the extension’s card in Chrome: Open in Chrome goes straight to it'], btn('Open in Chrome', () => openChrome(extensionsPage(v)), 'primary'))
+      : card('circle-check', `Installed in Chrome · v${ext.version}`, [el('small', { class: 'ok' }, `seen ${ago(ext.seen)} · the call’s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY))
   return [
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
     grp('Chrome extension'),
@@ -1460,20 +1488,24 @@ function meetPage(v: AppView): HTMLElement[] {
     card('mic', '3 · In a meeting: the Altype icon → Record, or the key', ['the call’s sound and your microphone · the transcript appears in Transcripts'], caps(MEET_KEY)),
     grp('If something is off'),
     card('keyboard', 'The key does nothing', ['set it at chrome://extensions/shortcuts'], btn('Open in Chrome', () => openChrome('chrome://extensions/shortcuts'))),
-    card('rotate-cw', 'After Altype updates, press Reload on the extension', ['Chrome keeps the old copy until then'], btn('Open in Chrome', () => openChrome('chrome://extensions/'))),
+    card('rotate-cw', 'After Altype updates, press Reload on the extension', ['Chrome keeps the old copy until then'], btn('Open in Chrome', () => openChrome(extensionsPage(v)))),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
-/** The card that opens the speakers' setup, or the download of their part. */
+/** The card that opens who spoke when: where it runs, whether it is here, its model's state. */
 function speakersCard(v: AppView): HTMLElement | null {
   if (!installed(v)) return null
+  const s = v.speech
+  const note = 'the words are recognized already; this tells the voices apart'
+  const open = () => openSub('speakers')
+  const work = s.pack.status === 'installing' && s.pack.installing?.includes('speakers')
+  if (work) return navCard('users', 'Who spoke when', note, 'downloading…', open, 'speakers')
   if (!hasPart(v, 'speakers')) {
-    const rows = speakerRows(v)
-    const first = rows[0]
-    if (first) first.prepend(lucide('users'))
-    return first ?? null
+    const sz = s.speakers.sizes[s.speakers.on]
+    return navCard('users', 'Who spoke when', note, `not installed · ≈${speechSize(sz.download)}`, open, 'speakers')
   }
-  if (!running(v)) return card('users', 'Who spoke when', ['set up once the speech engine runs'], null)
+  const on = DEVICE_NAMES[s.pack.speakersOn ?? 'cpu']
+  if (!running(v)) return navCard('users', 'Who spoke when', note, `on the ${on}`, open, 'speakers')
   const state = diarizationOf(v)
   const STATES: Record<typeof state, [string, boolean]> = {
     ready: ['ready', true],
@@ -1486,7 +1518,7 @@ function speakersCard(v: AppView): HTMLElement | null {
     failed: ['could not check', false],
   }
   const [value, ok] = STATES[state]
-  return navCard('users', 'Who spoke when', 'speakers told apart with a free Hugging Face key, once', value, () => openSub('speakers'), 'speakers', ok)
+  return navCard('users', 'Who spoke when', note, ok ? `${value} · ${on}` : value, open, 'speakers', ok)
 }
 
 function transcribePage(v: AppView): HTMLElement[] {
@@ -1771,21 +1803,31 @@ function enginePage(v: AppView): HTMLElement[] {
     if (p.status === 'installing' || p.status === 'removing') return [grp('Download'), ...offer]
     return [grp('Download'), ...offer]
   }
-  const out: (HTMLElement | null)[] = [grp('Parts')]
-  const add = (part: 'gpu' | 'speakers', mb: number) =>
-    el('button', { class: 'chip off', title: `Add · ≈${mb} MB`, disabled: p.status !== 'ready', onclick: () => post({ type: 'installSpeech', parts: [part] }) }, `+ ${PART_NAMES[part]}`)
+  const out: (HTMLElement | null)[] = [grp('On this computer')]
+  const busy = p.status !== 'ready'
+  const here = (text: string) => el('small', { class: 'ok' }, text)
+  const speakersOnCard = p.speakersOn === 'cuda'
   out.push(
-    card(
-      'download',
-      'Parts',
-      [(p.nvidia && !hasPart(v, 'gpu')) || !hasPart(v, 'speakers') ? 'downloaded once · tap one to add it' : 'all downloaded, once'],
-      el(
-        'span',
-        { class: 'chips' },
-        ...p.parts.map(part => chip(PART_NAMES[part])),
-        p.nvidia && !hasPart(v, 'gpu') ? add('gpu', sp.download.gpu) : null,
-        !hasPart(v, 'speakers') ? add('speakers', sp.download.speakers) : null,
-      ),
+    card('mic', 'Speech to text', [here(`Installed · ≈${speechSize(sp.installed.core)}`), 'Whisper and Parakeet on the processor: Dictate and Transcribe'], null),
+    p.nvidia
+      ? card(
+          'monitor',
+          'The graphics card’s part',
+          [
+            hasPart(v, 'gpu') ? here(speakersOnCard ? 'Installed · inside the speakers’ PyTorch' : `Installed · ≈${speechSize(sp.installed.gpu)}`) : `Not installed · ≈${speechSize(sp.download.gpu)} download`,
+            'speech on the NVIDIA card, several times quicker',
+          ],
+          hasPart(v, 'gpu') ? null : Object.assign(btn('Add', () => post({ type: 'installSpeech', parts: ['gpu'] })), { disabled: busy }),
+        )
+      : null,
+    navCard(
+      'users',
+      'Who spoke when',
+      sp.speakers.model ? 'PyTorch and pyannote · the voices’ model is here already' : 'PyTorch and pyannote · the voices’ model comes with a free Hugging Face key',
+      hasPart(v, 'speakers') ? `Installed · ${DEVICE_NAMES[p.speakersOn ?? 'cpu']}` : `Not installed · ≈${speechSize(sp.speakers.sizes[sp.speakers.on].download)}`,
+      () => openSub('speakers'),
+      'speakers',
+      hasPart(v, 'speakers'),
     ),
     ...engineRows(v, ''),
     card('monitor', 'Graphics card', [cardNote(v)], null),
@@ -2085,7 +2127,7 @@ setTranscriptHooks({
   view: () => view,
   shown: () => open?.name === 'transcripts',
   show: () => openPage('transcripts'),
-  setup: () => openPage('transcribe'),
+  setup: () => (openPage('transcribe'), openSub('speakers')),
 })
 
 post({ type: 'appReady' })

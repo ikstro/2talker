@@ -7,6 +7,7 @@
 // depends on changes (the engine's numbers, the downloaded models, the person's
 // choices, the computer) and sent to the engine when it differs.
 
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 import { driveOf, fingerprint, freeMb, loadProfile, probeDevice, quickProfile, saveProfile, type DeviceProfile } from './device'
@@ -33,6 +34,8 @@ export type SpeechHostOptions = {
   userDir: string
   engineDir: string
   extensionDir: string
+  /** uv's download cache of this computer, when it has one (speechpack.ts `sharedCache`). */
+  sharedCache?: string
   port: number
   open: (url: string) => Promise<AsyncIterable<Uint8Array>>
   /** A test run gives the engine its own settings folder. */
@@ -51,6 +54,8 @@ export class SpeechHost {
   private pushing = false
   private autoTested = { key: '', at: 0 }
   private readonly nvidiaDriver = hasNvidia()
+  /** The extension's version in Altype's folder, which Chrome loads unpacked. */
+  private readonly extensionShipped: string
 
   constructor(private readonly o: SpeechHostOptions) {
     this.profile = loadProfile(this.deviceFile) ?? quickProfile()
@@ -60,7 +65,8 @@ export class SpeechHost {
       root: o.root,
       engineDir: o.engineDir,
       nvidia: this.nvidiaDriver,
-      gpuSpeakers: () => this.plan.offers.speakersGpu,
+      gpuSpeakers: () => this.speakersOnCard(),
+      ...(o.sharedCache ? { sharedCache: o.sharedCache } : {}),
       open: o.open,
       onChange: () => this.changed(),
     })
@@ -73,6 +79,12 @@ export class SpeechHost {
       env: o.testHome ? { ALTYPE_SPEECH_HOME: o.testHome } : {},
       change: () => this.changed(),
     })
+    this.extensionShipped = shippedVersion(o.extensionDir)
+  }
+
+  /** "Who spoke when" runs on the card: the person's choice or the advice, and only where the card has room for it. */
+  private speakersOnCard(): boolean {
+    return this.plan.offers.speakersGpu && this.o.settings().speakersDevice !== 'cpu'
   }
 
   private get deviceFile(): string {
@@ -209,19 +221,29 @@ export class SpeechHost {
   }
 
   view(keysOk: SpeechView['keysOk']): SpeechView {
-    const offers = this.plan.offers
+    const onCard = this.speakersOnCard()
     const gpuPlan = planSpeech({ ...this.input, cuda: true }).dictation.chosen
     const cpuPlan = planSpeech({ ...this.input, cuda: false }).dictation.chosen
     const first = (c: typeof gpuPlan) => ({ model: c.label, mb: c.downloaded ? 0 : c.mb, phrase: c.estimate })
     return {
-      pack: { ...this.pack.state, nvidia: offers.gpu || (this.pack.state.parts.includes('gpu') && this.nvidiaDriver) },
+      pack: { ...this.pack.state, nvidia: this.plan.offers.gpu || (this.pack.state.parts.includes('gpu') && this.nvidiaDriver) },
       service: this.service.state,
       ...(this.service.trouble ? { trouble: this.service.trouble } : {}),
       ...(this.service.health ? { health: this.service.health } : {}),
       port: this.o.port,
       extensionDir: this.o.extensionDir,
-      download: { core: DOWNLOAD_MB.core, gpu: DOWNLOAD_MB.gpu, speakers: offers.speakersGpu ? DOWNLOAD_MB.speakersGpu : DOWNLOAD_MB.speakers },
-      installed: { core: INSTALLED_MB.core, gpu: INSTALLED_MB.gpu, speakers: offers.speakersGpu ? INSTALLED_MB.speakersGpu : INSTALLED_MB.speakers },
+      extensionShipped: this.extensionShipped,
+      download: { core: DOWNLOAD_MB.core, gpu: DOWNLOAD_MB.gpu, speakers: onCard ? DOWNLOAD_MB.speakersGpu : DOWNLOAD_MB.speakers },
+      installed: { core: INSTALLED_MB.core, gpu: INSTALLED_MB.gpu, speakers: onCard ? INSTALLED_MB.speakersGpu : INSTALLED_MB.speakers },
+      speakers: {
+        on: onCard ? 'cuda' : 'cpu',
+        sizes: {
+          cuda: { download: DOWNLOAD_MB.speakersGpu, installed: INSTALLED_MB.speakersGpu },
+          cpu: { download: DOWNLOAD_MB.speakers, installed: INSTALLED_MB.speakers },
+        },
+        // The engine says "ready" once the voices' model is on the disk, the part installed or not.
+        model: this.service.health?.diarization === 'ready',
+      },
       firstModel: { cpu: first(cpuPlan), cuda: first(gpuPlan) },
       disk: { freeMb: freeMb(this.o.root), drive: driveOf(this.o.root) },
       device: this.profile,
@@ -306,5 +328,15 @@ export class SpeechHost {
 
   dispose(): void {
     this.service.dispose()
+  }
+}
+
+/** The version in the extension's manifest.json; empty when it cannot be read. */
+function shippedVersion(dir: string): string {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')) as { version?: unknown }
+    return typeof m.version === 'string' ? m.version : ''
+  } catch {
+    return ''
   }
 }

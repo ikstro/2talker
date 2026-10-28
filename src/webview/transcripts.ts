@@ -648,7 +648,13 @@ function splitWay(t: Transcript): 'words' | 'redo' | null {
 /** Speakers missing from a transcript: what to do about it, right where it shows. */
 function speakersNotice(v: AppView, t: Transcript): HTMLElement | null {
   if (t.source === 'note' || t.speakersStatus === 'ok' || t.speakersStatus === 'single') return null
-  const why = t.speakersStatus === 'failed' ? 'Speakers could not be told apart; the text is one stream.' : 'Speakers are not told apart: it was made without a Hugging Face key.'
+  const meet = t.source === 'meet' ? ' Your microphone is Me; the call’s voices are one speaker.' : ''
+  const why =
+    t.speakersStatus === 'failed'
+      ? 'Speakers could not be told apart; the text is one stream.'
+      : t.speakersStatus === 'no-part'
+        ? `Speakers are not told apart: who spoke when was not installed yet.${meet}`
+        : `Speakers are not told apart: the voices’ model needed a Hugging Face key.${meet}`
   const missing = speakersMissing(v, () => hooks.setup())
   if (missing) return aside('users', why, ' ', linkBtn('Set up speakers', () => hooks.setup()))
   const way = splitWay(t)

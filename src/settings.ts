@@ -90,6 +90,8 @@ export type Settings = {
   /** A speech model the person picked for dictation and for transcripts (models.json names); empty: chosen for this computer. */
   dictationModel: string
   transcriptsModel: string
+  /** Where "who spoke when" runs: chosen for this computer (the graphics card when it has room), the card, or the processor. */
+  speakersDevice: 'auto' | 'cuda' | 'cpu'
   /** The person agreed to the speed test: it runs again by itself when something changes (a model, a card). */
   speechTestAgreed: boolean
   /** "Not now" to the test: what it would have measured then, and when; it is offered again when that changes, a day later at the soonest. */
@@ -144,6 +146,7 @@ export const DEFAULTS: Settings = {
   speechPrefer: 'accuracy',
   dictationModel: '',
   transcriptsModel: '',
+  speakersDevice: 'auto',
   speechTestAgreed: false,
   speechTestDeclinedKey: '',
   speechTestDeclinedAt: 0,
@@ -231,6 +234,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     speechPrefer: r.speechPrefer === 'speed' ? 'speed' : 'accuracy',
     dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),
     transcriptsModel: key(r.transcriptsModel, DEFAULTS.transcriptsModel),
+    speakersDevice: r.speakersDevice === 'cuda' || r.speakersDevice === 'cpu' ? r.speakersDevice : 'auto',
     speechTestAgreed: flag(r.speechTestAgreed, DEFAULTS.speechTestAgreed),
     setupDone: flag(r.setupDone, DEFAULTS.setupDone),
     speechTestDeclinedKey: key(r.speechTestDeclinedKey, DEFAULTS.speechTestDeclinedKey),

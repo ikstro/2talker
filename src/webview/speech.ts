@@ -8,7 +8,7 @@ import { cardText, mainCard, nvidiaCard, shortCpu } from '../hardware'
 import type { AppView, Choice, Feature, SpeechHealth, SpeechPart, SpeechResult } from '../protocol'
 import { BASIS_TEXT, estimateText, minutes, seconds } from '../speechplan'
 import { el, icon } from './dom'
-import { aside, bad, bar, btn, chip, link, linkBtn, post, row, toggleKnob } from './ui'
+import { aside, bad, bar, btn, card, chip, grp, link, linkBtn, post, row, toggleKnob } from './ui'
 
 export type Source = 'file' | 'mic' | 'meet' | 'note'
 export type Stage = '' | 'decode' | 'words' | 'speakers' | 'save'
@@ -40,7 +40,7 @@ export type Transcript = {
   language: string
   speakers: Record<string, { name: string }>
   utterances: Utterance[]
-  speakersStatus: 'ok' | 'single' | 'needs-token' | 'failed'
+  speakersStatus: 'ok' | 'single' | 'no-part' | 'needs-token' | 'failed'
   note?: string
   noteError?: string
   /** The words' times are kept: speakers can be split later without recognizing the text again. */
@@ -388,7 +388,7 @@ const DIARIZATION: Record<Diarization, ['' | 'busy' | 'bad' | 'ok', string]> = {
   'no-access': ['bad', 'the key works, but the model is not open to it yet: fill in the form on its page (step 2), then Check again'],
   failed: ['bad', 'could not check the key'],
   missing: ['', 'key saved · the model downloads with the first transcription'],
-  ready: ['ok', 'the key works and the model is here · speakers are told apart offline'],
+  ready: ['ok', 'the model is here · speakers are told apart offline, no key needed any more'],
 }
 
 /** "Replace key" was tapped: the field and the steps come back. */
@@ -417,18 +417,67 @@ const follow = (state: Diarization) => {
  */
 export function speakerRows(v: AppView): HTMLElement[] {
   const s = v.speech
-  const work = packWork(v)
-  if (!hasPart(v, 'speakers')) {
-    if (work) return [work]
-    return [
-      row(
-        'Who spoke when',
-        [`needs the speakers part · ≈${s.download.speakers} MB, once`],
-        btn('Download', () => post({ type: 'installSpeech', parts: ['speakers'] }), '', 'Download the speakers part'),
-      ),
-    ]
+  const out: HTMLElement[] = [...speakersDeviceRows(v), ...speakersInstallRows(v)]
+  if (!hasPart(v, 'speakers')) return out
+  if (!running(v)) return [...out, card('lock', 'The voices’ model', ['set up once the speech engine runs'], null)]
+  return [...out, grp('The voices’ model'), ...keyRows(v)]
+}
+
+export const DEVICE_NAMES = { cuda: 'graphics card', cpu: 'processor' } as const
+
+/** Where who spoke when runs, as the person may choose it: the card (when it has room) or the processor, each with its size and its time here. */
+function speakersDeviceRows(v: AppView): HTMLElement[] {
+  const s = v.speech
+  const plan = s.plan.speakers
+  const pick = (on: 'cuda' | 'cpu') => post({ type: 'saveSettings', patch: { speakersDevice: on === plan.advised ? 'auto' : on } })
+  const option = (on: 'cuda' | 'cpu') => {
+    const sz = s.speakers.sizes[on]
+    const time = plan[on]
+    const chosen = s.speakers.on === on
+    const node = card(
+      on === 'cuda' ? 'monitor' : 'cpu',
+      on === 'cuda' ? 'Graphics card' : 'Processor',
+      [
+        time === undefined ? null : `an hour’s voices in ≈${minutes(time)} here${plan.advised === on ? ' · advised' : ''}`,
+        on === 'cuda'
+          ? `PyTorch for the card · ≈${size(sz.download)} download · ${size(sz.installed)} on the disk, in place of the card’s part`
+          : `PyTorch for the processor · ≈${size(sz.download)} download · ${size(sz.installed)} on the disk`,
+      ],
+      chosen ? chip('chosen', 'lit') : linkBtn('Use', () => pick(on)),
+    )
+    if (chosen) node.classList.add('picked')
+    return node
   }
-  if (!running(v)) return [row('Who spoke when', ['set up once the speech engine runs'], null)]
+  const rows: HTMLElement[] = [aside('info', 'The words are recognized already. Telling the voices apart is another model; it runs on PyTorch, which is what downloads here.'), grp('Runs on')]
+  if (s.plan.offers.speakersGpu && plan.cuda !== undefined) rows.push(option('cuda'))
+  rows.push(option('cpu'))
+  return rows
+}
+
+/** The part as it stands: to download for the chosen place, to switch to it, being installed, or installed. */
+function speakersInstallRows(v: AppView): HTMLElement[] {
+  const s = v.speech
+  const work = packWork(v)
+  if (work) return [work]
+  const on = s.speakers.on
+  const sz = s.speakers.sizes[on]
+  const parts: SpeechPart[] = on === 'cuda' && !hasPart(v, 'gpu') ? ['gpu', 'speakers'] : ['speakers']
+  const install = (label: string) => btn(label, () => post({ type: 'installSpeech', parts }), 'primary')
+  const model = s.speakers.model ? 'the voices’ model is here already: no Hugging Face key needed' : 'then a free Hugging Face key, once, for the voices’ model'
+  const room = s.disk.freeMb > 0 && s.disk.freeMb < sz.installed * 1.1 ? bad(`Needs ≈${size(sz.installed * 1.1)} free; ${s.disk.drive} has ${size(s.disk.freeMb)}`) : null
+  if (!hasPart(v, 'speakers')) {
+    return [grp('Download'), card('download', `Who spoke when, on the ${DEVICE_NAMES[on]}`, [`≈${size(sz.download)} download, once · ${model}`, s.pack.status === 'failed' ? bad(`The download stopped: ${s.pack.message ?? 'unknown error'}`) : room], install(s.pack.status === 'failed' ? 'Try again' : 'Download'))]
+  }
+  const there = s.pack.speakersOn ?? 'cpu'
+  if (there !== on) {
+    return [grp('Installed'), card('rotate-cw', `On the ${DEVICE_NAMES[there]} now`, [`switching to the ${DEVICE_NAMES[on]}: ≈${size(sz.download)} download; the other PyTorch goes`, room], install('Switch'))]
+  }
+  return [grp('Installed'), card('circle-check', `Installed · on the ${DEVICE_NAMES[on]}`, [el('small', { class: 'ok' }, `an hour’s voices in ≈${minutes(s.plan.speakers[on] ?? s.plan.speakers.cpu)} here`)], null)]
+}
+
+/** The Hugging Face key with its live state, and the four steps to get one while it is needed. */
+function keyRows(v: AppView): HTMLElement[] {
+  const s = v.speech
   const state = diarizationOf(v)
   const [kind, words] = DIARIZATION[state]
   const message = state === 'failed' && s.health?.diarizationMessage ? `${words}: ${s.health.diarizationMessage}` : words
@@ -477,6 +526,8 @@ export function speakerRows(v: AppView): HTMLElement[] {
         : state === 'failed'
           ? again('Try again')
           : null
+  // Once the model is on the disk the key has done its work: nothing to replace.
+  if (state === 'ready' && !replacing) return [row('The voices’ model', [note], null)]
   const out = [row('Hugging Face key', [note], control)]
   const typing = (!settled && state !== 'checking' && state !== 'downloading') || replacing
   if (typing) {

@@ -819,7 +819,7 @@
       gpu: plan.offers.gpu ? { on: true, why: `speech on the graphics card: a phrase in \u2248${seconds(s.firstModel.cuda.phrase)}, not \u2248${seconds(s.firstModel.cpu.phrase)}` } : { on: false, why: d.at ? "no NVIDIA card that can take it; speech runs on the processor" : "looking at the graphics card\u2026" },
       dictate: { on: true, why: `${s.firstModel.cpu.model} writes a phrase in \u2248${seconds(s.firstModel.cpu.phrase)} on this processor` },
       transcribe: chosen.fits && !rough ? { on: true, why: `${chosen.label}: an hour of a meeting in \u2248${hourCpu} on this computer${plan.offers.gpu ? ", quicker on the graphics card" : ""}` } : { on: false, why: `possible, but ${rough ? "rough" : "slow"} here: ${chosen.label} writes an hour in \u2248${hourCpu}` },
-      speakers: plan.offers.speakersGpu ? { on: true, why: "who spoke when, told apart on the graphics card \xB7 a free Hugging Face key, once" } : { on: false, why: "on the processor it takes \u22480.8 s per second of sound \xB7 a free Hugging Face key, once" },
+      speakers: plan.offers.speakersGpu && plan.speakers.cuda !== void 0 ? { on: true, why: `the voices told apart on the graphics card: an hour in \u2248${minutes(plan.speakers.cuda)}` } : { on: false, why: `possible, but slow here: on the processor an hour\u2019s voices take \u2248${minutes(plan.speakers.cpu)}` },
       startWithWindows: { on: true, why: "the keys work from the first minute" }
     };
   }
@@ -833,11 +833,15 @@
       dictate: r.dictate.on,
       transcribe: r.transcribe.on,
       speakers: r.speakers.on && r.transcribe.on,
+      speakersOn: v.speech.plan.speakers.advised,
       startWithWindows: true,
       test: true
     };
   }
   var speechNeeded = (c) => c.dictate || c.transcribe;
+  function speakersWhere(c, v) {
+    return c.speakersOn === "cuda" && c.gpu && v.speech.pack.nvidia && v.speech.plan.offers.speakersGpu ? "cuda" : "cpu";
+  }
   function cost(c, v) {
     const s = v.speech;
     const items = [];
@@ -865,8 +869,11 @@
       const have = new Set(s.pack.parts);
       const wanted = ["core", ...c.gpu && s.pack.nvidia ? ["gpu"] : [], ...c.transcribe && c.speakers ? ["speakers"] : []];
       for (const part of wanted) if (!have.has(part)) parts.push(part);
-      const mb = parts.reduce((n, p) => n + s.download[p], 0);
-      const onDisk = parts.reduce((n, p) => n + s.installed[p], 0);
+      const where2 = speakersWhere(c, v);
+      const cardInside = where2 === "cuda" && wanted.includes("speakers");
+      const size2 = (p, kind) => p === "speakers" ? s.speakers.sizes[where2][kind] : p === "gpu" && cardInside ? 0 : s[kind][p];
+      const mb = parts.reduce((n, p) => n + size2(p, "download"), 0);
+      const onDisk = parts.reduce((n, p) => n + size2(p, "installed"), 0);
       const names = { core: "speech to text", gpu: "the graphics card\u2019s part", speakers: "the speakers\u2019 part" };
       items.push({ key: "engine", label: "The speech engine", note: parts.length ? `${parts.map((p) => names[p]).join(", ")} \xB7 ${Math.round(onDisk)} MB on the disk` : "here already", mb });
       disk += onDisk;
@@ -1128,7 +1135,7 @@
     "no-access": ["bad", "the key works, but the model is not open to it yet: fill in the form on its page (step 2), then Check again"],
     failed: ["bad", "could not check the key"],
     missing: ["", "key saved \xB7 the model downloads with the first transcription"],
-    ready: ["ok", "the key works and the model is here \xB7 speakers are told apart offline"]
+    ready: ["ok", "the model is here \xB7 speakers are told apart offline, no key needed any more"]
   };
   var replacing = false;
   var draft = "";
@@ -1145,18 +1152,58 @@
   };
   function speakerRows(v) {
     const s = v.speech;
+    const out = [...speakersDeviceRows(v), ...speakersInstallRows(v)];
+    if (!hasPart(v, "speakers")) return out;
+    if (!running(v)) return [...out, card("lock", "The voices\u2019 model", ["set up once the speech engine runs"], null)];
+    return [...out, grp("The voices\u2019 model"), ...keyRows(v)];
+  }
+  var DEVICE_NAMES = { cuda: "graphics card", cpu: "processor" };
+  function speakersDeviceRows(v) {
+    const s = v.speech;
+    const plan = s.plan.speakers;
+    const pick = (on) => post({ type: "saveSettings", patch: { speakersDevice: on === plan.advised ? "auto" : on } });
+    const option = (on) => {
+      const sz = s.speakers.sizes[on];
+      const time = plan[on];
+      const chosen = s.speakers.on === on;
+      const node = card(
+        on === "cuda" ? "monitor" : "cpu",
+        on === "cuda" ? "Graphics card" : "Processor",
+        [
+          time === void 0 ? null : `an hour\u2019s voices in \u2248${minutes(time)} here${plan.advised === on ? " \xB7 advised" : ""}`,
+          on === "cuda" ? `PyTorch for the card \xB7 \u2248${size(sz.download)} download \xB7 ${size(sz.installed)} on the disk, in place of the card\u2019s part` : `PyTorch for the processor \xB7 \u2248${size(sz.download)} download \xB7 ${size(sz.installed)} on the disk`
+        ],
+        chosen ? chip("chosen", "lit") : linkBtn("Use", () => pick(on))
+      );
+      if (chosen) node.classList.add("picked");
+      return node;
+    };
+    const rows = [aside("info", "The words are recognized already. Telling the voices apart is another model; it runs on PyTorch, which is what downloads here."), grp("Runs on")];
+    if (s.plan.offers.speakersGpu && plan.cuda !== void 0) rows.push(option("cuda"));
+    rows.push(option("cpu"));
+    return rows;
+  }
+  function speakersInstallRows(v) {
+    const s = v.speech;
     const work = packWork(v);
+    if (work) return [work];
+    const on = s.speakers.on;
+    const sz = s.speakers.sizes[on];
+    const parts = on === "cuda" && !hasPart(v, "gpu") ? ["gpu", "speakers"] : ["speakers"];
+    const install = (label) => btn(label, () => post({ type: "installSpeech", parts }), "primary");
+    const model = s.speakers.model ? "the voices\u2019 model is here already: no Hugging Face key needed" : "then a free Hugging Face key, once, for the voices\u2019 model";
+    const room = s.disk.freeMb > 0 && s.disk.freeMb < sz.installed * 1.1 ? bad(`Needs \u2248${size(sz.installed * 1.1)} free; ${s.disk.drive} has ${size(s.disk.freeMb)}`) : null;
     if (!hasPart(v, "speakers")) {
-      if (work) return [work];
-      return [
-        row(
-          "Who spoke when",
-          [`needs the speakers part \xB7 \u2248${s.download.speakers} MB, once`],
-          btn("Download", () => post({ type: "installSpeech", parts: ["speakers"] }), "", "Download the speakers part")
-        )
-      ];
+      return [grp("Download"), card("download", `Who spoke when, on the ${DEVICE_NAMES[on]}`, [`\u2248${size(sz.download)} download, once \xB7 ${model}`, s.pack.status === "failed" ? bad(`The download stopped: ${s.pack.message ?? "unknown error"}`) : room], install(s.pack.status === "failed" ? "Try again" : "Download"))];
     }
-    if (!running(v)) return [row("Who spoke when", ["set up once the speech engine runs"], null)];
+    const there = s.pack.speakersOn ?? "cpu";
+    if (there !== on) {
+      return [grp("Installed"), card("rotate-cw", `On the ${DEVICE_NAMES[there]} now`, [`switching to the ${DEVICE_NAMES[on]}: \u2248${size(sz.download)} download; the other PyTorch goes`, room], install("Switch"))];
+    }
+    return [grp("Installed"), card("circle-check", `Installed \xB7 on the ${DEVICE_NAMES[on]}`, [el("small", { class: "ok" }, `an hour\u2019s voices in \u2248${minutes(s.plan.speakers[on] ?? s.plan.speakers.cpu)} here`)], null)];
+  }
+  function keyRows(v) {
+    const s = v.speech;
     const state = diarizationOf(v);
     const [kind, words] = DIARIZATION[state];
     const message = state === "failed" && s.health?.diarizationMessage ? `${words}: ${s.health.diarizationMessage}` : words;
@@ -1197,6 +1244,7 @@
       replacing = true;
       redraw();
     }) : state === "no-access" ? again("Check again") : state === "failed" ? again("Try again") : null;
+    if (state === "ready" && !replacing) return [row("The voices\u2019 model", [note], null)];
     const out = [row("Hugging Face key", [note], control)];
     const typing = !settled && state !== "checking" && state !== "downloading" || replacing;
     if (typing) {
@@ -1398,13 +1446,40 @@
       grp("Speech"),
       advised(toggleCard("mic", "Dictate", c.dictate, flip("dictate"), `${r.dictate.why} \xB7 the speech engine ${sizeText(engineMb)} + ${dictateModel.label} ${dictateModel.downloaded ? "here" : sizeText(dictateModel.mb)}`), r.dictate),
       advised(toggleCard("audio-lines", "Transcribe meetings and files", c.transcribe, flip("transcribe"), `${r.transcribe.why} \xB7 ${transcribeModel.label} ${transcribeModel.downloaded ? "here" : sizeText(transcribeModel.mb)}${c.dictate ? "" : ` + the speech engine ${sizeText(engineMb)}`}`), r.transcribe),
-      c.transcribe ? advised(toggleCard("users", "Who spoke when", c.speakers, flip("speakers"), `${r.speakers.why} \xB7 ${sizeText(s.download.speakers)}`), r.speakers) : null,
+      c.transcribe ? advised(toggleCard("users", "Who spoke when", c.speakers, flip("speakers"), `${r.speakers.why} \xB7 ${sizeText(s.speakers.sizes[speakersWhere(c, v)].download)}`), r.speakers) : null,
+      c.transcribe && c.speakers ? speakersOnCard(v, h, c) : null,
       grp("Altype"),
       advised(toggleCard("power", "Start with Windows", c.startWithWindows, flip("startWithWindows"), r.startWithWindows.why), r.startWithWindows),
       grp("All of it"),
       total,
       aside("info", "Keys are set on each action\u2019s page; everything here can be changed later in Settings.")
     ].filter((n) => n !== null);
+  }
+  function speakersOnCard(v, h, c) {
+    const s = v.speech;
+    const where2 = speakersWhere(c, v);
+    const time = (on) => s.plan.speakers[on];
+    const canCard = s.plan.offers.speakersGpu && c.gpu && s.pack.nvidia && time("cuda") !== void 0;
+    const note = `an hour\u2019s voices in \u2248${minutes(time(where2) ?? s.plan.speakers.cpu)} here`;
+    if (!canCard) return card("cpu", "Runs on the processor", [note], null);
+    const advice = s.plan.speakers.advised === "cuda" ? "the graphics card" : "the processor";
+    const node = card(
+      "cpu",
+      "Runs on",
+      [note, where2 === s.plan.speakers.advised ? null : `${advice} is advised on this computer`],
+      seg(
+        where2,
+        [
+          ["cuda", `Graphics card \xB7 ${sizeText(s.speakers.sizes.cuda.download)}`],
+          ["cpu", `Processor \xB7 ${sizeText(s.speakers.sizes.cpu.download)}`]
+        ],
+        (on) => {
+          c.speakersOn = on;
+          h.redraw();
+        }
+      )
+    );
+    return where2 === s.plan.speakers.advised ? advised(node, { on: true, why: "" }) : node;
   }
   function start(v, h, c) {
     const all = cost(c, v);
@@ -1414,7 +1489,9 @@
       autoFix: c.autoFix,
       layoutBadge: c.layoutBadge,
       startWithWindows: c.startWithWindows,
-      speechTestAgreed: c.test
+      speechTestAgreed: c.test,
+      // The advice stays "automatic", so it follows the computer; another choice is kept as made.
+      speakersDevice: speakersWhere(c, v) === v.speech.plan.speakers.advised ? "auto" : speakersWhere(c, v)
     });
     const t = v.translatorState.status;
     if (t === "absent" || t === "failed") h.post({ type: "prepareTranslator" });
@@ -2176,7 +2253,8 @@
   }
   function speakersNotice(v, t) {
     if (t.source === "note" || t.speakersStatus === "ok" || t.speakersStatus === "single") return null;
-    const why = t.speakersStatus === "failed" ? "Speakers could not be told apart; the text is one stream." : "Speakers are not told apart: it was made without a Hugging Face key.";
+    const meet = t.source === "meet" ? " Your microphone is Me; the call\u2019s voices are one speaker." : "";
+    const why = t.speakersStatus === "failed" ? "Speakers could not be told apart; the text is one stream." : t.speakersStatus === "no-part" ? `Speakers are not told apart: who spoke when was not installed yet.${meet}` : `Speakers are not told apart: the voices\u2019 model needed a Hugging Face key.${meet}`;
     const missing = speakersMissing(v, () => hooks.setup());
     if (missing) return aside("users", why, " ", linkBtn("Set up speakers", () => hooks.setup()));
     const way = splitWay(t);
@@ -3035,7 +3113,7 @@
     recent: { title: "Recent phrases", cap: () => "kept 30 days on this computer", body: recentPage },
     model: { title: "Speech model", body: modelPage, valid: running },
     meet: { title: "Google Meet", cap: () => "the Altype extension for Chrome", body: meetPage },
-    speakers: { title: "Speakers", cap: () => "who spoke when", body: speakerRows, valid: (v) => hasPart(v, "speakers") && running(v) },
+    speakers: { title: "Who spoke when", cap: () => "the voices told apart", body: speakerRows, valid: installed },
     layouts: { title: "Layouts", cap: () => "in the order the keys go through them", body: layoutsPage },
     programs: { title: "Programs left out", body: programsPage },
     kept: { title: "Kept as typed", body: keptPage },
@@ -3492,24 +3570,41 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     return `${d.getDate()} ${d.toLocaleDateString("en-GB", { month: "short" })}`;
   }
   function openChrome(url) {
-    void window.tutorHost.call({ call: "openChrome", url }).then(
-      (ok) => {
-        if (ok) return;
-        void window.tutorHost.call({ call: "copy", text: url }).then(() => toast(`Chrome was not found. The address is copied: paste it into Chrome\u2019s address bar.`), fault);
-      },
-      fault
-    );
+    void window.tutorHost.call({ call: "openChrome", url }).then((opened) => {
+      if (opened === "typed") return;
+      const say = opened === "opened" ? "Chrome is open: the address is copied, paste it into its address bar and press Enter." : "Chrome was not found. The address is copied: paste it into Chrome\u2019s address bar.";
+      void window.tutorHost.call({ call: "copy", text: url }).then(() => toast(say), fault);
+    }, fault);
   }
   var extensionSeen = (v) => v.speech.health?.extension ?? null;
+  function olderVersion(a, b) {
+    const x = a.split(".").map(Number);
+    const y = b.split(".").map(Number);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      const d = (x[i] || 0) - (y[i] || 0);
+      if (d) return d < 0;
+    }
+    return false;
+  }
+  var extensionStale = (v) => {
+    const ext = extensionSeen(v);
+    return !!ext && !!v.speech.extensionShipped && olderVersion(ext.version, v.speech.extensionShipped);
+  };
+  var extensionsPage = (v) => {
+    const id = extensionSeen(v)?.id;
+    return id && /^[a-p]{32}$/.test(id) ? `chrome://extensions/?id=${id}` : "chrome://extensions/";
+  };
   function meetCard(v) {
     const ext = extensionSeen(v);
-    return navCard("video", "Google Meet", "record a call in Chrome with the Altype extension", ext ? `Installed \xB7 v${ext.version}` : "set up in Chrome", () => openSub("meet"), "meet", !!ext);
+    const stale = extensionStale(v);
+    const value = !ext ? "set up in Chrome" : stale ? `Reload in Chrome \xB7 v${ext.version} \u2192 v${v.speech.extensionShipped}` : `Installed \xB7 v${ext.version}`;
+    return navCard("video", "Google Meet", "record a call in Chrome with the Altype extension", value, () => openSub("meet"), "meet", !!ext && !stale);
   }
   function meetPage(v) {
     const dir = v.speech.extensionDir;
     const ext = extensionSeen(v);
     const offer = engineRows(v, "Google Meet");
-    const status = ext ? card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY)) : card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null);
+    const status = !ext ? card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null) : extensionStale(v) ? card("rotate-cw", `Chrome runs v${ext.version}; Altype has v${v.speech.extensionShipped}`, ["press Reload on the extension\u2019s card in Chrome: Open in Chrome goes straight to it"], btn("Open in Chrome", () => openChrome(extensionsPage(v)), "primary")) : card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY));
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
       grp("Chrome extension"),
@@ -3525,18 +3620,22 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       card("mic", "3 \xB7 In a meeting: the Altype icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone \xB7 the transcript appears in Transcripts"], caps(MEET_KEY)),
       grp("If something is off"),
       card("keyboard", "The key does nothing", ["set it at chrome://extensions/shortcuts"], btn("Open in Chrome", () => openChrome("chrome://extensions/shortcuts"))),
-      card("rotate-cw", "After Altype updates, press Reload on the extension", ["Chrome keeps the old copy until then"], btn("Open in Chrome", () => openChrome("chrome://extensions/")))
+      card("rotate-cw", "After Altype updates, press Reload on the extension", ["Chrome keeps the old copy until then"], btn("Open in Chrome", () => openChrome(extensionsPage(v))))
     ].filter((n) => n !== null);
   }
   function speakersCard(v) {
     if (!installed(v)) return null;
+    const s = v.speech;
+    const note = "the words are recognized already; this tells the voices apart";
+    const open2 = () => openSub("speakers");
+    const work = s.pack.status === "installing" && s.pack.installing?.includes("speakers");
+    if (work) return navCard("users", "Who spoke when", note, "downloading\u2026", open2, "speakers");
     if (!hasPart(v, "speakers")) {
-      const rows = speakerRows(v);
-      const first = rows[0];
-      if (first) first.prepend(lucide("users"));
-      return first ?? null;
+      const sz = s.speakers.sizes[s.speakers.on];
+      return navCard("users", "Who spoke when", note, `not installed \xB7 \u2248${size(sz.download)}`, open2, "speakers");
     }
-    if (!running(v)) return card("users", "Who spoke when", ["set up once the speech engine runs"], null);
+    const on = DEVICE_NAMES[s.pack.speakersOn ?? "cpu"];
+    if (!running(v)) return navCard("users", "Who spoke when", note, `on the ${on}`, open2, "speakers");
     const state = diarizationOf(v);
     const STATES = {
       ready: ["ready", true],
@@ -3549,7 +3648,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       failed: ["could not check", false]
     };
     const [value, ok] = STATES[state];
-    return navCard("users", "Who spoke when", "speakers told apart with a free Hugging Face key, once", value, () => openSub("speakers"), "speakers", ok);
+    return navCard("users", "Who spoke when", note, ok ? `${value} \xB7 ${on}` : value, open2, "speakers", ok);
   }
   function transcribePage(v) {
     const offer = engineRows(v, "Transcribe");
@@ -3795,20 +3894,29 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       if (p.status === "installing" || p.status === "removing") return [grp("Download"), ...offer];
       return [grp("Download"), ...offer];
     }
-    const out = [grp("Parts")];
-    const add = (part, mb) => el("button", { class: "chip off", title: `Add \xB7 \u2248${mb} MB`, disabled: p.status !== "ready", onclick: () => post({ type: "installSpeech", parts: [part] }) }, `+ ${PART_NAMES[part]}`);
+    const out = [grp("On this computer")];
+    const busy3 = p.status !== "ready";
+    const here = (text) => el("small", { class: "ok" }, text);
+    const speakersOnCard2 = p.speakersOn === "cuda";
     out.push(
-      card(
-        "download",
-        "Parts",
-        [p.nvidia && !hasPart(v, "gpu") || !hasPart(v, "speakers") ? "downloaded once \xB7 tap one to add it" : "all downloaded, once"],
-        el(
-          "span",
-          { class: "chips" },
-          ...p.parts.map((part) => chip(PART_NAMES[part])),
-          p.nvidia && !hasPart(v, "gpu") ? add("gpu", sp.download.gpu) : null,
-          !hasPart(v, "speakers") ? add("speakers", sp.download.speakers) : null
-        )
+      card("mic", "Speech to text", [here(`Installed \xB7 \u2248${size(sp.installed.core)}`), "Whisper and Parakeet on the processor: Dictate and Transcribe"], null),
+      p.nvidia ? card(
+        "monitor",
+        "The graphics card\u2019s part",
+        [
+          hasPart(v, "gpu") ? here(speakersOnCard2 ? "Installed \xB7 inside the speakers\u2019 PyTorch" : `Installed \xB7 \u2248${size(sp.installed.gpu)}`) : `Not installed \xB7 \u2248${size(sp.download.gpu)} download`,
+          "speech on the NVIDIA card, several times quicker"
+        ],
+        hasPart(v, "gpu") ? null : Object.assign(btn("Add", () => post({ type: "installSpeech", parts: ["gpu"] })), { disabled: busy3 })
+      ) : null,
+      navCard(
+        "users",
+        "Who spoke when",
+        sp.speakers.model ? "PyTorch and pyannote \xB7 the voices\u2019 model is here already" : "PyTorch and pyannote \xB7 the voices\u2019 model comes with a free Hugging Face key",
+        hasPart(v, "speakers") ? `Installed \xB7 ${DEVICE_NAMES[p.speakersOn ?? "cpu"]}` : `Not installed \xB7 \u2248${size(sp.speakers.sizes[sp.speakers.on].download)}`,
+        () => openSub("speakers"),
+        "speakers",
+        hasPart(v, "speakers")
       ),
       ...engineRows(v, ""),
       card("monitor", "Graphics card", [cardNote(v)], null),
@@ -4075,7 +4183,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     view: () => view,
     shown: () => open?.name === "transcripts",
     show: () => openPage("transcripts"),
-    setup: () => openPage("transcribe")
+    setup: () => (openPage("transcribe"), openSub("speakers"))
   });
   post({ type: "appReady" });
 })();

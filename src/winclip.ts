@@ -42,6 +42,7 @@ const VK_LWIN = 0x5b
 const VK_RWIN = 0x5c
 const VK_C = 0x43
 const VK_V = 0x56
+const VK_L = 0x4c
 const VK_RETURN = 0x0d
 const MODIFIERS = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN]
 
@@ -82,6 +83,25 @@ async function letGo(keys: readonly number[], maxWaitMs: number): Promise<void> 
  */
 export function keysLetGo(maxWaitMs = 1500): Promise<void> {
   return letGo([VK_RETURN, ...MODIFIERS], maxWaitMs)
+}
+
+/** Ctrl+L in the program in front: a browser's address bar, its text selected. */
+export async function pressAddressBar(maxWaitMs = 1500): Promise<void> {
+  await pressWithCtrl(VK_L, maxWaitMs)
+}
+
+/** Enter in the program in front. */
+export function pressEnter(): void {
+  keybd_event(VK_RETURN, 0, 0, MAIN_KEYS)
+  keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
+}
+
+const AllowSetForegroundWindow = user32.func('bool __stdcall AllowSetForegroundWindow(uint32_t pid)')
+const ASFW_ANY = 0xffffffff
+
+/** Lets any program come to the front next (Windows lets the program in front allow it): a Chrome that runs already, say. */
+export function allowForeground(): void {
+  AllowSetForegroundWindow(ASFW_ANY)
 }
 
 async function pressWithCtrl(vk: number, maxWaitMs: number): Promise<void> {

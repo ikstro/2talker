@@ -110,6 +110,23 @@ async function appShots(theme: 'dark' | 'light', wide = false): Promise<void> {
     send(w, { type: 'app', view: appView({ paused: true }) })
     await sleep(500)
     await shot(w, tag('home-paused'))
+    // Chrome holds an older copy of the extension than Altype's folder.
+    const stale = appView()
+    stale.speech = { ...stale.speech, extensionShipped: '0.2.1' }
+    send(w, { type: 'app', view: stale })
+    await sleep(300)
+    await page('.act[data-page="transcribe"]', 'transcribe-stale', ['meet'])
+    // Who spoke when installed on the card; then the processor picked, so it offers to switch.
+    const card = appView()
+    card.speech = { ...card.speech, pack: { status: 'ready', parts: ['core', 'gpu', 'speakers'], nvidia: true, speakersOn: 'cuda' }, health: { ...card.speech.health!, diarization: 'ready', parts: { core: true, gpu: true, speakers: true } } }
+    send(w, { type: 'app', view: card })
+    await sleep(300)
+    await page('.act[data-page="transcribe"]', 'tr-installed', ['speakers'])
+    const cpu = appView({ speakersDevice: 'cpu' })
+    cpu.speech = { ...card.speech, speakers: { ...card.speech.speakers, on: 'cpu' } }
+    send(w, { type: 'app', view: cpu })
+    await sleep(300)
+    await page('.act[data-page="transcribe"]', 'tr-switch', ['speakers'])
   } else {
     await page('.act[data-page="transcribe"]', 'transcribe', ['vocabulary'])
     await page('.act[data-page="keyboard"]', 'keyboard', ['layouts'])
@@ -129,6 +146,9 @@ async function setupShots(theme: 'dark' | 'light'): Promise<void> {
   for (let step = 1; step <= 4; step++) {
     await shot(w, `setup-${theme}-${step}`)
     if (step === 3) {
+      await js(w, `document.querySelector('.sbody').scrollTop = 640, 'ok'`)
+      await sleep(200)
+      await shot(w, `setup-${theme}-3-speakers`)
       await js(w, `document.querySelector('.sbody').scrollTop = 1e5, 'ok'`)
       await sleep(200)
       await shot(w, `setup-${theme}-3-bottom`)

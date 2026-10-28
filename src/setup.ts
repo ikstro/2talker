@@ -17,6 +17,8 @@ export type Choice = {
   dictate: boolean
   transcribe: boolean
   speakers: boolean
+  /** Where who spoke when runs: the graphics card (PyTorch for it, large) or the processor (small, slow). */
+  speakersOn: 'cuda' | 'cpu'
   startWithWindows: boolean
   /** Run the speed test once the models are here. */
   test: boolean
@@ -56,9 +58,10 @@ export function recommend(v: AppView): Recommendation {
       chosen.fits && !rough
         ? { on: true, why: `${chosen.label}: an hour of a meeting in ≈${hourCpu} on this computer${plan.offers.gpu ? ', quicker on the graphics card' : ''}` }
         : { on: false, why: `possible, but ${rough ? 'rough' : 'slow'} here: ${chosen.label} writes an hour in ≈${hourCpu}` },
-    speakers: plan.offers.speakersGpu
-      ? { on: true, why: 'who spoke when, told apart on the graphics card · a free Hugging Face key, once' }
-      : { on: false, why: 'on the processor it takes ≈0.8 s per second of sound · a free Hugging Face key, once' },
+    speakers:
+      plan.offers.speakersGpu && plan.speakers.cuda !== undefined
+        ? { on: true, why: `the voices told apart on the graphics card: an hour in ≈${minutes(plan.speakers.cuda)}` }
+        : { on: false, why: `possible, but slow here: on the processor an hour’s voices take ≈${minutes(plan.speakers.cpu)}` },
     startWithWindows: { on: true, why: 'the keys work from the first minute' },
   }
 }
@@ -74,6 +77,7 @@ export function recommendedChoice(v: AppView): Choice {
     dictate: r.dictate.on,
     transcribe: r.transcribe.on,
     speakers: r.speakers.on && r.transcribe.on,
+    speakersOn: v.speech.plan.speakers.advised,
     startWithWindows: true,
     test: true,
   }
@@ -100,6 +104,11 @@ export type Cost = {
 }
 
 const speechNeeded = (c: Choice) => c.dictate || c.transcribe
+
+/** Where the choice's speakers would run: the card only with its part chosen and room on it, else the processor. */
+export function speakersWhere(c: Choice, v: AppView): 'cuda' | 'cpu' {
+  return c.speakersOn === 'cuda' && c.gpu && v.speech.pack.nvidia && v.speech.plan.offers.speakersGpu ? 'cuda' : 'cpu'
+}
 
 /** What a choice costs on this computer, item by item. */
 export function cost(c: Choice, v: AppView): Cost {
@@ -129,8 +138,13 @@ export function cost(c: Choice, v: AppView): Cost {
     const have = new Set(s.pack.parts)
     const wanted: SpeechPart[] = ['core', ...(c.gpu && s.pack.nvidia ? (['gpu'] as SpeechPart[]) : []), ...(c.transcribe && c.speakers ? (['speakers'] as SpeechPart[]) : [])]
     for (const part of wanted) if (!have.has(part)) parts.push(part)
-    const mb = parts.reduce((n, p) => n + s.download[p], 0)
-    const onDisk = parts.reduce((n, p) => n + s.installed[p], 0)
+    // The speakers' PyTorch for the card carries the card's libraries itself: with it, the card's part costs nothing more.
+    const where = speakersWhere(c, v)
+    const cardInside = where === 'cuda' && wanted.includes('speakers')
+    const size = (p: SpeechPart, kind: 'download' | 'installed') =>
+      p === 'speakers' ? s.speakers.sizes[where][kind] : p === 'gpu' && cardInside ? 0 : s[kind][p]
+    const mb = parts.reduce((n, p) => n + size(p, 'download'), 0)
+    const onDisk = parts.reduce((n, p) => n + size(p, 'installed'), 0)
     const names = { core: 'speech to text', gpu: 'the graphics card’s part', speakers: 'the speakers’ part' }
     items.push({ key: 'engine', label: 'The speech engine', note: parts.length ? `${parts.map(p => names[p]).join(', ')} · ${Math.round(onDisk)} MB on the disk` : 'here already', mb })
     disk += onDisk

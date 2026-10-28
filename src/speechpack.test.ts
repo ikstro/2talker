@@ -88,6 +88,44 @@ describe('SpeechPack', () => {
     expect(calls.filter(c => c.args[0] === 'sync').at(-1)!.args.slice(-2)).toEqual(['--extra', 'speakers'])
   })
 
+  it('puts who spoke when where the person chose, and switches it there later', async () => {
+    const { root, engineDir, calls, run } = setup()
+    withUv(root)
+    let onCard = true
+    const pack = new SpeechPack({ root, engineDir, nvidia: true, gpuSpeakers: () => onCard, open: vi.fn(), run, onChange: () => undefined })
+    await pack.install(['gpu', 'speakers'])
+    expect(pack.state.speakersOn).toBe('cuda')
+    expect(calls.filter(c => c.args[0] === 'sync').at(-1)!.args.slice(-2)).toEqual(['--extra', 'speakers-gpu'])
+    // The same parts, now wanted on the processor: the extras change with them.
+    onCard = false
+    await pack.install(['speakers'])
+    expect(pack.state.speakersOn).toBe('cpu')
+    expect(calls.filter(c => c.args[0] === 'sync').at(-1)!.args.slice(-4)).toEqual(['--extra', 'gpu', '--extra', 'speakers'])
+    // An update with nothing asked keeps them as they are.
+    await pack.install([])
+    expect(calls.filter(c => c.args[0] === 'sync').at(-1)!.args.slice(-4)).toEqual(['--extra', 'gpu', '--extra', 'speakers'])
+  })
+
+  it('takes packages from uv’s shared cache when there is one, and leaves that cache in place', async () => {
+    const { root, engineDir, calls, run } = setup()
+    withUv(root)
+    const shared = fs.mkdtempSync(path.join(os.tmpdir(), 'uvcache-'))
+    dirs.push(shared)
+    fs.writeFileSync(path.join(shared, 'kept'), 'x')
+    const pack = new SpeechPack({ root, engineDir, nvidia: false, sharedCache: shared, open: vi.fn(), run, onChange: () => undefined })
+    await pack.install(['core'])
+    expect(calls.find(c => c.args[0] === 'sync')!.env.UV_CACHE_DIR).toBe(shared)
+    expect(fs.existsSync(path.join(shared, 'kept'))).toBe(true)
+  })
+
+  it('uses its own cache when the shared one is not there', async () => {
+    const { root, engineDir, calls, run } = setup()
+    withUv(root)
+    const pack = new SpeechPack({ root, engineDir, nvidia: false, sharedCache: path.join(root, 'no-such-cache'), open: vi.fn(), run, onChange: () => undefined })
+    await pack.install(['core'])
+    expect(calls.find(c => c.args[0] === 'sync')!.env.UV_CACHE_DIR).toBe(path.join(root, 'cache'))
+  })
+
   it('is stale after an update brings another lock', async () => {
     const { root, engineDir, run } = setup()
     withUv(root)

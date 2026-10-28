@@ -1806,7 +1806,8 @@ button.chip:hover {
   gap: 6px;
 }
 
-.row .l small.kstate.ok {
+.row .l small.kstate.ok,
+.row .l small.ok {
   color: var(--green);
 }
 

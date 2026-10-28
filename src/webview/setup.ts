@@ -9,7 +9,7 @@ import { cardText, mainCard, shortCpu } from '../hardware'
 import { LANGUAGES } from '../languages'
 import type { AppView, ToHost } from '../protocol'
 import type { Settings } from '../settings'
-import { cost, recommend, recommendedChoice, sizeText, type Advice, type Choice, type Item } from '../setup'
+import { cost, recommend, recommendedChoice, sizeText, speakersWhere, type Advice, type Choice, type Item } from '../setup'
 import { minutes, seconds } from '../speechplan'
 import { el } from './dom'
 import { lucide, type LucideName } from './lucide'
@@ -225,13 +225,42 @@ function needStep(v: AppView, h: SetupHooks, c: Choice, r: ReturnType<typeof rec
     grp('Speech'),
     advised(toggleCard('mic', 'Dictate', c.dictate, flip('dictate'), `${r.dictate.why} · the speech engine ${sizeText(engineMb)} + ${dictateModel.label} ${dictateModel.downloaded ? 'here' : sizeText(dictateModel.mb)}`), r.dictate),
     advised(toggleCard('audio-lines', 'Transcribe meetings and files', c.transcribe, flip('transcribe'), `${r.transcribe.why} · ${transcribeModel.label} ${transcribeModel.downloaded ? 'here' : sizeText(transcribeModel.mb)}${c.dictate ? '' : ` + the speech engine ${sizeText(engineMb)}`}`), r.transcribe),
-    c.transcribe ? advised(toggleCard('users', 'Who spoke when', c.speakers, flip('speakers'), `${r.speakers.why} · ${sizeText(s.download.speakers)}`), r.speakers) : null,
+    c.transcribe ? advised(toggleCard('users', 'Who spoke when', c.speakers, flip('speakers'), `${r.speakers.why} · ${sizeText(s.speakers.sizes[speakersWhere(c, v)].download)}`), r.speakers) : null,
+    c.transcribe && c.speakers ? speakersOnCard(v, h, c) : null,
     grp('Altype'),
     advised(toggleCard('power', 'Start with Windows', c.startWithWindows, flip('startWithWindows'), r.startWithWindows.why), r.startWithWindows),
     grp('All of it'),
     total,
     aside('info', 'Keys are set on each action’s page; everything here can be changed later in Settings.'),
   ].filter((n): n is HTMLElement => n !== null)
+}
+
+/** Where who spoke when runs: the card (large, quick) or the processor (small, slow); the card only when it can. */
+function speakersOnCard(v: AppView, h: SetupHooks, c: Choice): HTMLElement {
+  const s = v.speech
+  const where = speakersWhere(c, v)
+  const time = (on: 'cuda' | 'cpu') => s.plan.speakers[on]
+  const canCard = s.plan.offers.speakersGpu && c.gpu && s.pack.nvidia && time('cuda') !== undefined
+  const note = `an hour’s voices in ≈${minutes(time(where) ?? s.plan.speakers.cpu)} here`
+  if (!canCard) return card('cpu', 'Runs on the processor', [note], null)
+  const advice = s.plan.speakers.advised === 'cuda' ? 'the graphics card' : 'the processor'
+  const node = card(
+    'cpu',
+    'Runs on',
+    [note, where === s.plan.speakers.advised ? null : `${advice} is advised on this computer`],
+    seg<'cuda' | 'cpu'>(
+      where,
+      [
+        ['cuda', `Graphics card · ${sizeText(s.speakers.sizes.cuda.download)}`],
+        ['cpu', `Processor · ${sizeText(s.speakers.sizes.cpu.download)}`],
+      ],
+      on => {
+        c.speakersOn = on
+        h.redraw()
+      },
+    ),
+  )
+  return where === s.plan.speakers.advised ? advised(node, { on: true, why: '' }) : node
 }
 
 /** Download: the settings are saved, every download starts; the fourth step shows them. */
@@ -244,6 +273,8 @@ function start(v: AppView, h: SetupHooks, c: Choice): void {
     layoutBadge: c.layoutBadge,
     startWithWindows: c.startWithWindows,
     speechTestAgreed: c.test,
+    // The advice stays "automatic", so it follows the computer; another choice is kept as made.
+    speakersDevice: speakersWhere(c, v) === v.speech.plan.speakers.advised ? 'auto' : speakersWhere(c, v),
   })
   const t = v.translatorState.status
   if (t === 'absent' || t === 'failed') h.post({ type: 'prepareTranslator' })

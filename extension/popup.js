@@ -64,7 +64,7 @@ async function render(error) {
   }
   error ??= status.lastError
   if (error) children.push(el('div', { class: 'error' }, error))
-  main.replaceChildren(...children)
+  main.replaceChildren(...children.filter(c => c !== null && c !== undefined && c !== false))
 }
 
 async function act(type, tab) {

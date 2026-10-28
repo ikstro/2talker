@@ -116,9 +116,20 @@ export type SpeechView = {
   port: number
   /** The Chrome extension's folder, for Load unpacked. */
   extensionDir: string
+  /** The extension's version in that folder: Chrome runs an older copy until Reload. */
+  extensionShipped: string
   download: { core: number; gpu: number; speakers: number }
   /** What each choice takes on the disk once installed, in MB. */
   installed: { core: number; gpu: number; speakers: number }
+  /**
+   * Who spoke when: where it runs (the person's choice, else the advice), each way's download and disk in MB,
+   * and whether the voices' model itself is on the disk already (then no Hugging Face key is asked).
+   */
+  speakers: {
+    on: 'cuda' | 'cpu'
+    sizes: Record<'cuda' | 'cpu', { download: number; installed: number }>
+    model: boolean
+  }
   /** The model dictation downloads at its first use (0 MB: it is here), on the processor or on the card, and its time for a phrase. */
   firstModel: { cpu: { model: string; mb: number; phrase: number }; cuda: { model: string; mb: number; phrase: number } }
   /** Free space where the engine goes. */
@@ -326,7 +337,7 @@ export type HostCall =
   /** Save a transcript: a Save dialog, then the engine writes the file. */
   | { call: 'exportTranscript'; id: string; format: string; name: string }
   | { call: 'copy'; text: string }
-  /** Open a page of Chrome's own (chrome://extensions/ or its shortcuts), which a link cannot; answers whether Chrome was started. */
+  /** Open a page of Chrome's own (the extensions, their keys, one extension's card), which a link cannot: answers chrome.ts `ChromeOpened` (typed, opened, missing, refused). */
   | { call: 'openChrome'; url: string }
 
 /** What every page has as `window.tutorHost` (preload.ts). */

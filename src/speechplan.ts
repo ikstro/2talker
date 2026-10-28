@@ -119,6 +119,8 @@ export type SpeechPlan = {
   engine: EnginePlan
   /** Worth offering: the graphics card's part (an NVIDIA card that can take Whisper), and speakers on it. */
   offers: { gpu: boolean; speakersGpu: boolean }
+  /** Minutes to tell an hour's speakers apart here, on the processor and (when offered) on the card; where it is advised. */
+  speakers: { cpu: number; cuda?: number; advised: Device }
   threads: number
 }
 
@@ -188,10 +190,14 @@ function speed(m: CatalogModel, device: Device, compute: string, field: 'phrase'
   return { value: m[device][field] * factor, basis: 'guess' }
 }
 
-function speakersRtf(input: PlanInput): number {
-  const device: Device = input.speakersCuda && input.cuda ? 'cuda' : 'cpu'
+/** Seconds per second of sound to tell the speakers apart on a device: measured here, else the catalog's guess scaled to this computer. */
+function speakersRtfOn(input: PlanInput, device: Device): number {
   const measured = measuredValue(input.bench, `speakers|${device}`, 'rtf')
   return measured ?? SPEAKERS[device].rtf * (device === 'cpu' ? cpuFactor(input.profile) : cudaFactor(input.profile))
+}
+
+function speakersRtf(input: PlanInput): number {
+  return speakersRtfOn(input, input.speakersCuda && input.cuda ? 'cuda' : 'cpu')
 }
 
 function choice(m: CatalogModel, feature: Feature, device: Device, input: PlanInput): Choice {
@@ -288,6 +294,11 @@ export function planSpeech(input: PlanInput): SpeechPlan {
       ...(cuda ? { cuda: { dictation: entryOf('dictation', cuda.dictation, input), transcripts: entryOf('transcripts', cuda.transcripts, input) } } : {}),
     },
     offers,
+    speakers: {
+      cpu: Math.round(60 * speakersRtfOn(input, 'cpu')),
+      ...(offers.speakersGpu ? { cuda: Math.max(1, Math.round(60 * speakersRtfOn(input, 'cuda'))) } : {}),
+      advised: offers.speakersGpu ? 'cuda' : 'cpu',
+    },
     threads,
   }
 }

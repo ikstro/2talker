@@ -42,6 +42,8 @@ export type SpeechPackState = {
   message?: string
   /** The system has an NVIDIA card, so the gpu part is worth offering. */
   nvidia: boolean
+  /** Where the installed speakers part runs: PyTorch for the card or for the processor. */
+  speakersOn?: 'cuda' | 'cpu'
 }
 
 /**
@@ -56,6 +58,12 @@ export function extrasFor(parts: SpeechPart[], gpuSpeakers = true): string[] {
     return gpuSpeakers ? ['speakers-gpu'] : ['gpu', 'speakers']
   }
   return set.has('gpu') ? ['gpu'] : []
+}
+
+/** Where these extras run the speakers: the card, the processor, or nowhere. */
+export function speakersOf(extras: readonly string[]): 'cuda' | 'cpu' | undefined {
+  if (extras.includes('speakers-gpu')) return 'cuda'
+  return extras.includes('speakers') ? 'cpu' : undefined
 }
 
 function sizeOf(table: typeof DOWNLOAD_MB, parts: SpeechPart[], gpuSpeakers: boolean): number {
@@ -94,6 +102,11 @@ export type SpeechPackOptions = {
   /** Speakers go on the card too (it has the memory for both models); else Whisper alone does. */
   gpuSpeakers?: () => boolean
   open: (url: string) => Promise<AsyncIterable<Uint8Array>>
+  /**
+   * uv's own download cache on this computer (another program's, or a developer's), when there is one: the
+   * packages already in it are not downloaded again, and it is left as it is after an install.
+   */
+  sharedCache?: string
   run?: Run
   onChange: () => void
 }
@@ -113,9 +126,12 @@ export class SpeechPack {
   }
 
   get state(): SpeechPackState {
+    const m = this.marker()
+    const on = m?.parts.includes('speakers') ? (m.extras ? speakersOf(m.extras) : undefined) ?? 'cpu' : undefined
     return {
       status: this.status,
-      parts: this.marker()?.parts ?? [],
+      parts: m?.parts ?? [],
+      ...(on ? { speakersOn: on } : {}),
       ...(this.installing ? { installing: this.installing } : {}),
       ...(this.step ? { step: this.step, progress: this.progress } : {}),
       ...(this.message ? { message: this.message } : {}),
@@ -175,6 +191,7 @@ export class SpeechPack {
       this.set('installing', 'packages', 0)
       await this.sync(parts)
       fs.writeFileSync(path.join(this.o.root, 'installed.json'), JSON.stringify({ parts, lock: this.lockHash(), extras: this.extras(parts) } satisfies Marker))
+      // Only Altype's own cache goes; a shared one stays as its owner keeps it.
       fs.rmSync(path.join(this.o.root, 'cache'), { recursive: true, force: true })
       this.installing = undefined
       this.set(this.marker() ? 'ready' : 'failed', undefined, 1)
@@ -217,28 +234,39 @@ export class SpeechPack {
     fs.rmSync(zip, { force: true })
   }
 
-  /** The extras for these parts: as installed before when the parts are the same (an update keeps them), else as this card can take. */
+  /**
+   * The extras for these parts: as installed before when the parts are the same (an update keeps them),
+   * unless the speakers are now wanted elsewhere (card or processor); else as this card can take.
+   */
   private extras(parts: SpeechPart[]): string[] {
     const m = this.marker()
-    if (m?.extras && m.parts.join() === parts.join()) return m.extras
-    return extrasFor(parts, this.o.gpuSpeakers?.() ?? true)
+    const wanted = extrasFor(parts, this.o.gpuSpeakers?.() ?? true)
+    if (m?.extras && m.parts.join() === parts.join() && speakersOf(m.extras) === speakersOf(wanted)) return m.extras
+    return wanted
   }
 
   private async sync(parts: SpeechPart[]): Promise<void> {
     const root = this.o.root
-    const cache = path.join(root, 'cache')
+    const shared = this.o.sharedCache && fs.existsSync(this.o.sharedCache) ? this.o.sharedCache : undefined
+    const cache = shared ?? path.join(root, 'cache')
+    const env = path.join(root, 'env')
     const extras = this.extras(parts)
     const args = ['sync', '--frozen', '--no-dev', '--project', this.o.engineDir, '--python', '3.12', ...extras.flatMap(e => ['--extra', e])]
     const job = this.runner(this.uvExe, args, {
-      UV_PROJECT_ENVIRONMENT: path.join(root, 'env'),
+      UV_PROJECT_ENVIRONMENT: env,
       UV_PYTHON_INSTALL_DIR: path.join(root, 'python'),
       UV_CACHE_DIR: cache,
       UV_PYTHON_PREFERENCE: 'only-managed',
       UV_NO_PROGRESS: '1',
     })
-    // uv shows no numbers when nobody watches it; the download cache growing against the expected size does.
-    const expected = downloadMb(parts, !extras.includes('speakers') || extras.includes('speakers-gpu')) * 1e6
-    const timer = setInterval(() => this.tick(Math.min(0.97, folderBytes(cache) / expected)), 1500)
+    // uv shows no numbers when nobody watches it; the download cache growing against the expected size does,
+    // or, with a shared cache that is big already, the environment growing towards its installed size.
+    const onCard = !extras.includes('speakers') || extras.includes('speakers-gpu')
+    const expected = downloadMb(parts, onCard) * 1e6
+    const before = shared ? folderBytes(env) : 0
+    const target = installedMb(parts, onCard) * 1e6
+    const done = () => (shared ? (folderBytes(env) - before) / Math.max(target - before, 1e8) : folderBytes(cache) / expected)
+    const timer = setInterval(() => this.tick(Math.max(0, Math.min(0.97, done()))), 1500)
     try {
       const code = await job.exit
       if (code !== 0) throw new Error(`Installing the speech engine failed (${code}): ${job.output().trim().split('\n').slice(-3).join(' ')}`)

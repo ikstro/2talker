@@ -45,8 +45,10 @@ function view(profile: DeviceProfile, over: Partial<AppView> = {}): AppView {
       service: 'off',
       port: 8765,
       extensionDir: '',
+      extensionShipped: '0.2.1',
       download: { core: 160, gpu: 1150, speakers: plan.offers.speakersGpu ? 3000 : 250 },
       installed: { core: 330, gpu: 1700, speakers: plan.offers.speakersGpu ? 4000 : 900 },
+      speakers: { on: plan.speakers.advised, sizes: { cuda: { download: 3000, installed: 4000 }, cpu: { download: 250, installed: 900 } }, model: false },
       firstModel: { cpu: { model: 'Parakeet', mb: 670, phrase: 0.3 }, cuda: { model: 'Whisper turbo', mb: 1600, phrase: 0.5 } },
       disk: { freeMb: 120_000, drive: 'C:' },
       device: profile,
@@ -118,6 +120,25 @@ describe('cost', () => {
     const light = cost({ ...recommendedChoice(v), dictate: false, transcribe: false, speakers: false }, v)
     expect(light.parts).toEqual([])
     expect(light.fits).toBe(true)
+  })
+
+  it('who spoke when on the card carries the card’s part; on the processor it is small', () => {
+    const v = view(i9)
+    const engine = (c: ReturnType<typeof cost>) => c.items.find(i => i.key === 'engine')?.mb
+    const onCard = cost({ ...recommendedChoice(v), speakersOn: 'cuda' }, v)
+    expect(engine(onCard)).toBe(160 + 3000)
+    const onCpu = cost({ ...recommendedChoice(v), speakersOn: 'cpu' }, v)
+    expect(engine(onCpu)).toBe(160 + 1150 + 250)
+    expect(onCpu.parts).toEqual(['core', 'gpu', 'speakers'])
+    // Without the card's part, the card cannot run them: the processor's size.
+    expect(engine(cost({ ...recommendedChoice(v), gpu: false, speakersOn: 'cuda' }, v))).toBe(160 + 250)
+  })
+
+  it('advises the card for the voices on the i9, with the minutes for each way', () => {
+    const v = view(i9)
+    expect(recommendedChoice(v).speakersOn).toBe('cuda')
+    expect(v.speech.plan.speakers.cuda).toBeLessThan(5)
+    expect(v.speech.plan.speakers.cpu).toBeGreaterThan(30)
   })
 
   it('parts already installed and a ready translator cost nothing', () => {
