@@ -16,6 +16,7 @@ import { BrowserWindow, globalShortcut, screen, shell } from 'electron'
 
 import type { DictationLog } from './dictationlog'
 import { frameWindow, WIN11 } from './dwm'
+import { log } from './log'
 import { badgeOffset, placeBadge, type Rect } from './placement'
 import type { DictationMode, ToHost, ToView } from './protocol'
 import type { Settings } from './settings'
@@ -107,8 +108,10 @@ export class Dictation {
     if (this.state !== 'recording') return
     const badge = this.window()
     this.height = BADGE.min
-    badge.setBounds(placeBadge(this.o.offset(), { width: BADGE.width, height: this.height }, area))
+    const place = placeBadge(this.o.offset(), { width: BADGE.width, height: this.height }, area)
+    badge.setBounds(place)
     badge.showInactive()
+    log(`badge: shown at ${JSON.stringify(badge.getBounds())} (asked ${JSON.stringify(place)}, area ${JSON.stringify(area)}, offset ${JSON.stringify(this.o.offset())}), visible ${badge.isVisible()}, session ${session ? 'yes' : 'no'}`)
     this.send({ type: 'dictation', command: 'start', mode, key, ...(session ? { session } : {}), expected })
     globalShortcut.register('Escape', () => this.cancel())
   }
@@ -283,7 +286,11 @@ export class Dictation {
       this.badge = undefined
       this.badgeReady = false
     })
+    b.on('hide', () => log(`badge: hidden, state ${this.state}`))
+    b.webContents.on('did-fail-load', (_event, code, description) => log(`badge: the page did not load: ${code} ${description}`))
+    b.webContents.on('console-message', m => log(`badge page: ${m.message} (${m.sourceId}:${m.lineNumber})`))
     void b.loadFile(this.o.page, WIN11 ? { query: { frame: 'dwm' } } : undefined)
+    log(`badge: window made, page ${this.o.page}`)
     this.badge = b
     return b
   }
@@ -322,6 +329,7 @@ export class Dictation {
     const area = screen.getDisplayMatching(now).workArea
     const y = Math.max(area.y, now.y + now.height - height)
     b.setBounds({ x: now.x, y, width: BADGE.width, height })
+    log(`badge: page ${px} px → ${JSON.stringify(b.getBounds())} from ${JSON.stringify(now)}, visible ${b.isVisible()}`)
   }
 
   /** The person dropped the badge: the place is kept from that screen's bottom centre, for every screen. */

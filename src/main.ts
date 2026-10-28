@@ -48,6 +48,7 @@ import { loadVoiceSpeed, nextVoiceSpeed, saveVoiceSpeed, type VoiceSpeed } from 
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { lookup, type Dictionary } from './lemma'
+import { log, logTo } from './log'
 import { systemVoiceName, type NaturalState } from './natural'
 import { recognize } from './ocr'
 import { adoptOldFolders } from './oldfolder'
@@ -1555,6 +1556,14 @@ async function hostCall(request: HostCall): Promise<unknown> {
 
 function start(): void {
   adoptOldFolder()
+  // altype.log beside the settings: the warnings, and what the windows did.
+  logTo(userDir())
+  const warn = console.warn.bind(console)
+  console.warn = (...parts: unknown[]) => {
+    warn(...parts)
+    log(`warn: ${parts.map(p => (p instanceof Error ? (p.stack ?? p.message) : String(p))).join(' ')}`)
+  }
+  log(`start: Altype ${app.getVersion()}, Electron ${process.versions.electron}, Windows ${process.getSystemVersion()}${TEST_HOME ? ', test home' : ''}`)
   const firstRun = !fs.existsSync(settingsFile())
   settings = readSettings()
   if (firstRun) saveSettings({})
