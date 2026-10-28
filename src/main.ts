@@ -14,6 +14,8 @@
 // The app window (media/app.html) holds the notebook of saved words, the
 // settings and how to use; the tray menu has the quick switches. The keyboard
 // helper (keyboard.ts, kbd-worker.ts) switches and fixes layouts as one types.
+// The speech engine (speechhost.ts: Python, installed in parts when first
+// wanted) serves Dictate (dictation.ts), Transcribe and the Chrome extension.
 //
 // %APPDATA%\Altype\ (moved over from 2Talker's or tu-talk's folder, once)
 //   settings.json   see settings.ts
@@ -21,6 +23,8 @@
 //   voice\          the natural voice, downloaded on request
 //   dict\           word dictionaries for languages other than Russian
 //   models\         the translator's models, one folder per language pair
+//   speech.json     the speech engine's settings (engine/settings.py), speech.log
+// %LOCALAPPDATA%\Altype\speech\   the speech engine's Python, packages and models
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -30,6 +34,7 @@ import { execFile } from 'node:child_process'
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
 
 import { DoubleCopy } from './clipboard'
+import { Dictation } from './dictation'
 import { DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { createTranslator, NATIVES } from './engine'
@@ -43,10 +48,12 @@ import { recognize } from './ocr'
 import { adoptOldFolders } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
-import type { AppTab, AppView, CardKind, CardState, GlossMissing, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
+import type { AppTab, AppView, CardKind, CardState, DictationMode, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, translationHtml } from './render'
 import { CARD_WIDTH, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
+import { SpeechHost } from './speechhost'
+import { SPEECH_PORT } from './speechservice'
 import { NaturalSpeaker } from './synth'
 import { englishReady, languageOf, splitText, targetFor, translateLines, translatePlain, type LanguageWords } from './translate'
 import type { Translator } from './translator'
@@ -93,7 +100,28 @@ const DOUBLE_COPY = 'Control+C*2'
 /** The settings that are keys of actions. */
 const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'switchKey', 'fixKey']
 /** The links the About tab may open. */
-const LINKS = new Set(['https://ikstro.com', 'https://github.com/ikstro/2talker', 'https://github.com/ikstro/2talker/releases', 'https://github.com/ikstro/2talker/blob/main/NOTICE'])
+const LINKS = new Set([
+  'https://ikstro.com',
+  'https://github.com/ikstro/2talker',
+  'https://github.com/ikstro/2talker/releases',
+  'https://github.com/ikstro/2talker/blob/main/NOTICE',
+  // The steps to the speakers' model: an account, the model's terms, a Read token.
+  'https://huggingface.co/join',
+  'https://huggingface.co/pyannote/speaker-diarization-community-1',
+  'https://huggingface.co/settings/tokens',
+])
+
+/** The settings that are Dictate's keys: registered only once the speech engine is installed. */
+const DICTATION_KEYS: readonly (keyof Settings)[] = ['dictateKey', 'englishKey', 'noteKey']
+
+// One Altype at a time, whichever folder it keeps its things in: the lock is taken on Altype's own
+// folder first, before a test run moves to its own. A second copy (another start, `npm start`, a test
+// run) hands its arguments to the first and quits; the first opens its window.
+const theOnlyOne = app.requestSingleInstanceLock()
+// A test run (ALTYPE_TEST_HOME) keeps to its own folders and port; the installed Altype is quit first.
+const TEST_HOME = process.env.ALTYPE_TEST_HOME
+if (TEST_HOME) app.setPath('userData', TEST_HOME)
+const speechPort = TEST_HOME ? Number(process.env.ALTYPE_TEST_PORT) || 8797 : SPEECH_PORT
 
 const userDir = () => app.getPath('userData')
 const settingsFile = () => path.join(userDir(), 'settings.json')
@@ -125,6 +153,11 @@ let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
 let keysOk = { snip: true, select: true, translate: true, text: true }
+let speechKeysOk = { dictate: true, note: true, english: true }
+let speech: SpeechHost
+let dictation: Dictation
+/** What a click on the tray's balloon does, for the balloon shown last. */
+let balloonClick: (() => void) | undefined
 let keyboard: KeyboardHelper
 let keyboardTrouble: string | undefined
 let lastApp: string | undefined
@@ -149,6 +182,8 @@ let resizeFrom: Rectangle | undefined
 let contentHeight = 160
 /** The tab the app window opens on, once its page is ready. */
 let pendingTab: AppTab | undefined
+/** The transcript it shows then (a note left in Transcripts, from its balloon). */
+let pendingTranscript: string | undefined
 let words: WordStore
 let updater: Updater
 /** The most common English words, for the card's dotted lines; read once. */
@@ -183,8 +218,8 @@ function saveSettings(patch: Partial<Settings>): void {
   }
   if ('startWithWindows' in patch) applyLoginItem()
   // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
-  if (ACTION_KEYS.some(k => k in patch)) registerShortcuts()
-  if ([...ACTION_KEYS, 'layouts', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
+  if ([...ACTION_KEYS, ...DICTATION_KEYS].some(k => k in patch)) registerShortcuts()
+  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
   if ('theme' in patch) applyTheme()
   refreshTray()
   if (shown) postCard()
@@ -428,6 +463,7 @@ function appView(): AppView {
     rivals,
     keyboardApps,
     foreignKeys,
+    speech: speech.view(speechKeysOk),
   }
 }
 
@@ -488,6 +524,13 @@ function openApp(tab?: AppTab): void {
   if (appWin.isMinimized()) appWin.restore()
   appWin.show()
   appWin.focus()
+}
+
+/** The app window on one transcript. */
+function openTranscript(id: string): void {
+  openApp('transcripts')
+  if (appReady) appWin?.webContents.send('to-view', { type: 'openTranscript', id } satisfies ToView)
+  else pendingTranscript = id
 }
 
 function postCard(): void {
@@ -551,7 +594,26 @@ function setCardHeight(px: number): void {
 }
 
 function onMessage(message: ToHost): void {
+  if (dictation?.onMessage(message)) return
   switch (message.type) {
+    case 'installSpeech':
+      speech.install(message.parts).then(
+        () => (registerShortcuts(), applyKeyboard()),
+        error => console.warn('Altype: the speech engine did not install', error),
+      )
+      return
+    case 'removeSpeech':
+      void speech.remove().then(() => (registerShortcuts(), applyKeyboard()))
+      return
+    case 'restartSpeech':
+      speech.restart()
+      return
+    case 'showInFolder':
+      shell.showItemInFolder(message.path)
+      return
+    case 'openPath':
+      void shell.openPath(message.path)
+      return
     case 'ready':
       cardReady = true
       postCard()
@@ -620,7 +682,9 @@ function onMessage(message: ToHost): void {
       appReady = true
       postApp()
       if (pendingTab) appWin?.webContents.send('to-view', { type: 'appTab', tab: pendingTab } satisfies ToView)
+      if (pendingTranscript) appWin?.webContents.send('to-view', { type: 'openTranscript', id: pendingTranscript } satisfies ToView)
       pendingTab = undefined
+      pendingTranscript = undefined
       return
     case 'saveSettings':
       saveSettings(message.patch)
@@ -930,11 +994,21 @@ function registerShortcuts(): void {
     translate: register(settings.translateKey, () => selection('translate', settings.translateKey)),
     text: register(settings.textKey, () => snip('translate', settings.textKey)),
   }
+  // Dictate's keys mean nothing before the engine is there; then each starts and stops a phrase.
+  const dictate = (mode: DictationMode, key: string) => (speech?.installed ? register(key, () => dictation.press(mode, key)) : true)
+  speechKeysOk = {
+    dictate: dictate('type', settings.dictateKey),
+    english: dictate('english', settings.englishKey),
+    note: dictate('note', settings.noteKey),
+  }
   const taken = [
     !keysOk.snip && settings.snipKey,
     !keysOk.select && settings.selectKey,
     !keysOk.translate && settings.translateKey,
     !keysOk.text && settings.textKey,
+    !speechKeysOk.dictate && settings.dictateKey,
+    !speechKeysOk.english && settings.englishKey,
+    !speechKeysOk.note && settings.noteKey,
   ].filter((k): k is string => !!k)
   // The settings window shows the trouble itself; the balloon is for a start without it.
   if (taken.length > 0 && !(appWin?.isVisible() ?? false)) {
@@ -950,7 +1024,8 @@ function registerShortcuts(): void {
 function applyKeyboard(): void {
   keyboardTrouble = undefined
   try {
-    keyboard.apply(settings)
+    // Dictate's keys work only once the engine is installed, here as with Electron's shortcuts.
+    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '' })
   } catch (error) {
     keyboardTrouble = messageOf(error)
   }
@@ -1066,6 +1141,7 @@ function trayView(): TrayView {
   return {
     keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', snipListen: settings.snipKey, snipTranslate: settings.textKey },
     autoFix: settings.autoFix,
+    speech: { installed: speech?.installed ?? false, recording: dictation?.state === 'recording', noteKey: settings.noteKey },
     translator: translator.state(langCode(settings.native)).status,
     native: settings.native,
   }
@@ -1178,6 +1254,13 @@ function runTrayCommand(command: TrayCommand): void {
     case 'translateScreen':
       snip('translate')
       return
+    case 'note':
+      // A note, not typing: the panel took the focus, so there is no cursor to type at.
+      dictation.press('note', settings.noteKey)
+      return
+    case 'transcripts':
+      openApp('transcripts')
+      return
     case 'open':
       openApp()
       return
@@ -1214,6 +1297,82 @@ function runCommand(argv: readonly string[]): boolean {
 
 // ---------------------------------------------------------------- start
 
+// ---------------------------------------------------------------- the speech engine
+
+/** Types a text in the program in front, through the clipboard, which is put back as it was. */
+async function typeText(text: string): Promise<void> {
+  await keysLetGo()
+  const saved = await saveClipboard()
+  await ownClipboard(async () => {
+    await clipboard.writeText(text)
+    await pressPaste()
+  })
+  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+}
+
+function balloon(title: string, content: string, click?: () => void): void {
+  balloonClick = click
+  tray?.displayBalloon({ title, content })
+}
+
+function setUpSpeechEngine(): void {
+  speech = new SpeechHost({
+    root: TEST_HOME ? path.join(TEST_HOME, 'speech') : path.join(process.env.LOCALAPPDATA ?? path.join(app.getPath('appData'), '..', 'Local'), 'Altype', 'speech'),
+    userDir: userDir(),
+    engineDir: unpacked('engine'),
+    extensionDir: unpacked('extension'),
+    port: speechPort,
+    open: url => openStream(url),
+    ...(TEST_HOME ? { testHome: TEST_HOME } : {}),
+    onChange: () => {
+      postApp()
+      refreshTray()
+    },
+  })
+  dictation = new Dictation({
+    page: path.join(app.getAppPath(), 'media', 'dictation.html'),
+    preload: path.join(__dirname, 'preload.js'),
+    background: cardColor,
+    speech,
+    paste: typeText,
+    toEnglish: (text, from) => translatePlain(text, from, 'en', translator.translate),
+    balloon,
+    needsEngine: () => openApp('dictate'),
+    openTranscript,
+    onChange: () => refreshTray(),
+  })
+  speech.start()
+}
+
+/** A page's request with an answer: the speech engine's API, a folder to pick, a transcript to save. */
+async function hostCall(request: HostCall): Promise<unknown> {
+  switch (request.call) {
+    case 'speech':
+      return speech.call(request.method, request.route, request.body)
+    case 'pickFolder': {
+      const options: Electron.OpenDialogOptions = { title: request.title, defaultPath: request.current || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] }
+      const { canceled, filePaths } = appWin ? await dialog.showOpenDialog(appWin, options) : await dialog.showOpenDialog(options)
+      return canceled ? null : (filePaths[0] ?? null)
+    }
+    case 'exportTranscript': {
+      const safe = request.name.replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').trim() || 'Transcript'
+      const options: Electron.SaveDialogOptions = {
+        title: 'Save the transcript',
+        defaultPath: path.join(app.getPath('documents'), `${safe}.${request.format}`),
+        filters: [{ name: request.format.toUpperCase(), extensions: [request.format] }],
+      }
+      const { canceled, filePath } = appWin ? await dialog.showSaveDialog(appWin, options) : await dialog.showSaveDialog(options)
+      if (canceled || !filePath) return null
+      const r = await speech.call('POST', `/transcripts/${request.id}/export`, { format: request.format, path: filePath })
+      if (!r.ok) throw new Error(r.error)
+      return filePath
+    }
+    case 'copy':
+      clipboard.writeText(request.text)
+      return null
+  }
+}
+
 function start(): void {
   adoptOldFolder()
   const firstRun = !fs.existsSync(settingsFile())
@@ -1232,6 +1391,8 @@ function start(): void {
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
   })
   tray = createTray()
+  tray.on('balloon-click', () => balloonClick?.())
+  setUpSpeechEngine()
   // Made now, so the first click on the tray icon opens it at once.
   trayPanel = createTrayPanel()
   refreshTray()
@@ -1240,7 +1401,10 @@ function start(): void {
     keep: word => saveSettings({ keepWords: [...settings.keepWords, word] }),
     selection: cycle => void convertSelection(cycle).catch(error => console.warn('Altype: could not convert the selection', error)),
     hotkey: action => {
-      if (action === 'select') selection('listen', settings.selectKey)
+      if (action === 'dictate') dictation.press('type', settings.dictateKey)
+      else if (action === 'english') dictation.press('english', settings.englishKey)
+      else if (action === 'note') dictation.press('note', settings.noteKey)
+      else if (action === 'select') selection('listen', settings.selectKey)
       else if (action === 'translate') selection('translate', settings.translateKey)
       else if (action === 'text') snip('translate', settings.textKey)
       else snip('listen', settings.snipKey)
@@ -1263,6 +1427,7 @@ function start(): void {
   applyKeyboard()
   card = createCard()
   ipcMain.on('to-host', (_event, message: ToHost) => onMessage(message))
+  ipcMain.handle('host-call', (_event, request: HostCall) => hostCall(request))
   try {
     stopWatching = watchClipboard(card, onClipboardChange)
   } catch (error) {
@@ -1275,7 +1440,7 @@ function start(): void {
   runCommand(process.argv)
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (!theOnlyOne) {
   app.quit()
 } else {
   // The card reads aloud as soon as a translation is in, before anyone touches it.
@@ -1294,6 +1459,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     const steps: [string, () => void][] = [
       ['shortcuts', () => globalShortcut.unregisterAll()],
+      ['speech', () => speech?.dispose()],
+      ['dictation', () => dictation?.dispose()],
       ['updater', () => updater?.dispose()],
       ['clipboard', () => stopWatching?.()],
       ['voice', () => natural?.dispose()],

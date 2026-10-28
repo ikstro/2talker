@@ -1,0 +1,134 @@
+// Altype's meeting recorder, the service worker: starts and stops a recording of
+// a tab. The recording itself lives in the offscreen document (offscreen.js),
+// which outlives this worker; chrome.storage.session remembers which tab it is.
+
+const OFFSCREEN = 'offscreen.html'
+
+async function port() {
+  const { port } = await chrome.storage.local.get('port')
+  return port || 8765
+}
+
+async function engineReady() {
+  try {
+    const r = await fetch(`http://127.0.0.1:${await port()}/health`, { signal: AbortSignal.timeout(1500) })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+async function current() {
+  const { recording } = await chrome.storage.session.get('recording')
+  return recording || null
+}
+
+async function ensureOffscreen() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })
+  if (contexts.length) return
+  await chrome.offscreen.createDocument({
+    url: OFFSCREEN,
+    reasons: ['USER_MEDIA'],
+    justification: 'Records the tab and the microphone for a transcript in Altype',
+  })
+}
+
+async function closeOffscreen() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })
+  if (contexts.length) await chrome.offscreen.closeDocument()
+}
+
+/** "Meet – abc-defg-hij" → "Meeting abc-defg-hij"; "Meet – Weekly sync" → "Weekly sync"; other tabs keep their title. */
+function titleOf(tab) {
+  const title = (tab.title || '').trim()
+  const meet = title.match(/^Meet\s*[–-]\s*(.+)$/)
+  if (!meet) return title || 'Tab recording'
+  return /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(meet[1]) ? `Meeting ${meet[1]}` : meet[1]
+}
+
+async function start(tab) {
+  if (await current()) return { ok: false, error: 'Already recording' }
+  if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) return { ok: false, error: 'This tab cannot be recorded' }
+  if (!(await engineReady())) return { ok: false, error: 'Altype is not running, or its speech engine is off: start it from the Start menu' }
+  let streamId
+  try {
+    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id })
+  } catch (error) {
+    return { ok: false, error: `Chrome did not give the tab's sound: ${error.message}` }
+  }
+  await ensureOffscreen()
+  const answer = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'start', streamId, title: titleOf(tab), port: await port() })
+  if (!answer || !answer.ok) {
+    await closeOffscreen()
+    return answer || { ok: false, error: 'The recording did not start' }
+  }
+  const recording = { tabId: tab.id, id: answer.id, title: titleOf(tab), startedAt: Date.now(), mic: answer.mic }
+  await chrome.storage.session.set({ recording })
+  await chrome.action.setBadgeBackgroundColor({ color: '#e5534b' })
+  await chrome.action.setBadgeText({ text: 'REC' })
+  return { ok: true, recording }
+}
+
+async function stop() {
+  const recording = await current()
+  if (!recording) return { ok: false, error: 'Not recording' }
+  let answer
+  try {
+    answer = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'stop' })
+  } catch (error) {
+    answer = { ok: false, error: error.message }
+  }
+  await chrome.storage.session.remove('recording')
+  await chrome.action.setBadgeText({ text: '' })
+  await closeOffscreen()
+  return answer || { ok: false, error: 'The recording did not stop' }
+}
+
+async function toggle(tab) {
+  return (await current()) ? stop() : start(tab)
+}
+
+/** A shortcut has no popup to answer in: a failure shows as "!" on the icon, and the popup says what. */
+async function remember(answer) {
+  if (answer && !answer.ok) {
+    await chrome.storage.session.set({ lastError: answer.error })
+    await chrome.action.setBadgeBackgroundColor({ color: '#e5534b' })
+    await chrome.action.setBadgeText({ text: '!' })
+  } else {
+    await chrome.storage.session.remove('lastError')
+  }
+  return answer
+}
+
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  if (command !== 'toggle-recording') return
+  try {
+    await remember(await toggle(tab))
+  } catch (error) {
+    await remember({ ok: false, error: error.message || String(error) })
+  }
+})
+
+// The meeting's tab closed: what was recorded goes to the engine.
+chrome.tabs.onRemoved.addListener(async tabId => {
+  const recording = await current()
+  if (recording && recording.tabId === tabId) await stop()
+})
+
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message.target !== 'background') return false
+  ;(async () => {
+    if (message.type === 'status') {
+      const { lastError } = await chrome.storage.session.get('lastError')
+      if (lastError && !(await current())) await chrome.action.setBadgeText({ text: '' })
+      await chrome.storage.session.remove('lastError')
+      return { recording: await current(), engine: await engineReady(), lastError }
+    }
+    if (message.type === 'start') return start(await chrome.tabs.get(message.tabId))
+    if (message.type === 'stop') return stop()
+    // The offscreen document saw the tab's sound end (the tab navigated away, Chrome stopped the capture).
+    if (message.type === 'ended') return stop()
+    return { ok: false, error: 'unknown' }
+  })().then(reply, error => reply({ ok: false, error: String(error) }))
+  return true
+})

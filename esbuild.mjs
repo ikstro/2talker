@@ -64,8 +64,10 @@ const appWindow = { ...card, entryPoints: ['src/webview/app.ts'], outfile: 'medi
 
 /** The tray's panel, in place of Windows' menu. */
 const trayPanel = { ...card, entryPoints: ['src/webview/tray.ts'], outfile: 'media/tray.js' }
+/** Dictate's badge by the pointer. */
+const dictation = { ...card, entryPoints: ['src/webview/dictation.ts'], outfile: 'media/dictation.js' }
 
-const all = [main, preload, voice, translator, keyboard, card, appWindow, trayPanel]
+const all = [main, preload, voice, translator, keyboard, card, appWindow, trayPanel, dictation]
 if (watch) {
   const contexts = await Promise.all(all.map(o => context(o)))
   await Promise.all(contexts.map(c => c.watch()))

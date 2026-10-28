@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="popup.css">
+<title>Altype: microphone</title>
+<style>
+  body { width: auto; max-width: 520px; margin: 48px auto; padding: 0 16px; }
+  h1 { font-size: 20px; color: var(--strong); }
+  button { padding: 0 16px; }
+</style>
+</head>
+<body>
+<h1>Allow the microphone</h1>
+<p>Altype records your voice as a track of its own, so the transcript shows where you spoke and where the others did. The sound never leaves this computer: Altype transcribes it here.</p>
+<p><button id="allow">Allow the microphone</button></p>
+<p id="result" class="muted"></p>
+<script src="permission.js"></script>
+</body>
+</html>

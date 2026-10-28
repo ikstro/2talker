@@ -6,3 +6,6 @@ release/
 .cache/
 *.log
 docs/frames/
+engine/.venv/
+__pycache__/
+.pytest_cache/

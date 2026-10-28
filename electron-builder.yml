@@ -14,6 +14,13 @@ files:
   - "!dist/**/*.map"
   - media/**
   - vendor/**
+  # The speech engine's source (a few hundred KB): Python runs it from disk, from
+  # an environment installed outside the app (src/speechpack.ts). The extension
+  # is a folder Chrome loads unpacked.
+  - engine/*.py
+  - engine/pyproject.toml
+  - engine/uv.lock
+  - extension/**
 # The translator and the voice run as a thread and a process of their own and
 # read the engine from disk: they live outside the archive. So does the
 # keyboard thread, with koffi, which it loads from beside it.
@@ -23,6 +30,8 @@ asarUnpack:
   - dist/kbd-worker.js
   - node_modules/koffi/**
   - vendor/**
+  - engine/**
+  - extension/**
 # koffi ships prebuilt for Node-API; nothing to rebuild for Electron.
 npmRebuild: false
 win:

@@ -93,16 +93,24 @@
       command("Translate", "translateScreen", v.keys.snipTranslate)
     ];
     cmds.forEach((c, i) => c.dataset.id = String(i));
-    const open = el("button", { class: "foot-btn", "data-nav": true, "data-id": "open", onclick: () => post({ type: "tray", command: "open" }) }, "Open Altype");
-    const quit = el("button", { class: "foot-btn", "data-nav": true, "data-id": "quit", onclick: () => post({ type: "tray", command: "quit" }) }, "Quit");
+    const note = command(v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey);
+    note.dataset.id = "note";
+    const transcripts = command("Transcripts", "transcripts");
+    transcripts.dataset.id = "transcripts";
+    const openApp = () => post({ type: "tray", command: "open" });
+    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Altype", onclick: openApp }, el("span", { class: "key" }, "alt"), el("span", { class: "wm" }, "altype"));
+    const open = el("button", { class: "open", "data-nav": true, "data-id": "open", onclick: openApp }, "Open");
+    const quit = command("Quit", "quit");
+    quit.dataset.id = "quit";
     const panel = el(
       "div",
       { class: "panel" },
-      el("header", { class: "head" }, el("div", { class: "brand" }, el("span", { class: "key" }, "alt"), el("span", { class: "wm" }, "altype")), status(v)),
+      el("header", { class: "head" }, brand, el("div", { class: "side" }, status(v), open)),
       el("section", { class: "sec" }, grp("Copied text"), cmds[0], cmds[1]),
       el("section", { class: "sec" }, grp("A piece of the screen"), cmds[2], cmds[3]),
+      v.speech.installed ? el("section", { class: "sec" }, grp("Speech"), note, transcripts) : null,
       el("section", { class: "sec sw" }, fix),
-      el("footer", { class: "foot" }, open, quit)
+      el("section", { class: "sec" }, quit)
     );
     root.replaceChildren(panel);
     if (focused) focusRow(root.querySelector(`[data-id="${focused}"]`));
@@ -143,7 +151,7 @@
     if (m.type === "tray") render(m.view);
     else if (m.type === "trayShown") {
       byKeys(false);
-      focusRow(navs()[0]);
+      focusRow(root.querySelector(".cmd[data-nav]"));
     }
   });
   new ResizeObserver(() => post({ type: "trayHeight", px: Math.ceil(document.body.getBoundingClientRect().height) + 2 })).observe(document.body);

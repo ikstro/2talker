@@ -1,0 +1,375 @@
+// What the speech pages share: the engine's HTTP API as the window sees it
+// (its library's rows and transcripts, its own settings), short messages at
+// the bottom of the window, and the two things a page offers before its
+// feature can work: the engine's parts to download, and the Hugging Face key
+// that lets speakers be told apart.
+
+import type { AppView, SpeechHealth, SpeechPart, SpeechResult } from '../protocol'
+import { el, icon } from './dom'
+import { aside, bad, bar, btn, chip, link, linkBtn, post, row, toggleKnob } from './ui'
+
+export type Source = 'file' | 'mic' | 'meet' | 'note'
+export type Stage = '' | 'decode' | 'words' | 'speakers' | 'save'
+
+/** A line of the engine's library (store.py LIST_COLUMNS), with the found words when searched. */
+export type Row = {
+  id: string
+  title: string
+  source: Source
+  created: string
+  duration: number
+  status: 'recording' | 'queued' | 'working' | 'done' | 'failed'
+  stage: Stage
+  progress: number
+  error: string
+  language: string
+  speakers_status: string
+  snippet?: string
+}
+
+export type Utterance = { speaker: string; start: number; end: number; text: string; edited?: boolean }
+
+export type Transcript = {
+  id: string
+  title: string
+  source: Source
+  created: string
+  duration: number
+  language: string
+  speakers: Record<string, { name: string }>
+  utterances: Utterance[]
+  speakersStatus: 'ok' | 'single' | 'needs-token' | 'failed'
+  note?: string
+  noteError?: string
+  /** The words' times are kept: speakers can be split later without recognizing the text again. */
+  hasWords?: boolean
+  edited?: string
+}
+
+/** The engine's own settings (engine/settings.py); the key itself never comes back, only whether there is one. */
+export type EngineSettings = {
+  model: string
+  language: string
+  hotwords: string
+  hasToken: boolean
+  dataDir: string
+  kbDir: string
+  kbInbox: string
+}
+
+export type Diarization = SpeechHealth['diarization']
+
+export class SpeechError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
+
+/** One call to the engine; its refusal is thrown with the engine's own words. */
+export async function api<T>(method: string, route: string, body?: unknown): Promise<T> {
+  const r = (await window.tutorHost.call({ call: 'speech', method, route, body })) as SpeechResult<T>
+  if (!r.ok) throw new SpeechError(r.error, r.status)
+  return r.data
+}
+
+export const problem = (error: unknown) => (error instanceof Error ? error.message : String(error))
+export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path
+
+// ---------------------------------------------------------------- the redraw
+
+let redraw = () => {}
+/** The window's way to draw the open page again, after something here changed. */
+export function onRedraw(fn: () => void): void {
+  redraw = fn
+}
+export const redrawPage = () => redraw()
+
+// ---------------------------------------------------------------- times
+
+/** 0:07, 12:40, 1:02:13. */
+export function clock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}
+
+/**
+ * Minutes an hour of sound takes here, speakers included, as measured: ~4 on an
+ * RTX 2080 Super, ~70 on an i9-9900K's eight cores (Whisper turbo int8 and pyannote on the CPU).
+ */
+export function minutesPerHour(v: AppView): number {
+  return v.speech.health?.parts.gpu ? 5 : 70
+}
+
+/** 40 s, 12 min, 1 h 4 min. */
+export function length(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)} s`
+  const minutes = Math.round(seconds / 60)
+  return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`
+}
+
+// ---------------------------------------------------------------- messages
+
+const toasts = el('div', { class: 'toasts', role: 'status' })
+document.body.append(toasts)
+
+/** A short message at the bottom of the window, with one thing to do about it at most. */
+export function toast(text: string, action?: { label: string; run: () => void }, fault = false): void {
+  const node = el(
+    'div',
+    { class: fault ? 'toast bad' : 'toast' },
+    el('span', {}, text),
+    action ? el('button', { class: 'link', onclick: () => (action.run(), node.remove()) }, action.label) : null,
+  )
+  toasts.append(node)
+  window.setTimeout(() => node.remove(), action ? 7000 : 3500)
+}
+
+export const fault = (error: unknown) => toast(problem(error), undefined, true)
+export const showFile = (path: string) => ({ label: 'Show', run: () => post({ type: 'showInFolder', path }) })
+
+// ---------------------------------------------------------------- the engine's settings
+
+let engine: EngineSettings | undefined
+let asking = false
+
+/** The engine's settings, once it runs; asked for once and kept, then followed by each change made here. */
+export function engineSettings(v: AppView): EngineSettings | undefined {
+  if (v.speech.service !== 'ready') return undefined
+  if (!engine && !asking) {
+    asking = true
+    api<EngineSettings>('GET', '/settings').then(
+      s => {
+        engine = s
+        asking = false
+        redraw()
+      },
+      () => (asking = false),
+    )
+  }
+  return engine
+}
+
+/** The engine went away (removed, restarted): its settings are asked for again. */
+export function forgetEngine(): void {
+  engine = undefined
+}
+
+export async function saveEngine(changes: Partial<EngineSettings> & { hfToken?: string }): Promise<boolean> {
+  try {
+    engine = await api<EngineSettings>('PUT', '/settings', changes)
+    redraw()
+    return true
+  } catch (error) {
+    fault(error)
+    return false
+  }
+}
+
+/** The knowledge base: a folder of .md files (an Obsidian vault will do). */
+export async function pickKb(): Promise<void> {
+  const folder = (await window.tutorHost.call({ call: 'pickFolder', title: 'The knowledge base folder', current: engine?.kbDir ?? '' })) as string | null
+  if (folder && (await saveEngine({ kbDir: folder }))) toast(`Knowledge base: ${folder}`)
+}
+
+// ---------------------------------------------------------------- the parts
+
+export const installed = (v: AppView) => v.speech.pack.parts.includes('core')
+export const hasPart = (v: AppView, part: SpeechPart) => v.speech.pack.parts.includes(part)
+/** The engine is here and answering. */
+export const running = (v: AppView) => installed(v) && v.speech.service === 'ready'
+
+/** The graphics card's part comes with the first download unless the person turns it off. */
+let withGpu = true
+
+/** A part being installed or removed now: its line with the bar, or undefined. */
+function packWork(v: AppView): HTMLElement | undefined {
+  const p = v.speech.pack
+  if (p.status === 'removing') return row('Removing the speech engine…', [], null)
+  if (p.status !== 'installing') return undefined
+  const what = p.step === 'tool' ? 'the Python manager' : 'the packages'
+  const pct = Math.round((p.progress ?? 0) * 100)
+  const parts = (p.installing ?? []).filter(x => !p.parts.includes(x))
+  const name = parts.includes('speakers') && p.parts.includes('core') ? 'Downloading the speakers part' : 'Downloading the speech engine'
+  return row(name, [`${what} · the window can be closed, it goes on`, bar(p.progress ?? 0)], el('span', { class: 'pct' }, `${pct}%`))
+}
+
+/**
+ * What the speech engine needs before `feature` works: its download (with
+ * the graphics card's part when there is an NVIDIA card), the download going
+ * on, why it failed, or the service starting. Nothing once it runs.
+ */
+export function engineRows(v: AppView, feature: string): HTMLElement[] {
+  const s = v.speech
+  const work = packWork(v)
+  if (work && !installed(v)) return [work]
+  if (!installed(v)) {
+    const gpu = s.pack.nvidia && withGpu
+    const mb = s.download.core + (gpu ? s.download.gpu : 0)
+    const go = () => post({ type: 'installSpeech', parts: gpu ? ['core', 'gpu'] : ['core'] })
+    const failed = s.pack.status === 'failed'
+    return [
+      row(
+        `${feature} needs the speech engine`,
+        [failed ? bad(`The download stopped: ${s.pack.message ?? 'unknown error'}`) : `≈${mb} MB · downloads once, then works offline`],
+        btn(failed ? 'Try again' : 'Download', go, 'primary'),
+      ),
+      s.pack.nvidia
+        ? row(
+            'Use the graphics card',
+            [`NVIDIA found · ≈${s.download.gpu} MB more · much faster`],
+            toggleKnob(withGpu, on => ((withGpu = on), redraw()), 'Use the graphics card'),
+          )
+        : null,
+    ].filter((n): n is HTMLElement => n !== null)
+  }
+  if (work) return [work]
+  if (s.service === 'starting' || s.service === 'off') return [row('The speech engine is starting…', [], null)]
+  if (s.service === 'down') return [row('The speech engine does not run', [bad(s.trouble ?? 'it stopped')], linkBtn('Restart', () => post({ type: 'restartSpeech' })))]
+  return []
+}
+
+/** A model's line: here, downloading, or still to come (and when). */
+export function modelRow(label: string, m: SpeechHealth['models']['dictation'] | undefined, later: string, now?: () => void): HTMLElement | null {
+  if (!m) return null
+  if (m.state === 'ready') return row(label, [`${m.name} · on this computer`], chip('ready'))
+  if (m.state === 'downloading') return row(label, [`${m.name} · downloading once`, bar(m.progress ?? 0)], el('span', { class: 'pct' }, `${Math.round((m.progress ?? 0) * 100)}%`))
+  return row(label, [`${m.name} · ${later}`], now ? linkBtn('Download now', now) : chip('not yet', 'off'))
+}
+
+// ---------------------------------------------------------------- speakers
+
+const HF = {
+  join: 'https://huggingface.co/join',
+  model: 'https://huggingface.co/pyannote/speaker-diarization-community-1',
+  tokens: 'https://huggingface.co/settings/tokens',
+}
+
+/** The speakers' model as the page says it: how it looks, and the words. */
+const DIARIZATION: Record<Diarization, ['' | 'busy' | 'bad' | 'ok', string]> = {
+  'needs-token': ['', 'needs a free Hugging Face key, once, to download the speakers’ model'],
+  checking: ['busy', 'checking the key…'],
+  downloading: ['busy', 'the key works · downloading the speakers’ model…'],
+  'bad-token': ['bad', 'the key did not work: copy it whole, and make it of type Read'],
+  'no-access': ['bad', 'the key works, but the model is not open to it yet: fill in the form on its page (step 2), then Check again'],
+  failed: ['bad', 'could not check the key'],
+  missing: ['', 'key saved · the model downloads with the first transcription'],
+  ready: ['ok', 'the key works and the model is here · speakers are told apart offline'],
+}
+
+/** "Replace key" was tapped: the field and the steps come back. */
+let replacing = false
+/** The key as typed so far: a redraw (the engine's state moving on) keeps it in the field. */
+let draft = ''
+/** What was asked of the engine a moment ago, shown until its own state follows (within two seconds). */
+let expected: { state: Diarization; until: number } | undefined
+
+export function diarizationOf(v: AppView): Diarization {
+  const real = v.speech.health?.diarization ?? 'needs-token'
+  if (expected && Date.now() < expected.until && (real === 'needs-token' || real === 'missing' || real === 'bad-token' || real === 'no-access' || real === 'failed')) return expected.state
+  expected = undefined
+  return real
+}
+
+const follow = (state: Diarization) => {
+  expected = { state, until: Date.now() + 3000 }
+  redraw()
+}
+
+/**
+ * Who spoke when: the speakers part to download, then the Hugging Face key
+ * with its live state (checking, downloading, a bad key, no access to the
+ * model, ready) and the four steps to get one.
+ */
+export function speakerRows(v: AppView): HTMLElement[] {
+  const s = v.speech
+  const work = packWork(v)
+  if (!hasPart(v, 'speakers')) {
+    if (work) return [work]
+    return [
+      row(
+        'Who spoke when',
+        [`needs the speakers part · ≈${s.download.speakers} MB, once`],
+        btn('Download', () => post({ type: 'installSpeech', parts: ['speakers'] }), '', 'Download the speakers part'),
+      ),
+    ]
+  }
+  if (!running(v)) return [row('Who spoke when', ['set up once the speech engine runs'], null)]
+  const state = diarizationOf(v)
+  const [kind, words] = DIARIZATION[state]
+  const message = state === 'failed' && s.health?.diarizationMessage ? `${words}: ${s.health.diarizationMessage}` : words
+  const note = el('small', { class: kind ? `kstate ${kind}` : 'kstate' }, kind === 'busy' ? el('i', { class: 'spin' }) : kind === 'ok' ? icon('check') : null, message)
+  const again = (label: string) =>
+    linkBtn(label, async () => {
+      try {
+        await api('POST', '/diarization/setup')
+        follow('checking')
+      } catch (error) {
+        fault(error)
+      }
+    })
+  const field = el('input', {
+    type: 'password',
+    class: 'field wide',
+    placeholder: 'hf_…',
+    autocomplete: 'off',
+    spellcheck: 'false',
+    'aria-label': 'Hugging Face key',
+    oninput: (event: Event) => (draft = (event.target as HTMLInputElement).value),
+  })
+  field.value = draft
+  const saveKey = async () => {
+    const value = field.value.trim()
+    if (!value) return field.focus()
+    field.blur()
+    draft = ''
+    replacing = false
+    if (await saveEngine({ hfToken: value })) follow('checking')
+  }
+  field.addEventListener('keydown', event => {
+    if (event.key === 'Enter') void saveKey()
+    if (event.key === 'Escape' && replacing) (event.preventDefault(), (replacing = false), field.blur(), redraw())
+  })
+  const entry = el('span', { class: 'kchg' }, field, btn('Save', () => void saveKey(), 'primary'))
+  const settled = state === 'ready' || state === 'missing'
+  const control =
+    settled && !replacing
+      ? linkBtn('Replace key', () => {
+          replacing = true
+          redraw()
+        })
+      : state === 'no-access'
+        ? again('Check again')
+        : state === 'failed'
+          ? again('Try again')
+          : null
+  const out = [row('Hugging Face key', [note], control)]
+  const typing = (!settled && state !== 'checking' && state !== 'downloading') || replacing
+  if (typing) {
+    out.push(
+      el(
+        'ol',
+        { class: 'steps' },
+        el('li', {}, link(HF.join, 'Sign up at Hugging Face'), ', free.'),
+        el('li', {}, 'Open ', link(HF.model, 'the model’s page'), ' and fill in its form: Company or university, anything, your own name will do; Use case: ', el('b', {}, 'Meeting note taker'), '. Then Agree and access.'),
+        el('li', {}, 'Open ', link(HF.tokens, 'Access Tokens'), ' → Create new token → type ', el('b', {}, 'Read'), ' → copy the hf_… key.'),
+        el('li', {}, 'Paste it here and Save. The model downloads once; after that, everything works offline.', el('span', { class: 'kline' }, entry)),
+      ),
+    )
+  }
+  return out
+}
+
+/** A line under a page saying, calmly, what speakers still need, with the way there. */
+export function speakersMissing(v: AppView, go: () => void): HTMLElement | null {
+  if (!installed(v)) return null
+  const state = v.speech.health?.diarization
+  if (hasPart(v, 'speakers') && state !== 'needs-token' && state !== 'bad-token' && state !== 'no-access' && state !== 'failed') return null
+  const why = !hasPart(v, 'speakers') ? 'Speakers are not told apart yet: their part is not downloaded.' : 'Speakers are not told apart yet: a Hugging Face key is needed.'
+  return aside('person', why, ' ', linkBtn('Set up', go))
+}

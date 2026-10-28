@@ -54,10 +54,57 @@ button {
   padding: 0 10px;
 }
 
+/* The brand opens the window: a quiet button, lit under the pointer. */
 .brand {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 9px;
+  margin-left: -6px;
+  padding: 5px 6px;
+  border-radius: var(--r-md);
+  transition: background-color 0.12s;
+}
+
+body:not(.keys) .brand:hover {
+  background: var(--hover);
+}
+
+/* The state gives way to Open: a long one ("translator on first use") ends in an ellipsis. */
+.side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.side .st {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side .st .dot {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.open {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  transition: background-color 0.12s;
+}
+
+body:not(.keys) .open:hover,
+body.keys .open.cur {
+  background: var(--hover);
 }
 
 .brand .key {
@@ -127,18 +174,14 @@ button {
    is pressed. A menu's row must read at a glance, so it takes the raised
    surface (the app's selected pill), not the faint hover tint. */
 body:not(.keys) .cmd:hover,
-body:not(.keys) .foot-btn:hover,
-body.keys .cmd.cur,
-body.keys .foot-btn.cur {
+body.keys .cmd.cur {
   background: var(--raised);
 }
 
 /* In the light theme the raised tone is the window's own: the next one. */
 @media (prefers-color-scheme: light) {
   body:not(.keys) .cmd:hover,
-  body:not(.keys) .foot-btn:hover,
-  body.keys .cmd.cur,
-  body.keys .foot-btn.cur {
+  body.keys .cmd.cur {
     background: var(--overlay);
   }
 }
@@ -195,33 +238,10 @@ body.keys .foot-btn.cur {
   background: var(--on-accent);
 }
 
-/* ---------------------------------------------------------------- footer */
-
-.foot {
-  display: flex;
-  justify-content: space-between;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.foot-btn {
-  height: 30px;
-  padding: 0 10px;
-  border-radius: var(--r-md);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--muted);
-  transition: background-color 0.12s, color 0.12s;
-}
-
-body:not(.keys) .foot-btn:hover,
-body.keys .foot-btn.cur {
-  color: var(--text);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .cmd,
-  .foot-btn,
+  .brand,
+  .open,
   .tg,
   .tg::after {
     transition: none;

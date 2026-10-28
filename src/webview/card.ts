@@ -10,7 +10,7 @@
 import { hotkeyLabel } from '../hotkey'
 import { findLanguage, labelCode, langCode, voiceMatches } from '../languages'
 import { chosenNatural } from '../natural'
-import type { CardKind, CardState, CardView, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, ViewConfig } from '../protocol'
+import type { CardKind, CardState, CardView, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
 import { el, html, icon } from './dom'
 import { glyph } from './glyphs'
 import { WordHover } from './hover'
@@ -20,7 +20,7 @@ import { canOpenSpeechSettings, voiceSteps } from './voices'
 
 declare global {
   interface Window {
-    tutorHost: { post(message: ToHost): void }
+    tutorHost: TutorHost
   }
 }
 

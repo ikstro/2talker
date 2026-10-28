@@ -232,23 +232,1267 @@
     return el("span", attrs, ...parts.map((part) => el("span", { class: "key" }, hotkeyLabel(part))), twice ? el("span", { class: "x2" }, "\xD72") : null);
   }
 
-  // src/webview/app.ts
+  // src/webview/ui.ts
   var post = (message) => window.tutorHost.post(message);
-  var save = (patch) => post({ type: "saveSettings", patch });
-  var ACTIONS = ["listen", "translate", "screen", "dictate", "keyboard"];
+  var grp = (text) => el("div", { class: "grp" }, text);
+  var bad = (text) => el("small", { class: "bad" }, text);
+  var notesOf = (notes) => notes.filter((n) => !!n).map((n) => typeof n === "string" ? el("small", {}, n) : n);
+  function row(label, notes, ...controls) {
+    return el("div", { class: "row" }, el("div", { class: "l" }, label, ...notesOf(notes)), ...controls);
+  }
+  function toggle(label, on, onchange, ...notes) {
+    const knob = el("span", { class: on ? "tg on" : "tg" });
+    const node = el(
+      "button",
+      {
+        class: "row trow",
+        role: "switch",
+        "aria-checked": String(on),
+        onclick: () => {
+          const next = node.getAttribute("aria-checked") !== "true";
+          node.setAttribute("aria-checked", String(next));
+          knob.classList.toggle("on", next);
+          onchange(next);
+        }
+      },
+      el("span", { class: "l" }, label, ...notesOf(notes)),
+      knob
+    );
+    return node;
+  }
+  function toggleKnob(on, onchange, label) {
+    const node = el("button", {
+      class: on ? "tg on" : "tg",
+      role: "switch",
+      "aria-checked": String(on),
+      "aria-label": label,
+      onclick: () => {
+        const next = node.getAttribute("aria-checked") !== "true";
+        node.setAttribute("aria-checked", String(next));
+        node.classList.toggle("on", next);
+        onchange(next);
+      }
+    });
+    return node;
+  }
+  function seg(value, options, onchange, mono = false) {
+    const node = el("span", { class: mono ? "seg mono" : "seg", role: "radiogroup" });
+    for (const [v, label] of options) {
+      const b = el(
+        "button",
+        {
+          class: v === value ? "on" : "",
+          role: "radio",
+          "aria-checked": String(v === value),
+          onclick: () => {
+            for (const other of node.children) {
+              other.classList.toggle("on", other === b);
+              other.setAttribute("aria-checked", String(other === b));
+            }
+            onchange(v);
+          }
+        },
+        label
+      );
+      node.append(b);
+    }
+    return node;
+  }
+  function select(value, options, onchange) {
+    const node = el("select", {
+      onchange: (event) => {
+        const raw = event.target.value;
+        const picked = options.find(([v]) => String(v) === raw)?.[0];
+        if (picked !== void 0) onchange(picked);
+      }
+    });
+    for (const [v, label] of options) node.append(el("option", v === value ? { value: String(v), selected: true } : { value: String(v) }, label));
+    return el("span", { class: "sel" }, node, icon("chevron-down"));
+  }
+  var linkBtn = (text, onclick, disabled = false) => el("button", { class: "link", disabled, onclick }, text);
+  var chip = (text, cls = "") => el("span", { class: `chip${cls ? " " + cls : ""}` }, text);
+  function btn(label, onclick, cls = "", title) {
+    return el("button", { class: `btn${cls ? " " + cls : ""}`, onclick, title, "aria-label": title }, ...typeof label === "string" ? [label] : label);
+  }
+  function link(url, text) {
+    return el("a", { href: url, onclick: (event) => (event.preventDefault(), post({ type: "openLink", url })) }, text);
+  }
+  function bar(progress) {
+    const fill = el("i", { class: "fill" });
+    fill.style.width = `${Math.round(progress * 100)}%`;
+    return el("span", { class: "bar" }, fill);
+  }
+  var aside = (glyphName, ...text) => el("p", { class: "aside" }, icon(glyphName), el("span", {}, ...text));
+  var warn = (...text) => el("p", { class: "warn" }, icon("warning"), el("span", {}, ...text));
+
+  // src/webview/speech.ts
+  var SpeechError = class extends Error {
+    constructor(message, status) {
+      super(message);
+      this.status = status;
+    }
+  };
+  async function api(method, route, body) {
+    const r = await window.tutorHost.call({ call: "speech", method, route, body });
+    if (!r.ok) throw new SpeechError(r.error, r.status);
+    return r.data;
+  }
+  var problem = (error) => error instanceof Error ? error.message : String(error);
+  var fileName = (path) => path.split(/[\\/]/).pop() ?? path;
+  var redraw = () => {
+  };
+  function onRedraw(fn) {
+    redraw = fn;
+  }
+  var redrawPage = () => redraw();
+  function clock(seconds) {
+    const s = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor(s % 3600 / 60);
+    const ss = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  }
+  function minutesPerHour(v) {
+    return v.speech.health?.parts.gpu ? 5 : 70;
+  }
+  function length(seconds) {
+    if (seconds < 60) return `${Math.round(seconds)} s`;
+    const minutes = Math.round(seconds / 60);
+    return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
+  }
+  var toasts = el("div", { class: "toasts", role: "status" });
+  document.body.append(toasts);
+  function toast(text, action, fault2 = false) {
+    const node = el(
+      "div",
+      { class: fault2 ? "toast bad" : "toast" },
+      el("span", {}, text),
+      action ? el("button", { class: "link", onclick: () => (action.run(), node.remove()) }, action.label) : null
+    );
+    toasts.append(node);
+    window.setTimeout(() => node.remove(), action ? 7e3 : 3500);
+  }
+  var fault = (error) => toast(problem(error), void 0, true);
+  var showFile = (path) => ({ label: "Show", run: () => post({ type: "showInFolder", path }) });
+  var engine;
+  var asking = false;
+  function engineSettings(v) {
+    if (v.speech.service !== "ready") return void 0;
+    if (!engine && !asking) {
+      asking = true;
+      api("GET", "/settings").then(
+        (s) => {
+          engine = s;
+          asking = false;
+          redraw();
+        },
+        () => asking = false
+      );
+    }
+    return engine;
+  }
+  function forgetEngine() {
+    engine = void 0;
+  }
+  async function saveEngine(changes) {
+    try {
+      engine = await api("PUT", "/settings", changes);
+      redraw();
+      return true;
+    } catch (error) {
+      fault(error);
+      return false;
+    }
+  }
+  async function pickKb() {
+    const folder = await window.tutorHost.call({ call: "pickFolder", title: "The knowledge base folder", current: engine?.kbDir ?? "" });
+    if (folder && await saveEngine({ kbDir: folder })) toast(`Knowledge base: ${folder}`);
+  }
+  var installed = (v) => v.speech.pack.parts.includes("core");
+  var hasPart = (v, part) => v.speech.pack.parts.includes(part);
+  var running = (v) => installed(v) && v.speech.service === "ready";
+  var withGpu = true;
+  function packWork(v) {
+    const p = v.speech.pack;
+    if (p.status === "removing") return row("Removing the speech engine\u2026", [], null);
+    if (p.status !== "installing") return void 0;
+    const what = p.step === "tool" ? "the Python manager" : "the packages";
+    const pct = Math.round((p.progress ?? 0) * 100);
+    const parts = (p.installing ?? []).filter((x) => !p.parts.includes(x));
+    const name = parts.includes("speakers") && p.parts.includes("core") ? "Downloading the speakers part" : "Downloading the speech engine";
+    return row(name, [`${what} \xB7 the window can be closed, it goes on`, bar(p.progress ?? 0)], el("span", { class: "pct" }, `${pct}%`));
+  }
+  function engineRows(v, feature) {
+    const s = v.speech;
+    const work = packWork(v);
+    if (work && !installed(v)) return [work];
+    if (!installed(v)) {
+      const gpu = s.pack.nvidia && withGpu;
+      const mb = s.download.core + (gpu ? s.download.gpu : 0);
+      const go = () => post({ type: "installSpeech", parts: gpu ? ["core", "gpu"] : ["core"] });
+      const failed = s.pack.status === "failed";
+      return [
+        row(
+          `${feature} needs the speech engine`,
+          [failed ? bad(`The download stopped: ${s.pack.message ?? "unknown error"}`) : `\u2248${mb} MB \xB7 downloads once, then works offline`],
+          btn(failed ? "Try again" : "Download", go, "primary")
+        ),
+        s.pack.nvidia ? row(
+          "Use the graphics card",
+          [`NVIDIA found \xB7 \u2248${s.download.gpu} MB more \xB7 much faster`],
+          toggleKnob(withGpu, (on) => (withGpu = on, redraw()), "Use the graphics card")
+        ) : null
+      ].filter((n) => n !== null);
+    }
+    if (work) return [work];
+    if (s.service === "starting" || s.service === "off") return [row("The speech engine is starting\u2026", [], null)];
+    if (s.service === "down") return [row("The speech engine does not run", [bad(s.trouble ?? "it stopped")], linkBtn("Restart", () => post({ type: "restartSpeech" })))];
+    return [];
+  }
+  function modelRow(label, m, later, now) {
+    if (!m) return null;
+    if (m.state === "ready") return row(label, [`${m.name} \xB7 on this computer`], chip("ready"));
+    if (m.state === "downloading") return row(label, [`${m.name} \xB7 downloading once`, bar(m.progress ?? 0)], el("span", { class: "pct" }, `${Math.round((m.progress ?? 0) * 100)}%`));
+    return row(label, [`${m.name} \xB7 ${later}`], now ? linkBtn("Download now", now) : chip("not yet", "off"));
+  }
+  var HF = {
+    join: "https://huggingface.co/join",
+    model: "https://huggingface.co/pyannote/speaker-diarization-community-1",
+    tokens: "https://huggingface.co/settings/tokens"
+  };
+  var DIARIZATION = {
+    "needs-token": ["", "needs a free Hugging Face key, once, to download the speakers\u2019 model"],
+    checking: ["busy", "checking the key\u2026"],
+    downloading: ["busy", "the key works \xB7 downloading the speakers\u2019 model\u2026"],
+    "bad-token": ["bad", "the key did not work: copy it whole, and make it of type Read"],
+    "no-access": ["bad", "the key works, but the model is not open to it yet: fill in the form on its page (step 2), then Check again"],
+    failed: ["bad", "could not check the key"],
+    missing: ["", "key saved \xB7 the model downloads with the first transcription"],
+    ready: ["ok", "the key works and the model is here \xB7 speakers are told apart offline"]
+  };
+  var replacing = false;
+  var draft = "";
+  var expected;
+  function diarizationOf(v) {
+    const real = v.speech.health?.diarization ?? "needs-token";
+    if (expected && Date.now() < expected.until && (real === "needs-token" || real === "missing" || real === "bad-token" || real === "no-access" || real === "failed")) return expected.state;
+    expected = void 0;
+    return real;
+  }
+  var follow = (state) => {
+    expected = { state, until: Date.now() + 3e3 };
+    redraw();
+  };
+  function speakerRows(v) {
+    const s = v.speech;
+    const work = packWork(v);
+    if (!hasPart(v, "speakers")) {
+      if (work) return [work];
+      return [
+        row(
+          "Who spoke when",
+          [`needs the speakers part \xB7 \u2248${s.download.speakers} MB, once`],
+          btn("Download", () => post({ type: "installSpeech", parts: ["speakers"] }), "", "Download the speakers part")
+        )
+      ];
+    }
+    if (!running(v)) return [row("Who spoke when", ["set up once the speech engine runs"], null)];
+    const state = diarizationOf(v);
+    const [kind, words] = DIARIZATION[state];
+    const message = state === "failed" && s.health?.diarizationMessage ? `${words}: ${s.health.diarizationMessage}` : words;
+    const note = el("small", { class: kind ? `kstate ${kind}` : "kstate" }, kind === "busy" ? el("i", { class: "spin" }) : kind === "ok" ? icon("check") : null, message);
+    const again = (label) => linkBtn(label, async () => {
+      try {
+        await api("POST", "/diarization/setup");
+        follow("checking");
+      } catch (error) {
+        fault(error);
+      }
+    });
+    const field = el("input", {
+      type: "password",
+      class: "field wide",
+      placeholder: "hf_\u2026",
+      autocomplete: "off",
+      spellcheck: "false",
+      "aria-label": "Hugging Face key",
+      oninput: (event) => draft = event.target.value
+    });
+    field.value = draft;
+    const saveKey2 = async () => {
+      const value = field.value.trim();
+      if (!value) return field.focus();
+      field.blur();
+      draft = "";
+      replacing = false;
+      if (await saveEngine({ hfToken: value })) follow("checking");
+    };
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") void saveKey2();
+      if (event.key === "Escape" && replacing) event.preventDefault(), replacing = false, field.blur(), redraw();
+    });
+    const entry = el("span", { class: "kchg" }, field, btn("Save", () => void saveKey2(), "primary"));
+    const settled = state === "ready" || state === "missing";
+    const control = settled && !replacing ? linkBtn("Replace key", () => {
+      replacing = true;
+      redraw();
+    }) : state === "no-access" ? again("Check again") : state === "failed" ? again("Try again") : null;
+    const out = [row("Hugging Face key", [note], control)];
+    const typing = !settled && state !== "checking" && state !== "downloading" || replacing;
+    if (typing) {
+      out.push(
+        el(
+          "ol",
+          { class: "steps" },
+          el("li", {}, link(HF.join, "Sign up at Hugging Face"), ", free."),
+          el("li", {}, "Open ", link(HF.model, "the model\u2019s page"), " and fill in its form: Company or university, anything, your own name will do; Use case: ", el("b", {}, "Meeting note taker"), ". Then Agree and access."),
+          el("li", {}, "Open ", link(HF.tokens, "Access Tokens"), " \u2192 Create new token \u2192 type ", el("b", {}, "Read"), " \u2192 copy the hf_\u2026 key."),
+          el("li", {}, "Paste it here and Save. The model downloads once; after that, everything works offline.", el("span", { class: "kline" }, entry))
+        )
+      );
+    }
+    return out;
+  }
+  function speakersMissing(v, go) {
+    if (!installed(v)) return null;
+    const state = v.speech.health?.diarization;
+    if (hasPart(v, "speakers") && state !== "needs-token" && state !== "bad-token" && state !== "no-access" && state !== "failed") return null;
+    const why = !hasPart(v, "speakers") ? "Speakers are not told apart yet: their part is not downloaded." : "Speakers are not told apart yet: a Hugging Face key is needed.";
+    return aside("person", why, " ", linkBtn("Set up", go));
+  }
+
+  // src/webview/recorder.ts
+  async function microphone(close) {
+    return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: close, noiseSuppression: close, autoGainControl: true, channelCount: 1 } });
+  }
+  var Meter = class {
+    context;
+    analyser;
+    samples;
+    constructor(stream) {
+      this.context = new AudioContext();
+      this.analyser = this.context.createAnalyser();
+      this.analyser.fftSize = 1024;
+      this.samples = new Float32Array(this.analyser.fftSize);
+      this.context.createMediaStreamSource(stream).connect(this.analyser);
+    }
+    /** How loud it is now, 0…1. */
+    level() {
+      this.analyser.getFloatTimeDomainData(this.samples);
+      let sum = 0;
+      for (const v of this.samples) sum += v * v;
+      return Math.min(1, Math.sqrt(sum / this.samples.length) * 4);
+    }
+    close() {
+      void this.context.close();
+    }
+  };
+  function stopped(recorder) {
+    if (!recorder || recorder.state === "inactive") return Promise.resolve();
+    return new Promise((resolve) => {
+      recorder.onstop = () => resolve();
+      recorder.stop();
+    });
+  }
+  var RETRIES = 3;
+  var ChunkRecorder = class {
+    constructor(call, o) {
+      this.call = call;
+      this.o = o;
+    }
+    id;
+    startedAt = 0;
+    /** Set when a chunk could not be delivered: the recording will be missing a piece. */
+    lost = false;
+    recorder;
+    stream;
+    meter;
+    seq = 0;
+    uploads = Promise.resolve();
+    speech(method, route, body) {
+      return this.call({ call: "speech", method, route, body });
+    }
+    /** Asks for the microphone, opens the recording in the engine, starts sending. */
+    async start() {
+      this.stream = await microphone(this.o.source === "note");
+      this.startedAt = Date.now();
+      const opened = await this.speech("POST", "/recordings", {
+        source: this.o.source,
+        title: this.o.title,
+        language: this.o.language,
+        speakers: this.o.speakers,
+        tracks: { main: { startedAt: this.startedAt } }
+      });
+      if (!opened.ok) {
+        this.release();
+        throw new Error(opened.error);
+      }
+      this.id = opened.data.id;
+      this.meter = new Meter(this.stream);
+      this.recorder = new MediaRecorder(this.stream, { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 48e3 });
+      this.recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) this.upload(event.data);
+      };
+      this.recorder.start(this.o.slice);
+    }
+    upload(blob) {
+      const seq = this.seq++;
+      this.uploads = this.uploads.then(async () => {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        for (let attempt = 0; attempt < RETRIES; attempt++) {
+          if ((await this.speech("PUT", `/recordings/${this.id}/main/${seq}`, bytes)).ok) return;
+          await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+        }
+        this.lost = true;
+      });
+    }
+    level() {
+      return this.meter?.level() ?? 0;
+    }
+    get seconds() {
+      return this.startedAt ? (Date.now() - this.startedAt) / 1e3 : 0;
+    }
+    /** Stops, sends what is left, and hands the recording to the engine. Its id. */
+    async finish() {
+      await stopped(this.recorder);
+      await this.uploads;
+      this.release();
+      const r = await this.speech("POST", `/recordings/${this.id}/finish`, { language: this.o.language, speakers: this.o.speakers });
+      if (!r.ok) throw new Error(r.error);
+      return this.id;
+    }
+    async cancel() {
+      await stopped(this.recorder);
+      this.release();
+      if (this.id) await this.speech("DELETE", `/recordings/${this.id}`);
+    }
+    release() {
+      for (const track of this.stream?.getTracks() ?? []) track.stop();
+      this.meter?.close();
+      this.stream = void 0;
+      this.meter = void 0;
+    }
+  };
+  function micTrouble(error) {
+    const name = error instanceof DOMException ? error.name : "";
+    if (name === "NotAllowedError") return "No access to the microphone: allow it in Windows Settings \u2192 Privacy \u2192 Microphone";
+    if (name === "NotFoundError") return "No microphone found";
+    if (name === "NotReadableError") return "Another program holds the microphone";
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  // src/webview/transcripts.ts
+  var hooks = { view: () => void 0, shown: () => false, show: () => {
+  }, setup: () => {
+  } };
+  var setTranscriptHooks = (h) => hooks = h;
+  var SOURCES = {
+    file: { label: "file", icon: "file-media" },
+    mic: { label: "microphone", icon: "mic" },
+    meet: { label: "Google Meet", icon: "organization" },
+    note: { label: "note", icon: "note" }
+  };
+  var STAGES = [
+    ["decode", "Preparing the sound"],
+    ["words", "Recognizing speech"],
+    ["speakers", "Telling speakers apart"],
+    ["save", "Saving"]
+  ];
+  var WEIGHTS = { decode: [0, 0.1], words: [0.1, 0.6], speakers: [0.6, 0.95], save: [0.95, 1] };
+  var FORMATS = [
+    ["docx", "Word \xB7 .docx"],
+    ["md", "Markdown \xB7 .md"],
+    ["txt", "Text \xB7 .txt"],
+    ["srt", "Subtitles \xB7 .srt"],
+    ["vtt", "Subtitles \xB7 .vtt"],
+    ["json", "Data \xB7 .json"]
+  ];
+  var CODES = {
+    Russian: "ru",
+    Ukrainian: "uk",
+    German: "de",
+    French: "fr",
+    Spanish: "es",
+    Italian: "it",
+    Polish: "pl",
+    Portuguese: "pt",
+    Turkish: "tr",
+    Dutch: "nl",
+    Czech: "cs",
+    Japanese: "ja",
+    Chinese: "zh",
+    Korean: "ko",
+    Arabic: "ar",
+    Persian: "fa",
+    Kazakh: "kk",
+    Hebrew: "he",
+    Swedish: "sv",
+    Greek: "el",
+    Hungarian: "hu",
+    Romanian: "ro",
+    Bulgarian: "bg",
+    Finnish: "fi",
+    Danish: "da",
+    Norwegian: "no",
+    Serbian: "sr",
+    Croatian: "hr",
+    Slovak: "sk",
+    Lithuanian: "lt",
+    Latvian: "lv",
+    Estonian: "et"
+  };
+  var tx = {
+    rows: void 0,
+    query: "",
+    /** The transcript open on the page; empty: the library. */
+    openId: "",
+    row: void 0,
+    transcript: void 0,
+    recorder: void 0,
+    language: "auto",
+    speakers: 0,
+    /** The delete button was tapped once: it asks. */
+    deleting: false,
+    /** The export menu is open. */
+    exporting: false,
+    /** "Transcribe again" was tapped once: it asks. */
+    redoing: false
+  };
+  var DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  var DAY = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  function meta(r, long = false) {
+    const parts = [(long ? DAY : DATE).format(new Date(r.created))];
+    if (r.duration) parts.push(length(r.duration));
+    parts.push(SOURCES[r.source]?.label ?? r.source);
+    return parts.join(" \xB7 ");
+  }
+  var languages = (v) => {
+    const own = CODES[v.settings.native];
+    return [["auto", "Auto"], ["en", "English"], ...own ? [[own, v.settings.native]] : []];
+  };
+  async function transcribeFiles(files) {
+    const ids = [];
+    for (const file of files) {
+      const path = window.tutorHost.pathOf(file);
+      if (!path) continue;
+      try {
+        ids.push((await api("POST", "/transcripts", { path, language: tx.language === "auto" ? null : tx.language, speakers: tx.speakers || null })).id);
+      } catch (error) {
+        toast(`${file.name}: ${problem(error)}`, void 0, true);
+      }
+    }
+    if (ids.length === 1) openTranscript(ids[0]);
+    else if (ids.length > 1) {
+      toast(`${ids.length} files are waiting their turn`);
+      openTranscript("");
+    }
+  }
+  var picker = el("input", {
+    type: "file",
+    accept: "audio/*,video/*,.mkv,.m4a,.opus,.flac",
+    multiple: true,
+    hidden: true,
+    onchange: (event) => {
+      const input = event.target;
+      void transcribeFiles([...input.files ?? []]).finally(() => input.value = "");
+    }
+  });
+  document.body.append(picker);
+  function newRows(v) {
+    const zone = el(
+      "div",
+      { class: "zone", role: "button", tabindex: 0, onclick: () => picker.click(), onkeydown: (e) => e.key === "Enter" && picker.click() },
+      icon("cloud-upload"),
+      el("div", { class: "zt" }, el("b", {}, "Drop a video or audio file"), el("small", {}, `here or anywhere in the window \xB7 mp4, mov, mkv, webm, mp3, m4a, wav\u2026 \xB7 read where it is, never copied \xB7 an hour takes \u2248${minutesPerHour(v) >= 60 ? "an hour" : `${minutesPerHour(v)} min`} here`)),
+      btn("Pick a file\u2026", (event) => (event.stopPropagation(), picker.click()))
+    );
+    return [
+      zone,
+      row("Language", ["Auto: heard from the first seconds"], seg(tx.language, languages(v), (language) => tx.language = language)),
+      row(
+        "Speakers",
+        ["how many talk \xB7 Auto finds out"],
+        seg(tx.speakers, [[0, "Auto"], [1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"]], (speakers) => tx.speakers = speakers, true)
+      ),
+      micRow()
+    ];
+  }
+  function micRow() {
+    const r = tx.recorder;
+    if (!r) return row("Record from the microphone", ["a talk, a lecture, people in the room \xB7 the text comes after Stop"], btn([el("i", { class: "dot" }), "Record"], () => void startMic(), "rec"));
+    return el(
+      "div",
+      { class: "row live" },
+      el("div", { class: "l" }, el("span", { class: "livehead" }, el("i", { class: "dot pulse" }), "Recording", el("span", { class: "mtime" }, clock(r.seconds))), el("span", { class: "level" }, el("i"))),
+      el("span", { class: "kchg" }, linkBtn("Cancel", () => void cancelMic()), btn("Stop and transcribe", () => void stopMic(), "primary"))
+    );
+  }
+  window.setInterval(() => {
+    const r = tx.recorder;
+    if (!r) return;
+    for (const t of document.querySelectorAll(".mtime")) t.textContent = clock(r.seconds);
+    for (const l of document.querySelectorAll(".level i")) l.style.width = `${Math.round(r.level() * 100)}%`;
+  }, 100);
+  async function startMic() {
+    const r = new ChunkRecorder(window.tutorHost.call, { source: "mic", slice: 1e4, language: tx.language === "auto" ? void 0 : tx.language, speakers: tx.speakers || void 0 });
+    try {
+      await r.start();
+      tx.recorder = r;
+    } catch (error) {
+      toast(micTrouble(error), void 0, true);
+    }
+    redrawPage();
+  }
+  async function stopMic() {
+    const r = tx.recorder;
+    tx.recorder = void 0;
+    redrawPage();
+    if (!r) return;
+    try {
+      const id = await r.finish();
+      if (r.lost) toast("A piece of the recording did not reach the engine", void 0, true);
+      openTranscript(id);
+    } catch (error) {
+      fault(error);
+    }
+  }
+  async function cancelMic() {
+    const r = tx.recorder;
+    tx.recorder = void 0;
+    redrawPage();
+    await r?.cancel();
+  }
+  var drop = el("div", { class: "drop" }, el("div", {}, icon("cloud-upload"), el("b", {}, "Drop to transcribe")));
+  document.body.append(drop);
+  var dragDepth = 0;
+  var carriesFiles = (event) => !!event.dataTransfer?.types.includes("Files");
+  window.addEventListener("dragenter", (event) => {
+    if (!carriesFiles(event)) return;
+    dragDepth++;
+    drop.classList.add("on");
+  });
+  window.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) drop.classList.remove("on");
+  });
+  window.addEventListener("dragover", (event) => event.preventDefault());
+  window.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    drop.classList.remove("on");
+    const files = [...event.dataTransfer?.files ?? []];
+    if (!files.length) return;
+    const v = hooks.view();
+    if (!v || !running(v)) return hooks.setup();
+    void transcribeFiles(files);
+  });
+  var searchTimer;
+  async function loadRows() {
+    try {
+      const rows = await api("GET", `/transcripts?q=${encodeURIComponent(tx.query)}`);
+      const changed = JSON.stringify(rows) !== JSON.stringify(tx.rows);
+      tx.rows = rows;
+      if (changed && hooks.shown() && !tx.openId) redrawPage();
+    } catch {
+    }
+  }
+  function transcriptsCap() {
+    const n = tx.rows?.length;
+    if (n === void 0 || tx.query) return "searched by their words";
+    return n ? `${n} \xB7 searched by their words` : "none yet";
+  }
+  function transcriptsBody(v) {
+    if (!installed(v)) return [row("Transcripts need the speech engine", ["it downloads once, on the Transcribe page"], linkBtn("Transcribe\u2026", () => hooks.setup()))];
+    if (!running(v)) return [row("The speech engine is starting\u2026", ["the transcripts show once it runs"], null)];
+    return tx.openId ? transcriptPage(v) : libraryPage(v);
+  }
+  function libraryPage(v) {
+    const kb = v.speech.health?.kbDir;
+    return [
+      el(
+        "div",
+        { class: "tools" },
+        el(
+          "label",
+          { class: "search" },
+          icon("search"),
+          el("input", {
+            type: "search",
+            placeholder: "Search every transcript",
+            value: tx.query,
+            oninput: (event) => {
+              tx.query = event.target.value;
+              window.clearTimeout(searchTimer);
+              searchTimer = window.setTimeout(() => void loadRows(), 200);
+            }
+          })
+        ),
+        btn([icon("add"), "New"], () => hooks.setup(), "", "A new transcription")
+      ),
+      kb === "" ? aside("book", "Notes need a knowledge base folder.", " ", linkBtn("Choose\u2026", () => void pickKb())) : null,
+      speakersMissing(v, () => hooks.setup()),
+      list(v)
+    ].filter((n) => n !== null);
+  }
+  function list(v) {
+    const rows = tx.rows;
+    if (!rows) return el("ul", { class: "tl" }, el("li", { class: "empty" }, "Opening the library\u2026"));
+    if (!rows.length) {
+      if (tx.query) return el("ul", { class: "tl" }, el("li", { class: "empty" }, "Nothing found."));
+      const tip = (glyph2, ...text) => el("li", {}, icon(glyph2), el("span", {}, ...text));
+      return el(
+        "div",
+        { class: "tempty" },
+        el("b", {}, "Transcripts will be here"),
+        el(
+          "ul",
+          {},
+          tip("cloud-upload", "Drop a video or audio file into this window"),
+          tip("mic", "Record from the microphone on the Transcribe page"),
+          tip("note", "Dictate a note: ", caps(v.settings.noteKey), " in any program"),
+          tip("organization", "Record a Google Meet call with the Chrome extension")
+        )
+      );
+    }
+    return el(
+      "ul",
+      { class: "tl" },
+      ...rows.map(
+        (r) => el(
+          "li",
+          {},
+          el(
+            "button",
+            { class: "ti", onclick: () => openTranscript(r.id) },
+            el("span", { class: "src" }, icon(SOURCES[r.source]?.icon ?? "file")),
+            el("span", { class: "tm" }, el("b", {}, r.title), el("small", {}, meta(r)), r.snippet ? snippet(r.snippet) : null),
+            statusChip(r)
+          )
+        )
+      )
+    );
+  }
+  function snippet(text) {
+    const out = el("span", { class: "snip" });
+    for (const part of text.split(/(\[[^\]]*\])/)) {
+      if (part.startsWith("[") && part.endsWith("]")) out.append(el("mark", {}, part.slice(1, -1)));
+      else if (part) out.append(part);
+    }
+    return out;
+  }
+  function statusChip(r) {
+    if (r.status === "done") return null;
+    if (r.status === "failed") return el("span", { class: "chip bad" }, "failed");
+    if (r.status === "recording") return el("span", { class: "chip rec" }, el("i", { class: "dot pulse" }), "recording");
+    if (r.status === "queued") return el("span", { class: "chip off" }, "waiting");
+    return el("span", { class: "chip lit" }, `${Math.round(r.progress * 100)}%`);
+  }
+  function openTranscript(id) {
+    if (id !== tx.openId) stopPlayer();
+    tx.openId = id;
+    tx.deleting = tx.exporting = tx.redoing = false;
+    if (id && tx.row?.id !== id) {
+      tx.row = void 0;
+      tx.transcript = void 0;
+    }
+    if (id) void loadTranscript();
+    else void loadRows();
+    if (hooks.shown()) redrawPage();
+    else hooks.show();
+  }
+  function backToList() {
+    if (!tx.openId) return false;
+    openTranscript("");
+    return true;
+  }
+  function leaveTranscripts() {
+    stopPlayer();
+  }
+  var busy = (status) => status === "queued" || status === "working";
+  async function loadTranscript() {
+    const id = tx.openId;
+    try {
+      const r = await api("GET", `/transcripts/${id}`);
+      if (id !== tx.openId) return;
+      const before = tx.row?.id === id ? tx.row : void 0;
+      tx.row = r.row;
+      if (r.transcript || r.row.status !== "done") tx.transcript = r.transcript ?? void 0;
+      pace.see(r.row);
+      if (!hooks.shown()) return;
+      if (r.row.status === "done" && before?.status === "done") return;
+      const card = document.querySelector(".progress");
+      if (card && busy(before?.status) && busy(r.row.status)) return updateProgress(card, r.row);
+      redrawPage();
+    } catch (error) {
+      if (error instanceof SpeechError && error.status === 404) openTranscript("");
+    }
+  }
+  function transcriptPage(v) {
+    const r = tx.row;
+    if (!r || r.id !== tx.openId) return [el("p", { class: "opening" }, "Opening\u2026")];
+    const t = tx.transcript;
+    const title = el("h2", {
+      class: "ttitle",
+      contenteditable: t ? "plaintext-only" : false,
+      spellcheck: "false",
+      title: t ? "Rename" : void 0,
+      onkeydown: (event) => {
+        const e = event;
+        if (e.key === "Enter") e.preventDefault(), e.target.blur();
+        if (e.key === "Escape") e.preventDefault(), e.target.textContent = t?.title ?? r.title, e.target.blur();
+      },
+      onblur: (event) => {
+        const node = event.target;
+        const text = node.textContent?.trim() ?? "";
+        if (t && text && text !== t.title) void patch({ title: text }).then(() => void loadRows());
+        else node.textContent = t?.title ?? r.title;
+      }
+    });
+    title.textContent = t?.title ?? r.title;
+    const head = el("div", { class: "thead" }, title, el("small", { class: "tmeta" }, meta(t ?? r, true)));
+    if (r.status !== "done" || !t) {
+      stopPlayer();
+      return [head, progressCard(r)];
+    }
+    return [head, actions(t), ...notices(v, r, t), speakersStrip(t), utterances(t), player(v, t)].filter((n) => n !== null);
+  }
+  function progressCard(r) {
+    if (r.status === "failed") {
+      return el(
+        "div",
+        { class: "card bad" },
+        el("b", {}, "Could not transcribe it"),
+        el("small", {}, r.error),
+        el(
+          "div",
+          { class: "cardbtns" },
+          btn("Try again", async () => {
+            try {
+              await api("POST", `/transcripts/${r.id}/retry`);
+              void loadTranscript();
+            } catch (error) {
+              fault(error);
+            }
+          }),
+          linkBtn("Delete", () => void remove(r.id))
+        )
+      );
+    }
+    if (r.status === "recording") return el("div", { class: "card" }, el("b", {}, el("i", { class: "dot pulse" }), " Recording"), el("small", {}, "The text comes once the recording stops."));
+    const card = el(
+      "div",
+      { class: "card progress" },
+      el("b", { class: "plead" }),
+      el("span", { class: "track" }, el("i")),
+      el("small", { class: "pstat" }),
+      el("ol", { class: "stages" }, ...STAGES.map(([, label]) => el("li", {}, label))),
+      el("small", { class: "pnote" }, "The window can be closed: it goes on in the background.")
+    );
+    updateProgress(card, r);
+    return card;
+  }
+  function updateProgress(card, r) {
+    const at = STAGES.findIndex((s) => s[0] === r.stage);
+    const lead = card.querySelector(".plead");
+    if (lead) lead.textContent = r.status === "queued" ? "Waiting its turn" : `${STAGES[at]?.[1] ?? "Starting"}\u2026`;
+    const track = card.querySelector(".track");
+    track?.classList.toggle("live", r.status === "working");
+    const fill = track?.firstElementChild;
+    if (fill) fill.style.width = `${(r.progress * 100).toFixed(1)}%`;
+    const line = card.querySelector(".pstat");
+    if (line) line.textContent = progressLine(r);
+    card.querySelectorAll(".stages li").forEach((li, i) => li.className = i < at ? "done" : i === at ? "now" : "");
+  }
+  function progressLine(r) {
+    if (r.status === "queued") return "Starts once the one before it is done.";
+    const [a, b] = WEIGHTS[r.stage] ?? [0, 1];
+    const part = Math.min(1, Math.max(0, (r.progress - a) / (b - a)));
+    const parts = [];
+    if (r.stage === "words" && part === 0) parts.push("loading the model, finding speech");
+    else if (r.stage === "words" && r.duration && r.source !== "meet") parts.push(position(part * r.duration, r.duration));
+    else if (part > 0) parts.push(`${Math.round(part * 100)}%`);
+    const left = part > 0 ? pace.left(r) : "";
+    if (left) parts.push(left);
+    return parts.join(" \xB7 ");
+  }
+  function position(at, total) {
+    return total >= 120 ? `${Math.floor(at / 60)} of ${Math.round(total / 60)} min` : `${clock(at)} of ${clock(total)}`;
+  }
+  var pace = {
+    id: "",
+    seen: [],
+    see(r) {
+      const now = Date.now();
+      if (this.id !== r.id) this.id = r.id, this.seen = [];
+      this.seen = this.seen.filter(([t, p]) => now - t < 3e4 && p <= r.progress);
+      this.seen.push([now, r.progress]);
+    },
+    left(r) {
+      const first = this.seen[0];
+      if (this.id !== r.id || !first) return "";
+      const spent = (Date.now() - first[0]) / 1e3;
+      const done = r.progress - first[1];
+      if (spent < 8 || done < 0.01) return "";
+      const left = (1 - r.progress) * spent / done;
+      return left < 60 ? "under a minute left" : `about ${Math.round(left / 60)} min left`;
+    }
+  };
+  async function patch(changes) {
+    try {
+      const t = await api("PATCH", `/transcripts/${tx.openId}`, changes);
+      const recount = t.utterances.length !== tx.transcript?.utterances.length;
+      tx.transcript = t;
+      if (recount) redrawPage();
+    } catch (error) {
+      fault(error);
+    }
+  }
+  function actions(t) {
+    const copy = btn([icon("copy"), "Copy"], async () => {
+      try {
+        await window.tutorHost.call({ call: "copy", text: await api("GET", `/transcripts/${t.id}/text?format=txt`) });
+        toast("The text is copied");
+      } catch (error) {
+        fault(error);
+      }
+    });
+    const menu = tx.exporting ? el(
+      "div",
+      { class: "menu", role: "menu" },
+      ...FORMATS.map(
+        ([format, label]) => el(
+          "button",
+          {
+            class: "mi",
+            role: "menuitem",
+            onclick: async () => {
+              tx.exporting = false;
+              redrawPage();
+              try {
+                const path = await window.tutorHost.call({ call: "exportTranscript", id: t.id, format, name: t.title });
+                if (path) toast(`Saved: ${fileName(path)}`, showFile(path));
+              } catch (error) {
+                fault(error);
+              }
+            }
+          },
+          label
+        )
+      )
+    ) : null;
+    const exporter = el(
+      "span",
+      { class: "menuwrap" },
+      btn([icon("desktop-download"), "Export", icon("chevron-down")], (event) => {
+        event.stopPropagation();
+        tx.exporting = !tx.exporting;
+        redrawPage();
+      }),
+      menu
+    );
+    const toKb = t.source !== "note" ? btn([icon("book"), "To knowledge base"], async () => {
+      try {
+        const { path } = await api("POST", `/transcripts/${t.id}/to-kb`);
+        toast(`In the knowledge base: ${fileName(path)}`, showFile(path));
+      } catch (error) {
+        const choose = error instanceof SpeechError && error.status === 409;
+        toast(problem(error), choose ? { label: "Choose a folder", run: () => void pickKb() } : void 0, true);
+      }
+    }) : null;
+    const del = tx.deleting ? el(
+      "span",
+      { class: "confirm" },
+      el("small", {}, "Delete for good?"),
+      btn("Delete", () => void remove(t.id), "danger"),
+      linkBtn("Keep", () => (tx.deleting = false, redrawPage()))
+    ) : el("button", { class: "ib del", title: "Delete", "aria-label": "Delete", onclick: () => (tx.deleting = true, redrawPage()) }, icon("trash"));
+    return el("div", { class: "tools tacts" }, copy, exporter, toKb, el("span", { class: "gap" }), del);
+  }
+  window.addEventListener("click", (event) => {
+    if (!tx.exporting || event.target.closest?.(".menuwrap")) return;
+    tx.exporting = false;
+    redrawPage();
+  });
+  async function remove(id) {
+    try {
+      await api("DELETE", `/transcripts/${id}`);
+      toast("Deleted");
+      openTranscript("");
+    } catch (error) {
+      fault(error);
+    }
+  }
+  function notices(v, r, t) {
+    const out = [];
+    const note = t.note;
+    if (note) {
+      out.push(
+        aside("book", "In the knowledge base: ", el("b", {}, fileName(note)), " ", linkBtn("Open", () => post({ type: "openPath", path: note })), linkBtn("Show in folder", () => post({ type: "showInFolder", path: note })))
+      );
+    }
+    if (t.noteError) out.push(aside("info", t.noteError, " ", linkBtn("Choose a folder", () => void pickKb())));
+    if (r.error) out.push(aside("warning", r.error));
+    const speakers = speakersNotice(v, t);
+    if (speakers) out.push(speakers);
+    return out;
+  }
+  function splitWay(t) {
+    if (t.source === "note" || t.speakersStatus === "ok") return null;
+    if (t.hasWords) return "words";
+    return t.source === "file" || t.source === "mic" ? "redo" : null;
+  }
+  function speakersNotice(v, t) {
+    if (t.source === "note" || t.speakersStatus === "ok" || t.speakersStatus === "single") return null;
+    const why = t.speakersStatus === "failed" ? "Speakers could not be told apart; the text is one stream." : "Speakers are not told apart: it was made without a Hugging Face key.";
+    const missing = speakersMissing(v, () => hooks.setup());
+    if (missing) return aside("person", why, " ", linkBtn("Set up speakers", () => hooks.setup()));
+    const way = splitWay(t);
+    if (!way) return aside("person", `${why} This meeting can no longer be split: its words were not kept.`);
+    const run = () => void splitSpeakers(t.id);
+    if (way === "words") return aside("person", `${why} The text is not recognized again; edits stay.`, " ", linkBtn("Split by speaker", run));
+    const minutes = Math.max(1, Math.round(t.duration / 3600 * minutesPerHour(v)));
+    if (tx.redoing) {
+      return aside(
+        "person",
+        t.edited ? "Edits to the text will be lost. Go on?" : "Go on?",
+        " ",
+        linkBtn("Transcribe again", run),
+        linkBtn("Not now", () => (tx.redoing = false, redrawPage()))
+      );
+    }
+    return aside("person", `${why} It can be transcribed again, with speakers: about ${minutes} min.`, " ", linkBtn("Transcribe again", () => (tx.redoing = true, redrawPage())));
+  }
+  async function splitSpeakers(id) {
+    tx.redoing = false;
+    try {
+      await api("POST", `/transcripts/${id}/speakers`, {});
+      if (tx.openId === id && tx.row) {
+        tx.row = { ...tx.row, status: "queued", progress: 0, stage: "" };
+        redrawPage();
+      }
+    } catch (error) {
+      fault(error);
+    }
+  }
+  function speakerClass(t, key) {
+    if (key === "me") return "sp-me";
+    return `sp-${Object.keys(t.speakers).filter((k) => k !== "me").indexOf(key) % 6 + 1}`;
+  }
+  function speakersStrip(t) {
+    const keys = Object.keys(t.speakers);
+    if (keys.length < 2) return null;
+    const strip = el("div", { class: "spk" });
+    for (const key of keys) {
+      const name = t.speakers[key]?.name ?? key;
+      const chipNode = el("button", { class: `chip sp ${speakerClass(t, key)}`, title: "Rename" }, el("i", { class: "sw" }), name);
+      chipNode.addEventListener("click", () => {
+        const input = el("input", { type: "text", class: "field", value: name, "aria-label": "Speaker\u2019s name" });
+        let done = false;
+        const finish = (keep) => {
+          if (done) return;
+          done = true;
+          const next = input.value.trim();
+          const s = t.speakers[key];
+          if (keep && next && s && next !== s.name) {
+            s.name = next;
+            void patch({ speakers: { [key]: next } });
+            for (const who of document.querySelectorAll(`.who[data-speaker="${key}"]`)) who.textContent = next;
+            chipNode.lastChild.textContent = next;
+          }
+          input.replaceWith(chipNode);
+        };
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") finish(true);
+          if (event.key === "Escape") event.preventDefault(), finish(false);
+        });
+        input.addEventListener("blur", () => finish(true));
+        chipNode.replaceWith(input);
+        input.select();
+      });
+      strip.append(chipNode);
+    }
+    strip.append(el("small", {}, "tap a name to rename"));
+    return strip;
+  }
+  function speakerMenu(t, i, label) {
+    document.querySelector(".whomenu")?.remove();
+    const menu = el(
+      "div",
+      { class: "menu whomenu", role: "menu" },
+      ...Object.entries(t.speakers).map(
+        ([key, s]) => el(
+          "button",
+          {
+            class: `mi ${speakerClass(t, key)}`,
+            role: "menuitem",
+            onclick: () => {
+              menu.remove();
+              const u = t.utterances[i];
+              if (!u || u.speaker === key) return;
+              u.speaker = key;
+              void patch({ utterances: { [i]: { speaker: key } } }).then(redrawPage);
+            }
+          },
+          el("i", { class: "sw" }),
+          s.name
+        )
+      )
+    );
+    label.after(menu);
+    window.setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }));
+  }
+  function utterances(t) {
+    const many = Object.keys(t.speakers).length > 1;
+    const list2 = el("div", { class: "utts" });
+    t.utterances.forEach((u, i) => {
+      const first = i === 0 || t.utterances[i - 1]?.speaker !== u.speaker;
+      const text = el("div", {
+        class: "ut",
+        contenteditable: "plaintext-only",
+        spellcheck: "false",
+        onkeydown: (event) => {
+          const e = event;
+          const node = e.target;
+          if (e.key === "Enter" && !e.shiftKey) e.preventDefault(), node.blur();
+          if (e.key === "Escape") e.preventDefault(), node.textContent = t.utterances[i]?.text ?? "", node.blur();
+        },
+        onblur: (event) => {
+          const value = event.target.textContent?.trim() ?? "";
+          const now = t.utterances[i];
+          if (now && value !== now.text) {
+            now.text = value;
+            void patch({ utterances: { [i]: { text: value } } });
+          }
+        }
+      });
+      text.textContent = u.text;
+      const who = many && first ? el("button", { class: "who", "data-speaker": u.speaker, title: "Another speaker" }, t.speakers[u.speaker]?.name ?? u.speaker) : null;
+      who?.addEventListener("click", (event) => (event.stopPropagation(), speakerMenu(t, i, who)));
+      list2.append(
+        el(
+          "div",
+          { class: `utt${first ? " first" : ""}${who ? " has-who" : ""}${i === heard ? " now" : ""} ${speakerClass(t, u.speaker)}`, "data-i": String(i) },
+          el("button", { class: "at", title: "Listen from here", onclick: () => seek(u.start) }, clock(u.start)),
+          el("div", { class: "ub" }, who, text)
+        )
+      );
+    });
+    return list2;
+  }
+  var audio;
+  var audioId = "";
+  var heard = -1;
+  function stopPlayer() {
+    audio?.pause();
+    audio?.removeAttribute("src");
+    audio = void 0;
+    audioId = "";
+    heard = -1;
+  }
+  function soundOf(v, t) {
+    if (audio && audioId === t.id) return audio;
+    stopPlayer();
+    const a = new Audio(`http://127.0.0.1:${v.speech.port}/transcripts/${encodeURIComponent(t.id)}/audio`);
+    a.preload = "metadata";
+    const sync = () => {
+      for (const p of document.querySelectorAll(".player")) {
+        const playing = !a.paused;
+        p.classList.toggle("playing", playing);
+        p.querySelector(".pp")?.replaceChildren(icon(playing ? "debug-pause" : "play"));
+        const time = p.querySelector(".ptime");
+        if (time) time.textContent = `${clock(a.currentTime)} / ${clock(t.duration)}`;
+        const range = p.querySelector(".scrub");
+        if (range && document.activeElement !== range) range.value = String(Math.round(a.currentTime * 10));
+      }
+      mark(t, a.currentTime, !a.paused);
+    };
+    a.addEventListener("play", sync);
+    a.addEventListener("pause", sync);
+    a.addEventListener("timeupdate", sync);
+    audio = a;
+    audioId = t.id;
+    return a;
+  }
+  function seek(at) {
+    if (!audio) return;
+    audio.currentTime = Math.max(0, at - 0.3);
+    void audio.play();
+  }
+  var SPEEDS = [1, 1.25, 1.5, 2];
+  function player(v, t) {
+    const a = soundOf(v, t);
+    const playing = !a.paused;
+    const range = el("input", { type: "range", class: "scrub", min: 0, max: Math.round(t.duration * 10), value: Math.round(a.currentTime * 10), "aria-label": "Position" });
+    range.addEventListener("input", () => a.currentTime = Number(range.value) / 10);
+    const speed = el("button", { class: "speed", title: "Speed" }, `${a.playbackRate}\xD7`);
+    speed.addEventListener("click", () => {
+      const next = SPEEDS[(SPEEDS.indexOf(a.playbackRate) + 1) % SPEEDS.length] ?? 1;
+      a.playbackRate = next;
+      speed.textContent = `${next}\xD7`;
+    });
+    return el(
+      "div",
+      { class: playing ? "player playing" : "player" },
+      el("button", { class: "pp", title: "Play or pause \xB7 Space", "aria-label": "Play or pause", onclick: () => a.paused ? void a.play() : a.pause() }, icon(playing ? "debug-pause" : "play")),
+      el("span", { class: "ptime" }, `${clock(a.currentTime)} / ${clock(t.duration)}`),
+      range,
+      speed
+    );
+  }
+  function mark(t, at, follow2) {
+    let lo = 0;
+    let hi = t.utterances.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = lo + hi >> 1;
+      if ((t.utterances[mid]?.start ?? 0) <= at + 0.3) found = mid, lo = mid + 1;
+      else hi = mid - 1;
+    }
+    if (found === heard) return;
+    heard = found;
+    document.querySelector(".utt.now")?.classList.remove("now");
+    const node = document.querySelector(`.utt[data-i="${found}"]`);
+    node?.classList.add("now");
+    if (follow2 && node && !node.contains(document.activeElement)) node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  window.addEventListener("keydown", (event) => {
+    if (event.code !== "Space" || !audio || !hooks.shown() || !tx.openId) return;
+    const target = event.target;
+    if (target.isContentEditable || target.matches("input, textarea, select") || target.classList.contains("recording")) return;
+    event.preventDefault();
+    if (audio.paused) void audio.play();
+    else audio.pause();
+  });
+  window.setInterval(() => {
+    const v = hooks.view();
+    if (!v || !running(v) || !hooks.shown()) return;
+    if (!tx.openId) void loadRows();
+    else if (tx.row && tx.row.status !== "done") void loadTranscript();
+  }, 1500);
+  function enterTranscripts() {
+    if (tx.openId) void loadTranscript();
+    else void loadRows();
+  }
+
+  // src/webview/app.ts
+  var save = (patch2) => post({ type: "saveSettings", patch: patch2 });
+  var ACTIONS = ["listen", "translate", "screen", "dictate", "transcribe", "keyboard"];
   var isAction = (name) => ACTIONS.includes(name);
   var TITLES = {
     listen: "Listen",
     translate: "Translate",
     screen: "Screen",
     dictate: "Dictate",
+    transcribe: "Transcribe",
     keyboard: "Keyboard",
     words: "Words",
+    transcripts: "Transcripts",
     settings: "Settings",
     about: "About"
   };
   var view;
   var askedTab;
+  var askedTranscript = "";
   var search = "";
   var keyTrouble;
   var pickedLayout = "";
@@ -280,6 +1524,7 @@
   var sampleOf = (native) => SAMPLES[native] ?? SAMPLES.Russian;
   var said = (hotkey) => hotkey === COPY_TWICE ? "Ctrl + C twice" : hotkeyLabel(hotkey);
   var usage = (hotkey) => `${/^(Left|Right)(Control|Shift|Alt|Super)(\*2)?$/.test(hotkey) ? "tap" : "press"} ${said(hotkey)}`;
+  var MEET_KEY = "Alt+Shift+M";
   function keyLines(action, s) {
     switch (action) {
       case "listen":
@@ -300,7 +1545,12 @@
           { label: "translate", hotkey: s.textKey }
         ];
       case "dictate":
-        return [{ label: "hold or tap", hotkey: "" }];
+        return [
+          { label: "dictate", hotkey: s.dictateKey },
+          { label: "note", hotkey: s.noteKey }
+        ];
+      case "transcribe":
+        return [{ label: "in Meet", hotkey: MEET_KEY }];
       case "keyboard":
         return [
           { label: "switch", hotkey: s.switchKey },
@@ -317,6 +1567,13 @@
   }
   var naturalOn = (v) => v.natural.status === "ready" && (v.settings.voice === "" || v.settings.voice.startsWith(NATURAL_PREFIX));
   var pairOf = (v) => `${v.settings.native} \u21C4 English`;
+  function engineCap(v) {
+    const p = v.speech.pack;
+    if (p.status === "installing" && !installed(v)) return `downloading ${Math.round((p.progress ?? 0) * 100)}%`;
+    if (!installed(v)) return "downloads once";
+    const d = v.speech.health?.device;
+    return d === "cuda" ? "Whisper \xB7 graphics card" : d === "cpu" ? "Whisper \xB7 processor" : "Whisper";
+  }
   function actionText(action, v) {
     const title = TITLES[action];
     switch (action) {
@@ -327,7 +1584,9 @@
       case "screen":
         return { title, cap: "Windows OCR", desc: "Draw a box over words you can\u2019t select." };
       case "dictate":
-        return { title, cap: "coming", desc: `Say it and it types. Say it in ${v.settings.native}, get English.` };
+        return { title, cap: engineCap(v), desc: `Say it and it types. Say it in ${v.settings.native}, get English.` };
+      case "transcribe":
+        return { title, cap: "files \xB7 microphone \xB7 Meet", desc: "Talks and meetings into text, speaker by speaker." };
       case "keyboard":
         return {
           title,
@@ -343,6 +1602,7 @@
     { class: "nav" },
     pill("home", el("span", { class: "lbl" }, "Home")),
     pill("words", el("span", { class: "lbl" }, "Words"), wordCount),
+    pill("transcripts", el("span", { class: "lbl" }, "Transcripts")),
     pill("about", el("span", { class: "lbl" }, "About")),
     el("span", { class: "gap" }),
     pill("settings", icon("settings"), el("span", { class: "lbl" }, "Settings"))
@@ -356,7 +1616,7 @@
   var top = el("header", { class: "top" }, el("div", { class: "brand" }, el("span", { class: "key" }, "alt"), el("span", { class: "wm" }, "altype")), nav, winButtons);
   var home = el("main", { class: "home" });
   var pGround = el("div", { class: "pgg" });
-  var pBack = el("button", { class: "pback", onclick: () => closePage() }, icon("chevron-left"), "Back", el("span", { class: "key" }, "Esc"));
+  var pBack = el("button", { class: "pback", onclick: () => back() }, icon("chevron-left"), "Back", el("span", { class: "key" }, "Esc"));
   var pTitle = el("span", { class: "ptitle" });
   var pCap = el("span", { class: "pcap" });
   var pKeys = el("div", { class: "pkeys keys" });
@@ -390,7 +1650,7 @@
     return el(
       "li",
       {
-        class: action === "dictate" ? "act soon" : "act",
+        class: "act",
         "data-page": action,
         role: "button",
         tabindex: 0,
@@ -763,6 +2023,7 @@
     pickedLayout = "";
     addingApp = false;
     keyTrouble = void 0;
+    if (name === "transcripts") enterTranscripts();
     fillHeader();
     pBody.replaceChildren();
     renderBody();
@@ -780,9 +2041,14 @@
     renderGrowth(gr, 0);
     grow(gr, true, settle);
   }
+  function back() {
+    if (open?.name === "transcripts" && backToList()) return;
+    closePage();
+  }
   function closePage(animate = !reduced.matches) {
     if (!open) return;
     const name = open.name;
+    if (name === "transcripts") leaveTranscripts();
     const done = () => {
       root.classList.remove("page-open");
       pg.style.visibility = "";
@@ -796,10 +2062,10 @@
     animating = false;
     const source = sourceOf(name);
     if (!source || !animate) return done();
-    const back = pg.contains(document.activeElement);
+    const back2 = pg.contains(document.activeElement);
     grow(measureGrowth(source), false, () => {
       done();
-      if (back) source.focus({ preventScroll: true });
+      if (back2) source.focus({ preventScroll: true });
     });
   }
   function fillHeader() {
@@ -807,22 +2073,22 @@
     const name = open.name;
     const v = view;
     pTitle.textContent = TITLES[name];
-    pCap.textContent = isAction(name) ? actionText(name, v).cap : name === "words" ? v.words.length ? `${v.words.length} saved \xB7 from your cards` : "none yet \xB7 from your cards" : name === "about" ? `Altype ${v.version}` : "";
+    pCap.textContent = isAction(name) ? actionText(name, v).cap : name === "words" ? v.words.length ? `${v.words.length} saved \xB7 from your cards` : "none yet \xB7 from your cards" : name === "about" ? `Altype ${v.version}` : name === "transcripts" ? transcriptsCap() : "";
     const keys = isAction(name) ? keysOf(name, v.settings) : [];
     const next = el("div", {}, ...keys);
     if (next.innerHTML !== pKeys.innerHTML) pKeys.replaceChildren(...next.childNodes);
   }
   var bodyPending = false;
   var pointerDown = false;
-  function busy() {
+  function busy2() {
     const a = document.activeElement;
-    return !!a && pBody.contains(a) && (a.matches("input[type=text], input[type=search]") || a.classList.contains("recording"));
+    return !!a && pBody.contains(a) && (a.matches("input[type=text], input[type=search], input[type=password], input[type=range]") || a.isContentEditable || a.classList.contains("recording"));
   }
   function renderBody() {
     if (!view || !open) return;
     const next = el("div", {}, ...bodyOf(open.name, view));
     if (next.innerHTML === pBody.innerHTML) return;
-    if (busy()) {
+    if (busy2()) {
       bodyPending = true;
       return;
     }
@@ -848,7 +2114,11 @@
       case "screen":
         return screenPage(v);
       case "dictate":
-        return dictatePage();
+        return dictatePage(v);
+      case "transcribe":
+        return transcribePage(v);
+      case "transcripts":
+        return transcriptsBody(v);
       case "keyboard":
         return keyboardPage(v);
       case "words":
@@ -859,70 +2129,6 @@
         return aboutPage(v);
     }
   }
-  var grp = (text) => el("div", { class: "grp" }, text);
-  var bad = (text) => el("small", { class: "bad" }, text);
-  function row(label, notes, ...controls) {
-    return el("div", { class: "row" }, el("div", { class: "l" }, label, ...notes.filter((n) => !!n).map((n) => typeof n === "string" ? el("small", {}, n) : n)), ...controls);
-  }
-  function toggle(label, on, onchange, ...notes) {
-    const knob = el("span", { class: on ? "tg on" : "tg" });
-    const node = el(
-      "button",
-      {
-        class: "row trow",
-        role: "switch",
-        "aria-checked": String(on),
-        onclick: () => {
-          const next = node.getAttribute("aria-checked") !== "true";
-          node.setAttribute("aria-checked", String(next));
-          knob.classList.toggle("on", next);
-          onchange(next);
-        }
-      },
-      el("span", { class: "l" }, label, ...notes.filter((n) => !!n).map((n) => typeof n === "string" ? el("small", {}, n) : n)),
-      knob
-    );
-    return node;
-  }
-  function seg(value, options, onchange, mono = false) {
-    const node = el("span", { class: mono ? "seg mono" : "seg", role: "radiogroup" });
-    for (const [v, label] of options) {
-      const b = el(
-        "button",
-        {
-          class: v === value ? "on" : "",
-          role: "radio",
-          "aria-checked": String(v === value),
-          onclick: () => {
-            for (const other of node.children) {
-              other.classList.toggle("on", other === b);
-              other.setAttribute("aria-checked", String(other === b));
-            }
-            onchange(v);
-          }
-        },
-        label
-      );
-      node.append(b);
-    }
-    return node;
-  }
-  function select(value, options, onchange) {
-    const node = el("select", {
-      onchange: (event) => {
-        const raw = event.target.value;
-        const picked = options.find(([v]) => String(v) === raw)?.[0];
-        if (picked !== void 0) onchange(picked);
-      }
-    });
-    for (const [v, label] of options) node.append(el("option", v === value ? { value: String(v), selected: true } : { value: String(v) }, label));
-    return el("span", { class: "sel" }, node, icon("chevron-down"));
-  }
-  var linkBtn = (text, onclick, disabled = false) => el("button", { class: "link", disabled, onclick }, text);
-  var chip = (text, cls = "") => el("span", { class: `chip${cls ? " " + cls : ""}` }, text);
-  function link(url, text) {
-    return el("a", { href: url, onclick: (event) => (event.preventDefault(), post({ type: "openLink", url })) }, text);
-  }
   function tryIt(text, how) {
     return el("div", { class: "try" }, el("p", {}, text), el("small", {}, how));
   }
@@ -932,7 +2138,10 @@
     translateKey: "translating the selection",
     textKey: "translating a piece of the screen",
     switchKey: "switching the layout",
-    fixKey: "fixing the layout"
+    fixKey: "fixing the layout",
+    dictateKey: "dictating",
+    englishKey: "dictating in English",
+    noteKey: "dictating a note"
   };
   function saveKey(name, key) {
     const s = view?.settings;
@@ -1042,21 +2251,6 @@
       tryIt("The morning was quiet. A small boat drifted along the river, and two children watched the ducks from the bridge.", how)
     ];
   }
-  function toggleKnob(on, onchange, label) {
-    const node = el("button", {
-      class: on ? "tg on" : "tg",
-      role: "switch",
-      "aria-checked": String(on),
-      "aria-label": label,
-      onclick: () => {
-        const next = node.getAttribute("aria-checked") !== "true";
-        node.setAttribute("aria-checked", String(next));
-        node.classList.toggle("on", next);
-        onchange(next);
-      }
-    });
-    return node;
-  }
   var TRY_TRANSLATE = {
     Russian: "\u041A\u043E\u043D\u0435\u0447\u043D\u043E, \u043F\u0440\u0438\u0448\u043B\u044E \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D\u043D\u044B\u0435 \u043C\u0430\u043A\u0435\u0442\u044B \u0434\u043E \u0441\u043E\u0437\u0432\u043E\u043D\u0430.",
     Ukrainian: "\u0417\u0432\u0456\u0441\u043D\u043E, \u043D\u0430\u0434\u0456\u0448\u043B\u044E \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u0456 \u043C\u0430\u043A\u0435\u0442\u0438 \u0434\u043E \u0434\u0437\u0432\u0456\u043D\u043A\u0430."
@@ -1101,15 +2295,72 @@
       row("Fix what it misread in the card, then translate", [], null)
     ];
   }
-  function dictatePage() {
+  var pathNote = (path) => el("small", { class: "path", title: path }, el("bdi", {}, path));
+  async function prepareDictation() {
+    try {
+      await api("POST", "/dictate/prepare");
+    } catch (error) {
+      fault(error);
+    }
+  }
+  function kbRows(v) {
+    const e = engineSettings(v);
+    if (!running(v) || !e) return [row("Folder", [installed(v) ? "shown once the speech engine runs" : "chosen once the speech engine is here"], null)];
+    const inbox = el("input", {
+      type: "text",
+      class: "field",
+      value: e.kbInbox,
+      placeholder: "the folder itself",
+      "aria-label": "Folder for notes",
+      onkeydown: (event) => event.key === "Enter" && event.target.blur(),
+      onchange: (event) => void saveEngine({ kbInbox: event.target.value.trim() })
+    });
     return [
-      grp("Keys"),
-      fixedKey("Dictate", "", "types what you say"),
-      fixedKey("Dictate in English", "", "say it in your language, English is typed"),
-      row("Tap to start and stop, or hold while you talk", [], chip("coming", "off")),
-      grp("Speech model"),
-      row("Downloads once, then works offline", ["nothing to set yet: Dictate comes in a later version"], chip("~700 MB", "off"))
+      row("Folder", [e.kbDir ? pathNote(e.kbDir) : "not chosen \xB7 notes need one; an Obsidian vault will do"], linkBtn(e.kbDir ? "Change" : "Choose\u2026", () => void pickKb())),
+      row("Notes go into", ["a folder inside it \xB7 empty: the folder itself"], inbox)
     ];
+  }
+  function dictatePage(v) {
+    const s = v.settings;
+    const k = v.speech.keysOk;
+    const offer = engineRows(v, "Dictate");
+    return [
+      ...offer.length ? [grp("Speech engine"), ...offer] : [],
+      grp("Keys"),
+      keyRow("dictateKey", "Dictate", "types what you say where the cursor is", !k.dictate),
+      keyRow("englishKey", "Dictate in English", `say it in ${s.native}, English is typed`, !k.english),
+      keyRow("noteKey", "A note", "kept in the knowledge base as a .md file", !k.note),
+      row("Tap the key, talk, tap it again", ["Esc while it records throws it away"], null),
+      grp("Knowledge base"),
+      ...kbRows(v),
+      ...running(v) ? [grp("Speech model"), modelRow("Dictation", v.speech.health?.models.dictation, "downloads with the first phrase", () => void prepareDictation())] : [],
+      el("p", { class: "privacy" }, icon("lock"), "Speech is recognized on this computer; nothing is sent anywhere.")
+    ].filter((n) => n !== null);
+  }
+  var copyText = (text) => void window.tutorHost.call({ call: "copy", text }).then(() => toast(`Copied: ${text}`), fault);
+  function meetRows(v) {
+    const dir = v.speech.extensionDir;
+    return [
+      row("1 \xB7 In Chrome, open chrome://extensions and turn on Developer mode", [], linkBtn("Copy address", () => copyText("chrome://extensions"))),
+      row("2 \xB7 Load unpacked, then pick the extension\u2019s folder", [pathNote(dir)], linkBtn("Show the folder", () => post({ type: "showInFolder", path: dir }))),
+      row("3 \xB7 In a meeting: the Altype icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone"], caps(MEET_KEY)),
+      row("4 \xB7 If the key does nothing, set it at chrome://extensions/shortcuts", [], linkBtn("Copy address", () => copyText("chrome://extensions/shortcuts")))
+    ];
+  }
+  function transcribePage(v) {
+    const offer = engineRows(v, "Transcribe");
+    return [
+      ...offer.length ? [grp("Speech engine"), ...offer] : [],
+      ...running(v) ? [grp("New transcription"), ...newRows(v)] : [],
+      ...installed(v) ? [grp("Speakers"), ...speakerRows(v)] : [],
+      grp("Google Meet"),
+      ...meetRows(v),
+      ...running(v) ? [
+        grp("Speech model"),
+        modelRow("Transcription", v.speech.health?.models.transcripts, "downloads with the first transcription"),
+        row("Every transcript, searched by its words", [], linkBtn("Transcripts", () => openPage("transcripts")))
+      ] : []
+    ].filter((n) => n !== null);
   }
   function layoutChips(v) {
     const cycle = cycleOf(v);
@@ -1152,11 +2403,11 @@
       )
     );
   }
-  function chipList(items, remove) {
+  function chipList(items, remove2) {
     return el(
       "div",
       { class: "chiprow" },
-      ...items.map((item) => el("span", { class: "chip" }, item, el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${item}`, onclick: () => remove(item) }, icon("close"))))
+      ...items.map((item) => el("span", { class: "chip" }, item, el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${item}`, onclick: () => remove2(item) }, icon("close"))))
     );
   }
   function programsRow(v) {
@@ -1208,7 +2459,6 @@
     const s = v.settings;
     const sample = sampleOf(s.native);
     const [typed = "", fixed = ""] = [sample.typed.split(" ")[0], sample.fixed.split(" ")[0]];
-    const warn = (text) => el("p", { class: "warn" }, icon("warning"), text);
     return [
       grp("Keys"),
       keyRow("switchKey", "Switch the layout", s.switchKey && usage(s.switchKey).startsWith("tap") ? "tap it alone" : "to the next of the layouts below"),
@@ -1262,12 +2512,12 @@
     );
   }
   function wordsPage(v) {
-    const list = el("ul", { class: "wl" });
+    const list2 = el("ul", { class: "wl" });
     const fill = () => {
       const words = view?.words ?? v.words;
       const q = search.trim().toLowerCase();
       const shown2 = q ? words.filter((w) => matches(w, q)) : words;
-      list.replaceChildren(
+      list2.replaceChildren(
         ...shown2.length ? shown2.map(wordRow) : [el("li", { class: "empty" }, words.length ? "No such word." : "No words yet. Click a word in a card and tap its star.")]
       );
     };
@@ -1294,7 +2544,7 @@
         el("button", { class: "btn", disabled: none, onclick: () => post({ type: "exportWords" }) }, icon("export"), "Export for Anki\u2026"),
         el("button", { class: "btn", disabled: none, onclick: () => post({ type: "copyWords" }) }, icon("copy"), "Copy")
       ),
-      list
+      list2
     ];
   }
   function voiceOptions(v) {
@@ -1312,9 +2562,9 @@
       case "failed":
         return row("Natural voice", [bad("The download failed.")], download("Try again"));
       case "downloading": {
-        const bar = el("i", { class: "fill" });
-        bar.style.width = `${Math.round(n.progress * 100)}%`;
-        return row("Natural voice", [el("span", { class: "bar" }, bar)], el("span", { class: "pct" }, `${Math.round(n.progress * 100)}%`));
+        const bar2 = el("i", { class: "fill" });
+        bar2.style.width = `${Math.round(n.progress * 100)}%`;
+        return row("Natural voice", [el("span", { class: "bar" }, bar2)], el("span", { class: "pct" }, `${Math.round(n.progress * 100)}%`));
       }
       default:
         return null;
@@ -1337,6 +2587,66 @@
       default:
         return "";
     }
+  }
+  var removingSpeech = false;
+  var PART_NAMES = { core: "speech to text", gpu: "graphics card", speakers: "speakers" };
+  function speechSettings(v) {
+    const sp = v.speech;
+    const p = sp.pack;
+    const h = sp.health;
+    const head = grp("Speech engine");
+    const out = [head];
+    if (!installed(v)) {
+      const offer = engineRows(v, "Dictate and Transcribe");
+      if (p.status === "installing" || p.status === "removing") return [head, ...offer];
+      return [head, row("Not downloaded", ["for Dictate and Transcribe \xB7 downloads once, then works offline"], linkBtn("Set up\u2026", () => openPage("dictate")))];
+    }
+    const work = engineRows(v, "");
+    const add = (part, mb) => el("button", { class: "chip off", title: `Add \xB7 \u2248${mb} MB`, disabled: p.status !== "ready", onclick: () => post({ type: "installSpeech", parts: [part] }) }, `+ ${PART_NAMES[part]}`);
+    out.push(
+      row(
+        "Parts",
+        [p.nvidia && !hasPart(v, "gpu") || !hasPart(v, "speakers") ? "downloaded once \xB7 tap one to add it" : "all downloaded, once"],
+        el(
+          "span",
+          { class: "chips" },
+          ...p.parts.map((part) => chip(PART_NAMES[part])),
+          p.nvidia && !hasPart(v, "gpu") ? add("gpu", sp.download.gpu) : null,
+          !hasPart(v, "speakers") ? add("speakers", sp.download.speakers) : null
+        )
+      )
+    );
+    out.push(...work);
+    const service = { off: "off", starting: "starting\u2026", ready: h?.busy ? "running \xB7 transcribing now" : "running", down: "stopped" }[sp.service];
+    out.push(
+      row(
+        "Graphics card",
+        [
+          !p.nvidia ? "none found \xB7 runs on the processor" : !hasPart(v, "gpu") ? "NVIDIA found \xB7 add its part to use it" : h?.device === "cpu" ? "NVIDIA found, but the engine runs on the processor" : "NVIDIA \xB7 speech is recognized on it"
+        ],
+        null
+      ),
+      row("Service", [`${service} \xB7 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn("Restart", () => post({ type: "restartSpeech" }), p.status !== "ready"))
+    );
+    if (h) {
+      out.push(
+        row("Transcripts are kept in", [pathNote(h.dataDir)], linkBtn("Open", () => post({ type: "openPath", path: h.dataDir }))),
+        row("Notes go to", [h.kbDir ? pathNote(h.kbDir) : "no knowledge base folder yet"], linkBtn(h.kbDir ? "Change" : "Choose\u2026", () => void pickKb()))
+      );
+    }
+    out.push(
+      row(
+        "Remove the speech engine",
+        [removingSpeech ? "its parts and models go; transcripts and notes stay. Remove?" : "gives the space back \xB7 transcripts and notes stay"],
+        removingSpeech ? el(
+          "span",
+          { class: "kchg" },
+          linkBtn("Keep", () => (removingSpeech = false, renderBody())),
+          btn("Remove", () => (removingSpeech = false, post({ type: "removeSpeech" })), "danger")
+        ) : linkBtn("Remove\u2026", () => (removingSpeech = true, renderBody()), p.status !== "ready")
+      )
+    );
+    return out.filter((n) => n !== null);
   }
   function settingsPage(v) {
     const s = v.settings;
@@ -1401,7 +2711,8 @@
         `Version ${v.version}`,
         [u.status === "failed" ? bad(updateText(u)) : updateText(u)],
         linkBtn("Check for updates", () => post({ type: "checkUpdates" }), u.status === "dev" || u.status === "checking" || u.status === "downloading")
-      )
+      ),
+      ...speechSettings(v)
     ].filter((n) => n !== null);
   }
   function aboutPage(v) {
@@ -1443,6 +2754,7 @@
   }
   function start(v) {
     const asked = askedTab && askedTab !== "home" && askedTab !== "howto" ? askedTab : void 0;
+    if (askedTranscript) return openTranscript(askedTranscript);
     if (asked) return openPage(asked, false);
     if (FROZEN_T !== void 0) return playMoment(false, FROZEN_T);
     if (v.settings.introSeen) return;
@@ -1457,9 +2769,15 @@
       else askedTab = m.tab;
       return;
     }
+    if (m.type === "openTranscript") {
+      if (view) openTranscript(m.id);
+      else askedTranscript = m.id, askedTab = "transcripts";
+      return;
+    }
     if (m.type !== "app") return;
     const first = view === void 0;
     view = m.view;
+    if (m.view.speech.service !== "ready") forgetEngine();
     updateNav();
     renderHome();
     if (open) {
@@ -1474,8 +2792,18 @@
     if (event.defaultPrevented) return;
     if (event.key === "Escape" && open) {
       event.preventDefault();
-      closePage();
+      back();
     }
+  });
+  onRedraw(() => {
+    fillHeader();
+    renderBody();
+  });
+  setTranscriptHooks({
+    view: () => view,
+    shown: () => open?.name === "transcripts",
+    show: () => openPage("transcripts"),
+    setup: () => openPage("transcribe")
   });
   post({ type: "appReady" });
 })();

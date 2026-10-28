@@ -1,0 +1,129 @@
+r"""The speech engine's settings: %APPDATA%\Altype\speech.json.
+
+Altype's own settings (keys, theme) are its settings.json beside it; these are
+the ones the engine acts on. Altscribe, the app this engine came from, is
+adopted once: its settings and its downloaded models move over.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import json
+import logging
+import os
+import shutil
+import threading
+import uuid
+from pathlib import Path
+
+log = logging.getLogger("altype.settings")
+
+# A test run gives its own folders; the real ones are Altype's.
+TEST_HOME = os.environ.get("ALTYPE_SPEECH_HOME")
+APP_DIR = Path(TEST_HOME or Path(os.environ.get("APPDATA", Path.home())) / "Altype")
+SPEECH_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Altype" / "speech"
+MODELS_DIR = SPEECH_DIR / "models"
+SETTINGS_FILE = APP_DIR / "speech.json"
+
+OLD_SETTINGS = Path(os.environ.get("APPDATA", Path.home())) / "Altscribe" / "engine.json"
+OLD_MODELS = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Altscribe" / "models"
+
+MODELS = ("large-v3-turbo", "large-v3")
+# Dictation on the CPU: large-v3-turbo takes ~6 s for a 7 s phrase there, small ~2 s.
+CPU_DICTATION = "small"
+LANGUAGES = ("auto", "ru", "en")
+
+
+def documents_dir() -> Path:
+    """The person's Documents folder, wherever Windows moved it (OneDrive)."""
+    try:
+        folder_id = uuid.UUID("{FDD39AD0-238F-46AF-ADB4-6C85480369C7}")  # FOLDERID_Documents
+        guid = (ctypes.c_byte * 16).from_buffer_copy(folder_id.bytes_le)
+        out = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(guid, 0, None, ctypes.byref(out)) == 0:
+            path = Path(out.value)
+            ctypes.windll.ole32.CoTaskMemFree(out)
+            return path
+    except (AttributeError, OSError):
+        pass
+    return Path.home() / "Documents"
+
+
+def defaults() -> dict:
+    return {
+        "model": "large-v3-turbo",
+        "language": "auto",
+        "hotwords": "",
+        "hfToken": "",
+        "dataDir": str(documents_dir() / "Altype" / "Transcripts"),
+        "kbDir": "",
+        "kbInbox": "Inbox",
+    }
+
+
+def adopt_altscribe(file: Path = SETTINGS_FILE) -> None:
+    """Altscribe's settings (its library folder, knowledge base, Hugging Face key) and models, once."""
+    if TEST_HOME:
+        return
+    if not file.exists() and OLD_SETTINGS.exists():
+        try:
+            file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(OLD_SETTINGS, file)
+            log.info("adopted Altscribe's settings")
+        except OSError as error:
+            log.warning("could not adopt Altscribe's settings: %s", error)
+    if not MODELS_DIR.exists() and OLD_MODELS.exists():
+        try:
+            MODELS_DIR.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(OLD_MODELS), str(MODELS_DIR))
+            log.info("adopted Altscribe's models")
+        except OSError as error:
+            log.warning("could not adopt Altscribe's models: %s", error)
+
+
+class Settings:
+    def __init__(self, file: Path = SETTINGS_FILE):
+        self.file = file
+        self._lock = threading.Lock()
+        self.reload()
+
+    def reload(self) -> None:
+        values = defaults()
+        try:
+            stored = json.loads(self.file.read_text("utf-8"))
+            values.update({k: v for k, v in stored.items() if k in values})
+        except (OSError, ValueError):
+            pass
+        with self._lock:
+            self._values = values
+            self._check()
+
+    def _check(self) -> None:
+        if self._values["model"] not in MODELS:
+            self._values["model"] = MODELS[0]
+        if self._values["language"] not in LANGUAGES:
+            self._values["language"] = "auto"
+
+    def get(self) -> dict:
+        with self._lock:
+            return dict(self._values)
+
+    def __getitem__(self, key: str):
+        with self._lock:
+            return self._values[key]
+
+    def update(self, changes: dict) -> dict:
+        with self._lock:
+            for key, value in changes.items():
+                if key in self._values and isinstance(value, type(self._values[key])):
+                    self._values[key] = value.strip() if isinstance(value, str) and key != "hotwords" else value
+            self._check()
+            self.file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._values, ensure_ascii=False, indent=2), "utf-8")
+            tmp.replace(self.file)
+            return dict(self._values)
+
+    @property
+    def data_dir(self) -> Path:
+        return Path(self["dataDir"])

@@ -76,7 +76,15 @@ export class KeyboardHelper {
     const keys: Partial<Record<KeyAction, string>> = {}
     if (s.switchKey) keys.switch = s.switchKey
     if (s.fixKey) keys.fix = s.fixKey
-    for (const [action, key] of [['select', s.selectKey], ['snip', s.snipKey], ['translate', s.translateKey], ['text', s.textKey]] as const) {
+    for (const [action, key] of [
+      ['select', s.selectKey],
+      ['snip', s.snipKey],
+      ['translate', s.translateKey],
+      ['text', s.textKey],
+      ['dictate', s.dictateKey],
+      ['english', s.englishKey],
+      ['note', s.noteKey],
+    ] as const) {
       if (key && !isAccelerator(key)) keys[action] = key
     }
     if (Object.keys(keys).length === 0 && !s.autoFix && !s.layoutBadge) return this.stop()

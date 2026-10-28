@@ -1,17 +1,17 @@
-// The tray's panel, in place of Windows' menu: Altype's commands for the
-// copied text and for a piece of the screen with their keys, the switch for
-// fixing the layout while typing, and the way into the app window or out of
-// Altype. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
+// The tray's panel, in place of Windows' menu: the way into the app window at
+// the top (the brand, or Open), Altype's commands for the copied text and for
+// a piece of the screen with their keys, the switch for fixing the layout
+// while typing, and Quit as the last row. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
 // puts it away (the main process hides it, and after any command). Everything
 // shown comes in one `tray` message, sent again whenever any of it changes.
 
-import type { ToHost, ToView, TrayCommand, TrayView } from '../protocol'
+import type { ToHost, ToView, TrayCommand, TrayView, TutorHost } from '../protocol'
 import { el } from './dom'
 import { caps } from './keycaps'
 
 declare global {
   interface Window {
-    tutorHost: { post(message: ToHost): void }
+    tutorHost: TutorHost
   }
 }
 
@@ -69,16 +69,25 @@ function render(v: TrayView): void {
     command('Translate', 'translateScreen', v.keys.snipTranslate),
   ]
   cmds.forEach((c, i) => (c.dataset.id = String(i)))
-  const open = el('button', { class: 'foot-btn', 'data-nav': true, 'data-id': 'open', onclick: () => post({ type: 'tray', command: 'open' }) }, 'Open Altype')
-  const quit = el('button', { class: 'foot-btn', 'data-nav': true, 'data-id': 'quit', onclick: () => post({ type: 'tray', command: 'quit' }) }, 'Quit')
+  const note = command(v.speech.recording ? 'Save the note' : 'New note', 'note', v.speech.noteKey)
+  note.dataset.id = 'note'
+  const transcripts = command('Transcripts', 'transcripts')
+  transcripts.dataset.id = 'transcripts'
+  const openApp = () => post({ type: 'tray', command: 'open' })
+  // The brand opens the window too; Open is the one the keys reach.
+  const brand = el('button', { class: 'brand', tabindex: '-1', title: 'Open Altype', onclick: openApp }, el('span', { class: 'key' }, 'alt'), el('span', { class: 'wm' }, 'altype'))
+  const open = el('button', { class: 'open', 'data-nav': true, 'data-id': 'open', onclick: openApp }, 'Open')
+  const quit = command('Quit', 'quit')
+  quit.dataset.id = 'quit'
   const panel = el(
     'div',
     { class: 'panel' },
-    el('header', { class: 'head' }, el('div', { class: 'brand' }, el('span', { class: 'key' }, 'alt'), el('span', { class: 'wm' }, 'altype')), status(v)),
+    el('header', { class: 'head' }, brand, el('div', { class: 'side' }, status(v), open)),
     el('section', { class: 'sec' }, grp('Copied text'), cmds[0], cmds[1]),
     el('section', { class: 'sec' }, grp('A piece of the screen'), cmds[2], cmds[3]),
+    v.speech.installed ? el('section', { class: 'sec' }, grp('Speech'), note, transcripts) : null,
     el('section', { class: 'sec sw' }, fix),
-    el('footer', { class: 'foot' }, open, quit),
+    el('section', { class: 'sec' }, quit),
   )
   root.replaceChildren(panel)
   // A change while the panel is open keeps the focus where it was.
@@ -134,7 +143,8 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
   if (m.type === 'tray') render(m.view)
   else if (m.type === 'trayShown') {
     byKeys(false)
-    focusRow(navs()[0])
+    // The first command, not Open: the panel is mostly opened to run one.
+    focusRow(root.querySelector<HTMLElement>('.cmd[data-nav]'))
   }
 })
 

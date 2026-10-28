@@ -4,9 +4,11 @@ import type { WordTime } from './kokoro'
 import type { Gloss } from './lemma'
 import type { NaturalState } from './natural'
 import type { Settings } from './settings'
+import type { SpeechPackState, SpeechPart } from './speechpack'
+import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
 import type { SavedWord } from './words'
 
-export type { Gloss, NaturalState, SavedWord, Settings, WordTime }
+export type { Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechResult, WordTime }
 
 /**
  * What the card is for, and where the text came from. To listen to it, in
@@ -79,7 +81,7 @@ export type WordHintMode = 'shift' | 'hover' | 'off'
 export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
 
 /** The app window's places: Home (always first), its action pages, and Words, Settings, About; 'howto' is the old name of Home. */
-export type AppTab = 'home' | 'listen' | 'translate' | 'screen' | 'dictate' | 'keyboard' | 'words' | 'settings' | 'about' | 'howto'
+export type AppTab = 'home' | 'listen' | 'translate' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'transcripts' | 'settings' | 'about' | 'howto'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -91,6 +93,23 @@ export type UpdateStatus =
 
 /** A keyboard layout Windows has: `id` as settings.ts keeps it ("04090409"), `name` as Windows calls its language. */
 export type KeyboardLayout = { id: string; name: string; short: string }
+
+/**
+ * The speech engine (Dictate, Transcribe, Transcripts): its installed parts,
+ * the running service and what it reports. `download` is each choice's size in MB.
+ */
+export type SpeechView = {
+  pack: SpeechPackState
+  service: SpeechServiceState
+  trouble?: string
+  health?: SpeechHealth
+  port: number
+  /** The Chrome extension's folder, for Load unpacked. */
+  extensionDir: string
+  download: { core: number; gpu: number; speakers: number }
+  /** The dictation keys are registered (false: another program holds one). */
+  keysOk: { dictate: boolean; note: boolean; english: boolean }
+}
 
 /** Everything the app window shows, sent whole whenever any of it changes. */
 export type AppView = {
@@ -118,6 +137,7 @@ export type AppView = {
   keyboardApps: string[]
   /** Some program pressed keys by itself since the keyboard helper started; Altype ignores those. */
   foreignKeys: boolean
+  speech: SpeechView
 }
 
 /** What the tray's panel shows, sent whole whenever any of it changes. */
@@ -125,13 +145,15 @@ export type TrayView = {
   /** The keys of its commands, hotkey.ts notation ("Control+C*2" for Ctrl+C twice); empty when there is none. */
   keys: { listenCopied: string; snipListen: string; snipTranslate: string }
   autoFix: boolean
+  /** The speech engine is installed: a note can be started from here; one is being recorded now. */
+  speech: { installed: boolean; recording: boolean; noteKey: string }
   /** The translator between English and the person's language (as `AppView.translator`). */
   translator: AppView['translator']
   native: string
 }
 
 /** What the tray's panel can do; each puts the panel away first. */
-export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 'translateScreen' | 'open' | 'quit'
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -162,12 +184,21 @@ export type ToView =
   | { type: 'appTab'; tab: AppTab }
   /** The tray's panel's whole state. */
   | { type: 'tray'; view: TrayView }
+  /** Show this transcript in the app window (a finished note's balloon, the extension). */
+  | { type: 'openTranscript'; id: string }
+  /** The dictation badge: record, then stop (and type it, or keep it as a note), or throw it away. */
+  | { type: 'dictation'; command: 'start' | 'stop' | 'cancel'; mode: DictationMode; key: string }
+  | { type: 'dictationDone'; text: string }
+  | { type: 'dictationError'; message: string }
   /** The tray's panel was just shown: focus its first command. */
   | { type: 'trayShown' }
   | { type: 'natural'; state: NaturalState }
   /** One sentence of reading `id` in the natural voice: 24 kHz audio and when each of its words is spoken. */
   | { type: 'naturalAudio'; id: number; index: number; samples: Float32Array; words: WordTime[] }
   | { type: 'naturalFailed'; id: number; message: string }
+
+/** What a dictated phrase becomes: typed where the cursor is, typed in English, or a note in the knowledge base. */
+export type DictationMode = 'type' | 'english' | 'note'
 
 export type ToHost =
   | { type: 'lookup'; word: string }
@@ -218,3 +249,34 @@ export type ToHost =
   | { type: 'tray'; command: TrayCommand }
   /** Esc, or a click outside it. */
   | { type: 'trayClose' }
+  // The speech engine.
+  | { type: 'installSpeech'; parts: SpeechPart[] }
+  | { type: 'removeSpeech' }
+  | { type: 'restartSpeech' }
+  | { type: 'showInFolder'; path: string }
+  | { type: 'openPath'; path: string }
+  // The dictation badge.
+  | { type: 'dictationReady' }
+  /** A phrase to type: the whole recording, as webm. */
+  | { type: 'dictationAudio'; mode: DictationMode; audio: Uint8Array }
+  /** A note was recorded into the engine as this transcript. */
+  | { type: 'dictationNote'; id: string }
+  | { type: 'dictationCancelled' }
+  | { type: 'dictationFailed'; message: string }
+
+/** Calls a page makes and waits for (ipcMain.handle), through `window.tutorHost.call`. */
+export type HostCall =
+  /** One call to the speech engine's HTTP API. */
+  | { call: 'speech'; method: string; route: string; body?: unknown }
+  | { call: 'pickFolder'; title: string; current: string }
+  /** Save a transcript: a Save dialog, then the engine writes the file. */
+  | { call: 'exportTranscript'; id: string; format: string; name: string }
+  | { call: 'copy'; text: string }
+
+/** What every page has as `window.tutorHost` (preload.ts). */
+export type TutorHost = {
+  post(message: ToHost): void
+  call(request: HostCall): Promise<unknown>
+  /** A dropped or picked file's path on disk. */
+  pathOf(file: File): string
+}

@@ -3,42 +3,47 @@
 // as a moment: a word typed in the wrong layout is fixed, translated and read
 // aloud, each step lighting the person's own key; then the line rises into
 // the header and the keys drop into their actions), whether the translator
-// and the voice are here, and the five actions with their keys. A tapped
-// action (or the Words, About or Settings pill) grows into its page over the
-// whole window, its title and keys staying where they are as the page's
-// header; Back or Esc folds it back into the same place. Everything shown
+// and the voice are here, and the six actions with their keys. A tapped
+// action (or the Words, Transcripts, About or Settings pill) grows into its
+// page over the whole window, its title and keys staying where they are as
+// the page's header; Back or Esc folds it back into the same place (from a
+// transcript, back to the library first). Everything shown
 // comes from the main process in one `app` message, sent again whenever any
 // of it changes; every change goes back as a message.
 
 import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
-import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToHost, ToView, UpdateStatus } from '../protocol'
+import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
 import { RATES, type ThemeMode } from '../settings'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
+import { bad, btn, chip, grp, link, linkBtn, post, row, seg, select, toggle, toggleKnob, warn } from './ui'
+import { api, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRow, onRedraw, pickKb, running, saveEngine, speakerRows, toast } from './speech'
+import { backToList, enterTranscripts, leaveTranscripts, newRows, openTranscript, setTranscriptHooks, transcriptsBody, transcriptsCap } from './transcripts'
 
 declare global {
   interface Window {
-    tutorHost: { post(message: ToHost): void }
+    tutorHost: TutorHost
   }
 }
 
-const post = (message: ToHost) => window.tutorHost.post(message)
 const save = (patch: Partial<Settings>) => post({ type: 'saveSettings', patch })
 
-type Action = 'listen' | 'translate' | 'screen' | 'dictate' | 'keyboard'
-type Page = Action | 'words' | 'settings' | 'about'
+type Action = 'listen' | 'translate' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
+type Page = Action | 'words' | 'transcripts' | 'settings' | 'about'
 
-const ACTIONS: readonly Action[] = ['listen', 'translate', 'screen', 'dictate', 'keyboard']
+const ACTIONS: readonly Action[] = ['listen', 'translate', 'screen', 'dictate', 'transcribe', 'keyboard']
 const isAction = (name: Page): name is Action => (ACTIONS as readonly string[]).includes(name)
 const TITLES: Record<Page, string> = {
   listen: 'Listen',
   translate: 'Translate',
   screen: 'Screen',
   dictate: 'Dictate',
+  transcribe: 'Transcribe',
   keyboard: 'Keyboard',
   words: 'Words',
+  transcripts: 'Transcripts',
   settings: 'Settings',
   about: 'About',
 }
@@ -46,6 +51,8 @@ const TITLES: Record<Page, string> = {
 let view: AppView | undefined
 /** A place asked for before the first `app` message. */
 let askedTab: AppTab | undefined
+/** A transcript asked for before the first `app` message. */
+let askedTranscript = ''
 let search = ''
 /** Why the last key was not taken, shown under its row until another change. */
 let keyTrouble: { name: KeyName; text: string } | undefined
@@ -105,6 +112,9 @@ const said = (hotkey: string) => (hotkey === COPY_TWICE ? 'Ctrl + C twice' : hot
 /** How a key is used, in a few words: a modifier alone is tapped, anything else pressed. */
 const usage = (hotkey: string) => `${/^(Left|Right)(Control|Shift|Alt|Super)(\*2)?$/.test(hotkey) ? 'tap' : 'press'} ${said(hotkey)}`
 
+/** The Chrome extension's key for recording a meeting (extension/manifest.json). */
+const MEET_KEY = 'Alt+Shift+M'
+
 type KeyLine = { label: string; hotkey: string; chain?: 'listen' | 'translate' | 'fix' }
 
 /** The keys an action shows by its name, the person's own; the chain marks the three the moment lights. */
@@ -128,7 +138,12 @@ function keyLines(action: Action, s: Settings): KeyLine[] {
         { label: 'translate', hotkey: s.textKey },
       ]
     case 'dictate':
-      return [{ label: 'hold or tap', hotkey: '' }]
+      return [
+        { label: 'dictate', hotkey: s.dictateKey },
+        { label: 'note', hotkey: s.noteKey },
+      ]
+    case 'transcribe':
+      return [{ label: 'in Meet', hotkey: MEET_KEY }]
     case 'keyboard':
       return [
         { label: 'switch', hotkey: s.switchKey },
@@ -151,6 +166,15 @@ function cycleOf(v: AppView): KeyboardLayout[] {
 const naturalOn = (v: AppView) => v.natural.status === 'ready' && (v.settings.voice === '' || v.settings.voice.startsWith(NATURAL_PREFIX))
 const pairOf = (v: AppView) => `${v.settings.native} ⇄ English`
 
+/** What Dictate runs on: the speech engine, once it is here. */
+function engineCap(v: AppView): string {
+  const p = v.speech.pack
+  if (p.status === 'installing' && !installed(v)) return `downloading ${Math.round((p.progress ?? 0) * 100)}%`
+  if (!installed(v)) return 'downloads once'
+  const d = v.speech.health?.device
+  return d === 'cuda' ? 'Whisper · graphics card' : d === 'cpu' ? 'Whisper · processor' : 'Whisper'
+}
+
 /** What an action is called, what it runs on, and what it does. */
 function actionText(action: Action, v: AppView): { title: string; cap: string; desc: string } {
   const title = TITLES[action]
@@ -162,7 +186,9 @@ function actionText(action: Action, v: AppView): { title: string; cap: string; d
     case 'screen':
       return { title, cap: 'Windows OCR', desc: 'Draw a box over words you can’t select.' }
     case 'dictate':
-      return { title, cap: 'coming', desc: `Say it and it types. Say it in ${v.settings.native}, get English.` }
+      return { title, cap: engineCap(v), desc: `Say it and it types. Say it in ${v.settings.native}, get English.` }
+    case 'transcribe':
+      return { title, cap: 'files · microphone · Meet', desc: 'Talks and meetings into text, speaker by speaker.' }
     case 'keyboard':
       return {
         title,
@@ -184,6 +210,7 @@ const nav = el(
   { class: 'nav' },
   pill('home', el('span', { class: 'lbl' }, 'Home')),
   pill('words', el('span', { class: 'lbl' }, 'Words'), wordCount),
+  pill('transcripts', el('span', { class: 'lbl' }, 'Transcripts')),
   pill('about', el('span', { class: 'lbl' }, 'About')),
   el('span', { class: 'gap' }),
   pill('settings', icon('settings'), el('span', { class: 'lbl' }, 'Settings')),
@@ -200,7 +227,7 @@ const top = el('header', { class: 'top' }, el('div', { class: 'brand' }, el('spa
 const home = el('main', { class: 'home' })
 
 const pGround = el('div', { class: 'pgg' })
-const pBack = el('button', { class: 'pback', onclick: () => closePage() }, icon('chevron-left'), 'Back', el('span', { class: 'key' }, 'Esc'))
+const pBack = el('button', { class: 'pback', onclick: () => back() }, icon('chevron-left'), 'Back', el('span', { class: 'key' }, 'Esc'))
 const pTitle = el('span', { class: 'ptitle' })
 const pCap = el('span', { class: 'pcap' })
 const pKeys = el('div', { class: 'pkeys keys' })
@@ -245,7 +272,7 @@ function homeRow(action: Action, v: AppView): HTMLElement {
   return el(
     'li',
     {
-      class: action === 'dictate' ? 'act soon' : 'act',
+      class: 'act',
       'data-page': action,
       role: 'button',
       tabindex: 0,
@@ -733,6 +760,7 @@ function openPage(name: Page, animate = !reduced.matches): void {
   pickedLayout = ''
   addingApp = false
   keyTrouble = undefined
+  if (name === 'transcripts') enterTranscripts()
   fillHeader()
   pBody.replaceChildren()
   renderBody()
@@ -751,9 +779,16 @@ function openPage(name: Page, animate = !reduced.matches): void {
   grow(gr, true, settle)
 }
 
+/** Back (or Esc): from a transcript to the library first, from anything else to Home. */
+function back(): void {
+  if (open?.name === 'transcripts' && backToList()) return
+  closePage()
+}
+
 function closePage(animate = !reduced.matches): void {
   if (!open) return
   const name = open.name
+  if (name === 'transcripts') leaveTranscripts()
   const done = () => {
     root.classList.remove('page-open')
     pg.style.visibility = ''
@@ -787,7 +822,9 @@ function fillHeader(): void {
         : 'none yet · from your cards'
       : name === 'about'
         ? `Altype ${v.version}`
-        : ''
+        : name === 'transcripts'
+          ? transcriptsCap()
+          : ''
   const keys = isAction(name) ? keysOf(name, v.settings) : []
   const next = el('div', {}, ...keys)
   if (next.innerHTML !== pKeys.innerHTML) pKeys.replaceChildren(...next.childNodes)
@@ -799,7 +836,7 @@ let pointerDown = false
 
 function busy(): boolean {
   const a = document.activeElement
-  return !!a && pBody.contains(a) && (a.matches('input[type=text], input[type=search]') || a.classList.contains('recording'))
+  return !!a && pBody.contains(a) && (a.matches('input[type=text], input[type=search], input[type=password], input[type=range]') || (a as HTMLElement).isContentEditable || a.classList.contains('recording'))
 }
 
 function renderBody(): void {
@@ -835,7 +872,11 @@ function bodyOf(name: Page, v: AppView): HTMLElement[] {
     case 'screen':
       return screenPage(v)
     case 'dictate':
-      return dictatePage()
+      return dictatePage(v)
+    case 'transcribe':
+      return transcribePage(v)
+    case 'transcripts':
+      return transcriptsBody(v)
     case 'keyboard':
       return keyboardPage(v)
     case 'words':
@@ -849,82 +890,6 @@ function bodyOf(name: Page, v: AppView): HTMLElement[] {
 
 // ---------------------------------------------------------------- page parts
 
-const grp = (text: string) => el('div', { class: 'grp' }, text)
-const bad = (text: string) => el('small', { class: 'bad' }, text)
-type Note = string | HTMLElement | null | undefined | false
-
-/** A line of a page: what it is (with notes under it) and its control on the right. */
-function row(label: string | HTMLElement, notes: Note[], ...controls: (HTMLElement | null)[]): HTMLElement {
-  return el('div', { class: 'row' }, el('div', { class: 'l' }, label, ...notes.filter(n => !!n).map(n => (typeof n === 'string' ? el('small', {}, n) : n))), ...controls)
-}
-
-/** A line that is a switch: a tap anywhere on it turns it over at once, before the main process answers. */
-function toggle(label: string, on: boolean, onchange: (on: boolean) => void, ...notes: Note[]): HTMLElement {
-  const knob = el('span', { class: on ? 'tg on' : 'tg' })
-  const node = el(
-    'button',
-    {
-      class: 'row trow',
-      role: 'switch',
-      'aria-checked': String(on),
-      onclick: () => {
-        const next = node.getAttribute('aria-checked') !== 'true'
-        node.setAttribute('aria-checked', String(next))
-        knob.classList.toggle('on', next)
-        onchange(next)
-      },
-    },
-    el('span', { class: 'l' }, label, ...notes.filter(n => !!n).map(n => (typeof n === 'string' ? el('small', {}, n) : n))),
-    knob,
-  )
-  return node
-}
-
-/** Choices side by side; the one tapped lights at once. */
-function seg<T extends string | number>(value: T, options: [T, string][], onchange: (value: T) => void, mono = false): HTMLElement {
-  const node = el('span', { class: mono ? 'seg mono' : 'seg', role: 'radiogroup' })
-  for (const [v, label] of options) {
-    const b = el(
-      'button',
-      {
-        class: v === value ? 'on' : '',
-        role: 'radio',
-        'aria-checked': String(v === value),
-        onclick: () => {
-          for (const other of node.children) {
-            other.classList.toggle('on', other === b)
-            other.setAttribute('aria-checked', String(other === b))
-          }
-          onchange(v)
-        },
-      },
-      label,
-    )
-    node.append(b)
-  }
-  return node
-}
-
-/** A list to pick from, drawn as a pill. */
-function select<T extends string | number>(value: T, options: [T, string][], onchange: (value: T) => void): HTMLElement {
-  const node = el('select', {
-    onchange: event => {
-      const raw = (event.target as HTMLSelectElement).value
-      const picked = options.find(([v]) => String(v) === raw)?.[0]
-      if (picked !== undefined) onchange(picked)
-    },
-  })
-  for (const [v, label] of options) node.append(el('option', v === value ? { value: String(v), selected: true } : { value: String(v) }, label))
-  return el('span', { class: 'sel' }, node, icon('chevron-down'))
-}
-
-const linkBtn = (text: string, onclick: () => void, disabled = false) => el('button', { class: 'link', disabled, onclick }, text)
-const chip = (text: string, cls = '') => el('span', { class: `chip${cls ? ' ' + cls : ''}` }, text)
-
-function link(url: string, text: string): HTMLElement {
-  return el('a', { href: url, onclick: (event: Event) => (event.preventDefault(), post({ type: 'openLink', url })) }, text)
-}
-
 /** A sample to select and try the keys on, right here. */
 function tryIt(text: string, how: string): HTMLElement {
   return el('div', { class: 'try' }, el('p', {}, text), el('small', {}, how))
@@ -932,7 +897,7 @@ function tryIt(text: string, how: string): HTMLElement {
 
 // ---------------------------------------------------------------- keys on pages
 
-type KeyName = 'selectKey' | 'snipKey' | 'translateKey' | 'textKey' | 'switchKey' | 'fixKey'
+type KeyName = 'selectKey' | 'snipKey' | 'translateKey' | 'textKey' | 'switchKey' | 'fixKey' | 'dictateKey' | 'englishKey' | 'noteKey'
 
 const KEY_USE: Record<KeyName, string> = {
   selectKey: 'listening to the selection',
@@ -941,6 +906,9 @@ const KEY_USE: Record<KeyName, string> = {
   textKey: 'translating a piece of the screen',
   switchKey: 'switching the layout',
   fixKey: 'fixing the layout',
+  dictateKey: 'dictating',
+  englishKey: 'dictating in English',
+  noteKey: 'dictating a note',
 }
 
 /** Saves a key unless another use has it already. */
@@ -1070,23 +1038,6 @@ function listenPage(v: AppView): HTMLElement[] {
   ]
 }
 
-/** A switch without a line of its own (Ctrl + C twice sits by its keys). */
-function toggleKnob(on: boolean, onchange: (on: boolean) => void, label: string): HTMLElement {
-  const node = el('button', {
-    class: on ? 'tg on' : 'tg',
-    role: 'switch',
-    'aria-checked': String(on),
-    'aria-label': label,
-    onclick: () => {
-      const next = node.getAttribute('aria-checked') !== 'true'
-      node.setAttribute('aria-checked', String(next))
-      node.classList.toggle('on', next)
-      onchange(next)
-    },
-  })
-  return node
-}
-
 const TRY_TRANSLATE: Record<string, string> = {
   Russian: 'Конечно, пришлю обновлённые макеты до созвона.',
   Ukrainian: 'Звісно, надішлю оновлені макети до дзвінка.',
@@ -1135,15 +1086,83 @@ function screenPage(v: AppView): HTMLElement[] {
   ]
 }
 
-function dictatePage(): HTMLElement[] {
+/** A folder or file, in a note: its end shows when it is long. */
+const pathNote = (path: string) => el('small', { class: 'path', title: path }, el('bdi', {}, path))
+
+async function prepareDictation(): Promise<void> {
+  try {
+    await api('POST', '/dictate/prepare')
+  } catch (error) {
+    fault(error)
+  }
+}
+
+/** Where notes go: the knowledge base folder and the folder inside it, the engine's own settings. */
+function kbRows(v: AppView): HTMLElement[] {
+  const e = engineSettings(v)
+  if (!running(v) || !e) return [row('Folder', [installed(v) ? 'shown once the speech engine runs' : 'chosen once the speech engine is here'], null)]
+  const inbox = el('input', {
+    type: 'text',
+    class: 'field',
+    value: e.kbInbox,
+    placeholder: 'the folder itself',
+    'aria-label': 'Folder for notes',
+    onkeydown: (event: Event) => (event as KeyboardEvent).key === 'Enter' && (event.target as HTMLInputElement).blur(),
+    onchange: (event: Event) => void saveEngine({ kbInbox: (event.target as HTMLInputElement).value.trim() }),
+  })
   return [
-    grp('Keys'),
-    fixedKey('Dictate', '', 'types what you say'),
-    fixedKey('Dictate in English', '', 'say it in your language, English is typed'),
-    row('Tap to start and stop, or hold while you talk', [], chip('coming', 'off')),
-    grp('Speech model'),
-    row('Downloads once, then works offline', ['nothing to set yet: Dictate comes in a later version'], chip('~700 MB', 'off')),
+    row('Folder', [e.kbDir ? pathNote(e.kbDir) : 'not chosen · notes need one; an Obsidian vault will do'], linkBtn(e.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
+    row('Notes go into', ['a folder inside it · empty: the folder itself'], inbox),
   ]
+}
+
+function dictatePage(v: AppView): HTMLElement[] {
+  const s = v.settings
+  const k = v.speech.keysOk
+  const offer = engineRows(v, 'Dictate')
+  return [
+    ...(offer.length ? [grp('Speech engine'), ...offer] : []),
+    grp('Keys'),
+    keyRow('dictateKey', 'Dictate', 'types what you say where the cursor is', !k.dictate),
+    keyRow('englishKey', 'Dictate in English', `say it in ${s.native}, English is typed`, !k.english),
+    keyRow('noteKey', 'A note', 'kept in the knowledge base as a .md file', !k.note),
+    row('Tap the key, talk, tap it again', ['Esc while it records throws it away'], null),
+    grp('Knowledge base'),
+    ...kbRows(v),
+    ...(running(v) ? [grp('Speech model'), modelRow('Dictation', v.speech.health?.models.dictation, 'downloads with the first phrase', () => void prepareDictation())] : []),
+    el('p', { class: 'privacy' }, icon('lock'), 'Speech is recognized on this computer; nothing is sent anywhere.'),
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
+const copyText = (text: string) => void window.tutorHost.call({ call: 'copy', text }).then(() => toast(`Copied: ${text}`), fault)
+
+/** How to record a Google Meet call: the Chrome extension, loaded from Altype's folder. */
+function meetRows(v: AppView): HTMLElement[] {
+  const dir = v.speech.extensionDir
+  return [
+    row('1 · In Chrome, open chrome://extensions and turn on Developer mode', [], linkBtn('Copy address', () => copyText('chrome://extensions'))),
+    row('2 · Load unpacked, then pick the extension’s folder', [pathNote(dir)], linkBtn('Show the folder', () => post({ type: 'showInFolder', path: dir }))),
+    row('3 · In a meeting: the Altype icon → Record, or the key', ['the call’s sound and your microphone'], caps(MEET_KEY)),
+    row('4 · If the key does nothing, set it at chrome://extensions/shortcuts', [], linkBtn('Copy address', () => copyText('chrome://extensions/shortcuts'))),
+  ]
+}
+
+function transcribePage(v: AppView): HTMLElement[] {
+  const offer = engineRows(v, 'Transcribe')
+  return [
+    ...(offer.length ? [grp('Speech engine'), ...offer] : []),
+    ...(running(v) ? [grp('New transcription'), ...newRows(v)] : []),
+    ...(installed(v) ? [grp('Speakers'), ...speakerRows(v)] : []),
+    grp('Google Meet'),
+    ...meetRows(v),
+    ...(running(v)
+      ? [
+          grp('Speech model'),
+          modelRow('Transcription', v.speech.health?.models.transcripts, 'downloads with the first transcription'),
+          row('Every transcript, searched by its words', [], linkBtn('Transcripts', () => openPage('transcripts'))),
+        ]
+      : []),
+  ].filter((n): n is HTMLElement => n !== null)
 }
 
 /** Windows' layouts as chips, in the order the keys go through them; a tap on one shows how to move it or leave it out. */
@@ -1260,7 +1279,6 @@ function keyboardPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const sample = sampleOf(s.native)
   const [typed = '', fixed = ''] = [sample.typed.split(' ')[0], sample.fixed.split(' ')[0]]
-  const warn = (text: string) => el('p', { class: 'warn' }, icon('warning'), text)
   return [
     grp('Keys'),
     keyRow('switchKey', 'Switch the layout', s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below'),
@@ -1407,6 +1425,80 @@ function updateText(u: UpdateStatus): string {
   }
 }
 
+/** Remove was tapped once: it asks. */
+let removingSpeech = false
+
+const PART_NAMES = { core: 'speech to text', gpu: 'graphics card', speakers: 'speakers' } as const
+
+/** Settings → Speech engine: its parts, the card, the service, where things live, Restart and Remove. */
+function speechSettings(v: AppView): HTMLElement[] {
+  const sp = v.speech
+  const p = sp.pack
+  const h = sp.health
+  const head = grp('Speech engine')
+  const out: (HTMLElement | null)[] = [head]
+  if (!installed(v)) {
+    const offer = engineRows(v, 'Dictate and Transcribe')
+    if (p.status === 'installing' || p.status === 'removing') return [head, ...offer]
+    return [head, row('Not downloaded', ['for Dictate and Transcribe · downloads once, then works offline'], linkBtn('Set up…', () => openPage('dictate')))]
+  }
+  const work = engineRows(v, '')
+  const add = (part: 'gpu' | 'speakers', mb: number) =>
+    el('button', { class: 'chip off', title: `Add · ≈${mb} MB`, disabled: p.status !== 'ready', onclick: () => post({ type: 'installSpeech', parts: [part] }) }, `+ ${PART_NAMES[part]}`)
+  out.push(
+    row(
+      'Parts',
+      [(p.nvidia && !hasPart(v, 'gpu')) || !hasPart(v, 'speakers') ? 'downloaded once · tap one to add it' : 'all downloaded, once'],
+      el(
+        'span',
+        { class: 'chips' },
+        ...p.parts.map(part => chip(PART_NAMES[part])),
+        p.nvidia && !hasPart(v, 'gpu') ? add('gpu', sp.download.gpu) : null,
+        !hasPart(v, 'speakers') ? add('speakers', sp.download.speakers) : null,
+      ),
+    ),
+  )
+  out.push(...work)
+  const service = { off: 'off', starting: 'starting…', ready: h?.busy ? 'running · transcribing now' : 'running', down: 'stopped' }[sp.service]
+  out.push(
+    row(
+      'Graphics card',
+      [
+        !p.nvidia
+          ? 'none found · runs on the processor'
+          : !hasPart(v, 'gpu')
+            ? 'NVIDIA found · add its part to use it'
+            : h?.device === 'cpu'
+              ? 'NVIDIA found, but the engine runs on the processor'
+              : 'NVIDIA · speech is recognized on it',
+      ],
+      null,
+    ),
+    row('Service', [`${service} · 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn('Restart', () => post({ type: 'restartSpeech' }), p.status !== 'ready')),
+  )
+  if (h) {
+    out.push(
+      row('Transcripts are kept in', [pathNote(h.dataDir)], linkBtn('Open', () => post({ type: 'openPath', path: h.dataDir }))),
+      row('Notes go to', [h.kbDir ? pathNote(h.kbDir) : 'no knowledge base folder yet'], linkBtn(h.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
+    )
+  }
+  out.push(
+    row(
+      'Remove the speech engine',
+      [removingSpeech ? 'its parts and models go; transcripts and notes stay. Remove?' : 'gives the space back · transcripts and notes stay'],
+      removingSpeech
+        ? el(
+            'span',
+            { class: 'kchg' },
+            linkBtn('Keep', () => ((removingSpeech = false), renderBody())),
+            btn('Remove', () => ((removingSpeech = false), post({ type: 'removeSpeech' })), 'danger'),
+          )
+        : linkBtn('Remove…', () => ((removingSpeech = true), renderBody()), p.status !== 'ready'),
+    ),
+  )
+  return out.filter((n): n is HTMLElement => n !== null)
+}
+
 function settingsPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const u = v.update
@@ -1471,6 +1563,7 @@ function settingsPage(v: AppView): HTMLElement[] {
       [u.status === 'failed' ? bad(updateText(u)) : updateText(u)],
       linkBtn('Check for updates', () => post({ type: 'checkUpdates' }), u.status === 'dev' || u.status === 'checking' || u.status === 'downloading'),
     ),
+    ...speechSettings(v),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -1521,6 +1614,7 @@ function showTab(tab: AppTab): void {
 function start(v: AppView): void {
   const asked = askedTab && askedTab !== 'home' && askedTab !== 'howto' ? askedTab : undefined
   // A place asked for wins; the moment waits for an opening that starts at Home.
+  if (askedTranscript) return openTranscript(askedTranscript)
   if (asked) return openPage(asked, false)
   if (FROZEN_T !== undefined) return playMoment(false, FROZEN_T)
   if (v.settings.introSeen) return
@@ -1536,9 +1630,15 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
     else askedTab = m.tab
     return
   }
+  if (m.type === 'openTranscript') {
+    if (view) openTranscript(m.id)
+    else (askedTranscript = m.id), (askedTab = 'transcripts')
+    return
+  }
   if (m.type !== 'app') return
   const first = view === undefined
   view = m.view
+  if (m.view.speech.service !== 'ready') forgetEngine()
   updateNav()
   renderHome()
   if (open) {
@@ -1555,8 +1655,19 @@ window.addEventListener('keydown', event => {
   if (event.defaultPrevented) return
   if (event.key === 'Escape' && open) {
     event.preventDefault()
-    closePage()
+    back()
   }
+})
+
+onRedraw(() => {
+  fillHeader()
+  renderBody()
+})
+setTranscriptHooks({
+  view: () => view,
+  shown: () => open?.name === 'transcripts',
+  show: () => openPage('transcripts'),
+  setup: () => openPage('transcribe'),
 })
 
 post({ type: 'appReady' })

@@ -56,6 +56,14 @@ export type Settings = {
   keepWords: string[]
   /** A badge with the layout by the text cursor whenever the layout changes. */
   layoutBadge: boolean
+  /**
+   * Dictate's keys (hotkey.ts notation; empty for none): type what is said where the
+   * cursor is, type it in English, or keep it as a note in the knowledge base. They
+   * work once the speech engine is installed.
+   */
+  dictateKey: string
+  englishKey: string
+  noteKey: string
   /** Start Altype when Windows starts. */
   startWithWindows: boolean
   /** The offer of the natural voice was closed. */
@@ -87,6 +95,9 @@ export const DEFAULTS: Settings = {
   fixApps: [],
   keepWords: [],
   layoutBadge: false,
+  dictateKey: 'Control+Alt+D',
+  englishKey: '',
+  noteKey: 'Control+Alt+N',
   startWithWindows: true,
   naturalDismissed: false,
   introSeen: false,
@@ -124,6 +135,9 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     fixApps: strings(r.fixApps, s => s.trim().toLowerCase()),
     keepWords: strings(r.keepWords),
     layoutBadge: flag(r.layoutBadge, DEFAULTS.layoutBadge),
+    dictateKey: key(r.dictateKey, DEFAULTS.dictateKey),
+    englishKey: key(r.englishKey, DEFAULTS.englishKey),
+    noteKey: key(r.noteKey, DEFAULTS.noteKey),
     startWithWindows: flag(r.startWithWindows, DEFAULTS.startWithWindows),
     naturalDismissed: flag(r.naturalDismissed, DEFAULTS.naturalDismissed),
     introSeen: flag(r.introSeen, DEFAULTS.introSeen),
