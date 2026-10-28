@@ -101,9 +101,11 @@ describe('SpeechPack', () => {
     await pack.install(['speakers'])
     expect(pack.state.speakersOn).toBe('cpu')
     expect(calls.filter(c => c.args[0] === 'sync').at(-1)!.args.slice(-4)).toEqual(['--extra', 'gpu', '--extra', 'speakers'])
-    // An update with nothing asked keeps them as they are.
+    // A sync after an update, with nothing asked, keeps them where they are, whatever the advice says now.
+    onCard = true
     await pack.install([])
     expect(calls.filter(c => c.args[0] === 'sync').at(-1)!.args.slice(-4)).toEqual(['--extra', 'gpu', '--extra', 'speakers'])
+    expect(pack.state.speakersOn).toBe('cpu')
   })
 
   it('takes packages from uv’s shared cache when there is one, and leaves that cache in place', async () => {

@@ -178,19 +178,21 @@ export class SpeechPack {
   install(parts: SpeechPart[]): Promise<void> {
     if (this.running) return this.running
     const wanted = normalizeParts([...(this.marker()?.parts ?? []), ...parts])
-    this.running = this.installAll(wanted).finally(() => (this.running = undefined))
+    // Only a request for the speakers may move them (card or processor); a sync after an update keeps them where they are.
+    const extras = this.extras(wanted, parts.includes('speakers'))
+    this.running = this.installAll(wanted, extras).finally(() => (this.running = undefined))
     return this.running
   }
 
-  private async installAll(parts: SpeechPart[]): Promise<void> {
+  private async installAll(parts: SpeechPart[], extras: string[]): Promise<void> {
     this.installing = parts
     this.message = undefined
     try {
       this.set('installing', 'tool', 0)
       await this.ensureUv()
       this.set('installing', 'packages', 0)
-      await this.sync(parts)
-      fs.writeFileSync(path.join(this.o.root, 'installed.json'), JSON.stringify({ parts, lock: this.lockHash(), extras: this.extras(parts) } satisfies Marker))
+      await this.sync(parts, extras)
+      fs.writeFileSync(path.join(this.o.root, 'installed.json'), JSON.stringify({ parts, lock: this.lockHash(), extras } satisfies Marker))
       // Only Altype's own cache goes; a shared one stays as its owner keeps it.
       fs.rmSync(path.join(this.o.root, 'cache'), { recursive: true, force: true })
       this.installing = undefined
@@ -236,21 +238,20 @@ export class SpeechPack {
 
   /**
    * The extras for these parts: as installed before when the parts are the same (an update keeps them),
-   * unless the speakers are now wanted elsewhere (card or processor); else as this card can take.
+   * unless the speakers were asked for and are now wanted elsewhere (card or processor); else as this card can take.
    */
-  private extras(parts: SpeechPart[]): string[] {
+  private extras(parts: SpeechPart[], moveSpeakers = false): string[] {
     const m = this.marker()
     const wanted = extrasFor(parts, this.o.gpuSpeakers?.() ?? true)
-    if (m?.extras && m.parts.join() === parts.join() && speakersOf(m.extras) === speakersOf(wanted)) return m.extras
+    if (m?.extras && m.parts.join() === parts.join() && (!moveSpeakers || speakersOf(m.extras) === speakersOf(wanted))) return m.extras
     return wanted
   }
 
-  private async sync(parts: SpeechPart[]): Promise<void> {
+  private async sync(parts: SpeechPart[], extras: string[]): Promise<void> {
     const root = this.o.root
     const shared = this.o.sharedCache && fs.existsSync(this.o.sharedCache) ? this.o.sharedCache : undefined
     const cache = shared ?? path.join(root, 'cache')
     const env = path.join(root, 'env')
-    const extras = this.extras(parts)
     const args = ['sync', '--frozen', '--no-dev', '--project', this.o.engineDir, '--python', '3.12', ...extras.flatMap(e => ['--extra', e])]
     const job = this.runner(this.uvExe, args, {
       UV_PROJECT_ENVIRONMENT: env,
