@@ -97,6 +97,20 @@ def test_pieces_are_recognized_while_speaking_and_the_tail_at_the_end():
     assert r.calls[1]["language"] == "ru" and r.calls[1]["before"] == "[1]"
 
 
+def test_the_badge_is_told_everything_heard_so_far():
+    class Wordy(Recognizer):
+        def __call__(self, sound, language, expected, before):
+            super().__call__(sound, language, expected, before)
+            return " ".join(f"w{len(self.calls)}-{i}" for i in range(6)), "ru", 0.9
+
+    r = Wordy()
+    s = make(r)
+    send(s, np.concatenate([tone(5), silence(1.0), tone(5), silence(1.0)]))
+    assert wait(lambda: len(s.status()["heard"].split()) == 12)
+    assert s.status()["heard"].startswith("w1-0 ")
+    s.cancel()
+
+
 def test_a_tail_recognized_in_the_pause_is_not_recognized_again():
     r = Recognizer()
     s = make(r)

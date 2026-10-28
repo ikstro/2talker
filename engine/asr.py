@@ -154,10 +154,17 @@ def _speech_only(samples: np.ndarray) -> np.ndarray | None:
     return speech if len(speech) >= RATE // 4 else None
 
 
-def pick_language(probs: dict[str, float], expected: tuple[str, ...] | list[str]) -> str:
-    """Whisper's likeliest language, unless it is an unexpected one it is not sure of: then the likelier expected one."""
+def pick_language(probs: dict[str, float], expected: tuple[str, ...] | list[str], strict: bool = False) -> str:
+    """Whisper's likeliest language, unless it is an unexpected one it is not sure of: then the likelier expected one.
+
+    `strict`: the caller knows only the expected ones are spoken (Ukrainian heard in Russian
+    speech is a mistake there, however sure), so the likeliest of them, always."""
     top = max(probs, key=probs.get)
     pool = [c for c in expected if c in probs]
+    if strict:
+        if pool:
+            return max(pool, key=lambda c: probs[c])
+        log.warning("strict language asked, but Whisper knows none of %s", list(expected))
     if not pool or top in pool or probs[top] >= SURE_OTHER:
         return top
     return max(pool, key=lambda c: probs[c])
@@ -273,24 +280,26 @@ class Transcriber:
         hotwords: str = "",
         beam: int = 5,
         before: str = "",
+        strict: bool = False,
     ) -> tuple[str, str, float]:
         """A short phrase's text, its language and how sure Whisper is of it (0…1): no word times.
 
         The sound is encoded once: the language is read from the same pass the words
         come from (faster-whisper's own way encodes it twice), among the `expected`
-        ones unless Whisper is sure of another. `before`: the text said just before
-        (a dictation's earlier pieces), so this one goes on in its style.
+        ones unless Whisper is sure of another (never another with `strict`).
+        `before`: the text said just before (a dictation's earlier pieces), so this
+        one goes on in its style.
         """
         speech = _speech_only(samples)
         if speech is None:
             return "", language or "", 0.0
         try:
-            return self._one_pass(speech, language, expected, hotwords, beam, before)
+            return self._one_pass(speech, language, expected, hotwords, beam, before, strict)
         except (AttributeError, TypeError, KeyError) as error:  # faster-whisper changed underneath
             log.warning("one-pass dictation failed (%s); using faster-whisper's own way", error)
-            return self._two_passes(speech, language, hotwords, beam)
+            return self._two_passes(speech, language, hotwords, beam, expected, strict)
 
-    def _one_pass(self, speech: np.ndarray, language: str | None, expected, hotwords: str, beam: int, before: str = "") -> tuple[str, str, float]:
+    def _one_pass(self, speech: np.ndarray, language: str | None, expected, hotwords: str, beam: int, before: str = "", strict: bool = False) -> tuple[str, str, float]:
         from faster_whisper.audio import pad_or_trim
         from faster_whisper.tokenizer import Tokenizer
 
@@ -302,7 +311,7 @@ class Transcriber:
         if language is None:
             if model.model.is_multilingual:
                 probs = {token[2:-2]: p for token, p in model.model.detect_language(encoded)[0]}
-                language = pick_language(probs, expected)
+                language = pick_language(probs, expected, strict)
                 sure = float(probs[language])
             else:
                 language = "en"
@@ -323,11 +332,15 @@ class Transcriber:
         segments = model.generate_segments(features, tokenizer, info.transcription_options, False, encoded)
         return " ".join(s.text.strip() for s in segments).strip(), language, sure
 
-    def _two_passes(self, speech: np.ndarray, language: str | None, hotwords: str, beam: int) -> tuple[str, str, float]:
+    def _two_passes(self, speech: np.ndarray, language: str | None, hotwords: str, beam: int, expected=(), strict: bool = False) -> tuple[str, str, float]:
         sure = 1.0
         if language is None:
             try:
-                language, sure, _ = self._model.detect_language(speech)
+                top, sure, every = self._model.detect_language(speech)
+                # Every language's chance, so the expected ones are preferred here as in one pass.
+                probs = dict(every) if every else {top: sure}
+                language = pick_language(probs, expected, strict)
+                sure = probs.get(language, sure)
             except Exception:
                 language = None
         segments, info = self._model.transcribe(
@@ -396,8 +409,8 @@ class Parakeet:
             self._warm = None
             self.name = None
 
-    def dictate(self, samples: np.ndarray, language: str | None = None, expected=(), hotwords: str = "", beam: int = 0, before: str = "") -> tuple[str, str, float]:
-        """The phrase's text; its language is unknown here ("", sure 0)."""
+    def dictate(self, samples: np.ndarray, language: str | None = None, expected=(), hotwords: str = "", beam: int = 0, before: str = "", strict: bool = False) -> tuple[str, str, float]:
+        """The phrase's text; its language is unknown here ("", sure 0), so `strict` has nothing to hold."""
         speech = _speech_only(samples)
         if speech is None:
             return "", language or "", 0.0

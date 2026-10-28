@@ -263,12 +263,13 @@ class Session:
     # ---------------------------------------------------------------- out
 
     def status(self) -> dict:
-        """How long it is, how much sound waits behind the piece being recognized (the engine falling behind), the last words heard."""
+        """How long it is, how much sound waits behind the piece being recognized (the engine falling behind), and
+        everything heard so far (the badge decides how much of it fits)."""
         with self._lock:
             waiting = sum(e - s for s, e in self._pieces)
             tail = self._guess[2] if self._guess and self._guess[0] == self._cut else self._preview[1] if self._preview and self._preview[0] > self._cut else ""
-            words = " ".join(self._texts + ([tail] if tail else [])).split()
-            return {"state": self.state, "seconds": round(self._length / RATE, 2), "pending": round(waiting / RATE, 2), "heard": " ".join(words[-8:])}
+            heard = " ".join(t for t in self._texts + [tail] if t)
+            return {"state": self.state, "seconds": round(self._length / RATE, 2), "pending": round(waiting / RATE, 2), "heard": heard}
 
     def finish(self, pcm: bytes, timeout: float = 120.0) -> dict:
         """The last chunk; waits for every piece; the whole text."""

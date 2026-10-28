@@ -16,6 +16,8 @@ import threading
 import uuid
 from pathlib import Path
 
+from vocab import split_items
+
 log = logging.getLogger("altype.settings")
 
 # A test run gives its own folders; the real ones are Altype's.
@@ -61,7 +63,10 @@ def defaults() -> dict:
     return {
         "model": "large-v3-turbo",
         "language": "auto",
+        # The old way of naming words for Whisper (one string); moved into `vocabulary` once, kept for older callers.
         "hotwords": "",
+        # Words to be spelled right: [{word, heard: [what the recognizer writes instead]}] (vocab.py).
+        "vocabulary": [],
         "hfToken": "",
         "dataDir": str(documents_dir() / "Altype" / "Transcripts"),
         "kbDir": "",
@@ -119,6 +124,46 @@ def clean_plan(plan: dict) -> dict:
     return out
 
 
+VOCABULARY_MOST = 200
+WORD_LONGEST = 48
+HEARD_MOST = 8
+
+
+def _alias(raw) -> str | None:
+    """What a word may be heard as: one to three words, spaces made single; None when it is not that."""
+    if not isinstance(raw, str):
+        return None
+    tokens = raw.split()
+    return " ".join(tokens) if 1 <= len(tokens) <= 3 and len(" ".join(tokens)) <= WORD_LONGEST else None
+
+
+def clean_vocabulary(raw) -> list[dict]:
+    """The vocabulary as Altype sends it, as [{word, heard}]; a bare string is a word heard no other way.
+
+    Anything else (an empty word, a line break, a fourth word in an alias) is left out without a word:
+    the list is typed by a person, and one slip should not cost the rest."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw if isinstance(raw, list) else []:
+        if isinstance(entry, str):
+            entry = {"word": entry, "heard": []}
+        if not isinstance(entry, dict) or not isinstance(entry.get("word"), str):
+            continue
+        word = entry["word"].strip()
+        if not 1 <= len(word) <= WORD_LONGEST or "\n" in word or "\r" in word or word.casefold() in seen:
+            continue
+        heard: list[str] = []
+        for alias in entry.get("heard") if isinstance(entry.get("heard"), list) else []:
+            alias = _alias(alias)
+            if alias and alias.casefold() not in {h.casefold() for h in heard} and len(heard) < HEARD_MOST:
+                heard.append(alias)
+        seen.add(word.casefold())
+        out.append({"word": word, "heard": heard})
+        if len(out) >= VOCABULARY_MOST:
+            break
+    return out
+
+
 class Settings:
     def __init__(self, file: Path = SETTINGS_FILE):
         self.file = file
@@ -135,6 +180,20 @@ class Settings:
         with self._lock:
             self._values = values
             self._check()
+            # The hotwords string of before become the vocabulary's words, once.
+            if not self._values["vocabulary"] and isinstance(self._values["hotwords"], str) and self._values["hotwords"].strip():
+                self._values["vocabulary"] = clean_vocabulary(split_items(self._values["hotwords"]))
+                self._values["hotwords"] = ""
+                try:
+                    self._save()
+                except OSError as error:
+                    log.warning("could not save the vocabulary: %s", error)
+
+    def _save(self) -> None:
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._values, ensure_ascii=False, indent=2), "utf-8")
+        tmp.replace(self.file)
 
     def _check(self) -> None:
         if self._values["model"] not in MODELS:
@@ -142,6 +201,7 @@ class Settings:
         if self._values["language"] not in LANGUAGES:
             self._values["language"] = "auto"
         self._values["plan"] = clean_plan(self._values["plan"])
+        self._values["vocabulary"] = clean_vocabulary(self._values["vocabulary"])
         if not isinstance(self._values["bench"].get("runs"), dict):
             self._values["bench"] = {}
 
@@ -159,10 +219,7 @@ class Settings:
                 if key in self._values and isinstance(value, type(self._values[key])):
                     self._values[key] = value.strip() if isinstance(value, str) and key != "hotwords" else value
             self._check()
-            self.file.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._values, ensure_ascii=False, indent=2), "utf-8")
-            tmp.replace(self.file)
+            self._save()
             return dict(self._values)
 
     @property

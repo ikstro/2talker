@@ -56,6 +56,60 @@ def test_pick_language_prefers_the_expected_ones_when_unsure():
     assert asr.pick_language({"fr": 0.6}, []) == "fr"
 
 
+def test_strict_language_never_leaves_the_expected_ones():
+    probs = {"uk": 0.8, "ru": 0.15, "en": 0.05}
+    assert asr.pick_language(probs, ["ru", "en"], strict=True) == "ru"
+    # Nothing expected that Whisper knows: as without strict.
+    assert asr.pick_language(probs, [], strict=True) == "uk"
+    assert asr.pick_language(probs, ["xx"], strict=True) == "uk"
+
+
+def test_clean_vocabulary_drops_bad_entries_and_takes_bare_words():
+    raw = [
+        "Altype",
+        {"word": "  Paximizer ", "heard": ["paxi mizer", "  too   many words here ", 5, "paxi   mizer", ""]},
+        {"word": "altype", "heard": ["dup"]},  # the same word again
+        {"word": "two\nlines"},
+        {"word": "x" * 49},
+        {"word": ""},
+        {"heard": ["no word"]},
+        42,
+        {"word": "Льоша", "heard": "not a list"},
+        {"word": "Many", "heard": [f"m{i}" for i in range(12)]},
+    ]
+    assert settings_module.clean_vocabulary(raw) == [
+        {"word": "Altype", "heard": []},
+        {"word": "Paximizer", "heard": ["paxi mizer"]},
+        {"word": "Льоша", "heard": []},
+        {"word": "Many", "heard": [f"m{i}" for i in range(8)]},
+    ]
+    assert settings_module.clean_vocabulary("Altype") == []
+    assert len(settings_module.clean_vocabulary([f"w{i}" for i in range(300)])) == 200
+
+
+def test_settings_keep_a_clean_vocabulary(s):
+    s.update({"vocabulary": ["Altype", {"word": "Lisa", "heard": ["Liza"]}, {"bad": 1}]})
+    assert s["vocabulary"] == [{"word": "Altype", "heard": []}, {"word": "Lisa", "heard": ["Liza"]}]
+    s.update({"vocabulary": "not a list"})
+    assert s["vocabulary"] == [{"word": "Altype", "heard": []}, {"word": "Lisa", "heard": ["Liza"]}]
+
+
+def test_old_hotwords_move_into_the_vocabulary_once(tmp_path):
+    import json
+
+    file = tmp_path / "speech.json"
+    file.write_text(json.dumps({"hotwords": "Altype, Visual Studio;Paximizer\nAltype"}), "utf-8")
+    s = Settings(file)
+    assert [e["word"] for e in s["vocabulary"]] == ["Altype", "Visual Studio", "Paximizer"]
+    assert s["hotwords"] == ""
+    # Saved: a second start finds the vocabulary, not the hotwords.
+    assert json.loads(file.read_text("utf-8"))["hotwords"] == ""
+    # A vocabulary already there is never overwritten by hotwords.
+    file.write_text(json.dumps({"hotwords": "Other", "vocabulary": ["Mine"]}), "utf-8")
+    s = Settings(file)
+    assert s["vocabulary"] == [{"word": "Mine", "heard": []}] and s["hotwords"] == "Other"
+
+
 def test_bench_test_replaces_and_use_nudges(s):
     b = bench.Bench(s)
     name = bench.key("small", "cpu", "int8")

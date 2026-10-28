@@ -26,6 +26,7 @@ import asr
 import audio
 import merge
 import notes
+import vocab
 from asr import CudaFailed, Parakeet, Transcriber
 from bench import Bench
 from diarize import Diarizer, NeedsPart, NeedsToken
@@ -311,7 +312,7 @@ class Worker:
 
         language = job.get("language") or settings["language"]
         language = None if language == "auto" else language
-        hotwords = settings["hotwords"]
+        hotwords = vocab.hotwords(settings["vocabulary"], settings["hotwords"])
         speakers_status = "single"
 
         def words(samples, share=(0.0, 1.0)):
@@ -324,9 +325,12 @@ class Worker:
                     self.yield_to_dictation()
 
             started = time.perf_counter()
-            out = t.transcribe(samples, language, hotwords, step)
+            segments, spoken = t.transcribe(samples, language, hotwords, step)
             self.bench.words(t.name, t.device, t.compute, audio.duration(samples), time.perf_counter() - started)
-            return out
+            # Spelled as the vocabulary says before the words are numbered and kept (merge.py), so the
+            # kept words, the utterances and a later split by speaker all read the same; in a meeting
+            # both tracks are corrected alike, so the echo of a name is still found on the microphone.
+            return vocab.correct_segments(segments, settings["vocabulary"]), spoken
 
         # Loading the model, finding the language and cutting the silence come before the first words.
         progress("words")

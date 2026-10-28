@@ -4,14 +4,16 @@ Run: python app.py [--port 8765]. Only this computer can reach it; a web page
 cannot call it either (see `guard`), only the app (no Origin) and the extension.
 
 What other apps may use, and keep using:
-  POST /dictate?language=auto|<code>&expected=ru,en[&format=pcm16]
+  POST /dictate?language=auto|<code>&expected=ru,en[&strict=1][&format=pcm16]
                                       a short recording (any format; raw 16-bit 16 kHz mono with
                                       format=pcm16) -> {text, language, sure}
-                                      (`expected`: the languages likely spoken, when Whisper is unsure;
-                                      `language` is "" when the model does not say, as Parakeet)
-  POST /dictate/sessions {expected?, language?} -> {id, model}
-                                      a dictation recognized while it is spoken:
-  PUT  /dictate/sessions/<id>/<seq>   a chunk of raw 16-bit 16 kHz mono -> {pending, heard, model}
+                                      (`expected`: the languages likely spoken, up to 8, when Whisper is unsure;
+                                      strict: never a language outside expected; an explicit `language` wins;
+                                      `language` is "" when the model does not say, as Parakeet;
+                                      the text is spelled as the vocabulary says)
+  POST /dictate/sessions {expected?, language?, strict?} -> {id, model}
+                                      a dictation recognized while it is spoken (the same rules):
+  PUT  /dictate/sessions/<id>/<seq>   a chunk of raw 16-bit 16 kHz mono -> {pending, heard (all so far), model}
   POST /dictate/sessions/<id>/finish  the last chunk -> {text, language, sure, seconds, took}
   DELETE /dictate/sessions/<id>       thrown away
   POST /dictate/prepare               loads the dictation model, so the next phrase is quick
@@ -19,13 +21,15 @@ What other apps may use, and keep using:
   POST /recordings ...                a recording that arrives in chunks (the extension)
   GET  /health                        what is installed (parts), loaded and busy
 
-Altype alone uses: PUT /settings {plan} (which model runs where, made from this
-computer's measurements), POST /calibrate (the speed test), POST /models/<name>/download.
+Altype alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
+where, made from this computer's measurements; the words to spell right and what they
+are heard as), POST /calibrate (the speed test), POST /models/<name>/download.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import logging
 import os
 import secrets
@@ -50,6 +54,7 @@ import diarize
 import export
 import notes
 import numpy as np
+import vocab
 
 from bench import Calibrator
 from jobs import Worker, finish_recording
@@ -143,7 +148,26 @@ def health():
 # Dictation ----------------------------------------------------------------
 
 DICTATION_LONGEST = 300  # seconds; anything longer is a recording for /transcripts
+EXPECTED_MOST = 8  # languages a caller may say are likely; more would be no hint at all
 _dictating = threading.Lock()
+
+
+def expected_codes(raw) -> list[str]:
+    """The expected languages as codes Whisper may know: lower case, 2 or 3 letters, each once, up to EXPECTED_MOST."""
+    out: list[str] = []
+    for code in raw if isinstance(raw, (list, tuple)) else []:
+        code = code.strip().lower() if isinstance(code, str) else ""
+        if 2 <= len(code) <= 3 and code.isascii() and code.isalpha() and code not in out:
+            out.append(code)
+    return out[:EXPECTED_MOST]
+
+
+def truthy(value: str) -> bool:
+    return value.strip().lower() in ("1", "true")
+
+
+def hotwords() -> str:
+    return vocab.hotwords(settings["vocabulary"], settings["hotwords"])
 
 
 def _prepare() -> None:
@@ -167,7 +191,7 @@ def pcm16(data: bytes) -> np.ndarray:
 
 
 @app.post("/dictate")
-async def dictate(request: Request, language: str = "auto", expected: str = "", format: str = ""):
+async def dictate(request: Request, language: str = "auto", expected: str = "", format: str = "", strict: str = ""):
     """A short recording to its text. Nothing is kept: the sound is read and thrown away."""
     data = await request.body()
     if not data:
@@ -191,7 +215,7 @@ async def dictate(request: Request, language: str = "auto", expected: str = "", 
         raise HTTPException(413, "Too long for dictation: transcribe it instead")
     if seconds < 0.3:
         return {"text": "", "language": language, "sure": 0, "seconds": round(seconds, 2)}
-    likely = [c.strip() for c in expected.split(",") if c.strip()][:4]
+    likely = expected_codes(expected.split(","))
 
     def run():
         with _dictating:
@@ -199,24 +223,27 @@ async def dictate(request: Request, language: str = "auto", expected: str = "", 
             transcriber, entry = worker.dictation_model()
             beam = entry.get("beam") or (5 if transcriber.device == "cuda" else 2)
             started = time.perf_counter()
-            out = transcriber.dictate(samples, None if language == "auto" else language, likely, settings["hotwords"], beam)
+            out = transcriber.dictate(samples, None if language == "auto" else language, likely, hotwords(), beam, strict=truthy(strict))
             worker.bench.phrase(transcriber.name, transcriber.device, transcriber.compute, seconds, time.perf_counter() - started)
             return out
 
     started = time.perf_counter()
     text, spoken, sure = await run_in_threadpool(run)
+    text = vocab.correct(text, settings["vocabulary"])
     worker.last_work = time.monotonic()
     return {"text": text, "language": spoken, "sure": round(sure, 3), "seconds": round(seconds, 2), "took": round(time.perf_counter() - started, 2)}
 
 
-def _piece(sound: np.ndarray, language: str | None, expected: list, before: str) -> tuple[str, str, float]:
-    """One piece of a dictation heard while it is spoken (stream.py), by dictation's model."""
+def _piece(sound: np.ndarray, language: str | None, expected: list, before: str, strict: bool = False) -> tuple[str, str, float]:
+    """One piece of a dictation heard while it is spoken (stream.py), by dictation's model.
+
+    Its text stays as recognized: the vocabulary is applied to the whole text at the finish."""
     with _dictating:
         worker.activity += 1
         transcriber, entry = worker.dictation_model()
         beam = entry.get("beam") or (5 if transcriber.device == "cuda" else 2)
         started = time.perf_counter()
-        out = transcriber.dictate(sound, language, expected, settings["hotwords"], beam, before)
+        out = transcriber.dictate(sound, language, expected, hotwords(), beam, before, strict=strict)
         worker.bench.phrase(transcriber.name, transcriber.device, transcriber.compute, audio.duration(sound), time.perf_counter() - started)
         return out
 
@@ -231,11 +258,13 @@ def session_or_404(id: str) -> Session:
 @app.post("/dictate/sessions")
 def open_session(body: dict = Body(default={})):
     """A dictation to be heard while it is spoken; the model loads meanwhile (the first time it downloads)."""
-    expected = [c for c in body.get("expected") or [] if isinstance(c, str)][:4]
+    expected = expected_codes(body.get("expected"))
     language = body.get("language") if isinstance(body.get("language"), str) and body.get("language") not in ("", "auto") else None
     device, entry = worker.entry("dictation")
     kind = (asr.backend(entry["model"]) or "whisper", device)
-    session = sessions.open(Session(_piece, kind, expected, language))
+    # stream.py calls a recognizer with (sound, language, expected, before) only; strictness rides along here.
+    recognize = functools.partial(_piece, strict=body.get("strict") is True)
+    session = sessions.open(Session(recognize, kind, expected, language))
     threading.Thread(target=_prepare, name="altype-prepare", daemon=True).start()
     return {"id": session.id, "model": planned("dictation")}
 
@@ -259,6 +288,8 @@ async def session_finish(id: str, request: Request):
         raise HTTPException(500, f"Could not recognize: {error}")
     finally:
         worker.last_work = time.monotonic()
+    # On the whole text, so a name cut between two pieces is still found; what the badge showed meanwhile stays raw.
+    result["text"] = vocab.correct(result["text"], settings["vocabulary"])
     return result
 
 
@@ -278,7 +309,7 @@ def calibrate(body: dict = Body(...)):
     runs = [r for r in body.get("runs") or [] if isinstance(r, dict) and r.get("model") in ALL_MODELS and asr.downloaded(r["model"])]
     if not runs:
         raise HTTPException(409, "No downloaded model to test")
-    expected = [c for c in body.get("expected") or [] if isinstance(c, str)][:4]
+    expected = expected_codes(body.get("expected"))
     if not calibrator.start(runs, expected):
         raise HTTPException(409, "A test is running")
     return calibrator.status()
