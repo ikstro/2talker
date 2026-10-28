@@ -1422,6 +1422,8 @@ function updateText(u: UpdateStatus): string {
       return 'downloading an update…'
     case 'ready':
       return `version ${u.version} is ready: it installs when Altype quits`
+    case 'unavailable':
+      return u.message
     case 'failed':
       return `could not check: ${u.message}`
     default:

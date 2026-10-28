@@ -6,6 +6,7 @@ import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 import type { UpdateStatus } from './protocol'
+import { updateFailure } from './updatereason'
 
 const EVERY_MS = 6 * 60 * 60_000
 
@@ -31,7 +32,7 @@ export class Updater {
       this.set({ status: 'ready', version: info.version })
       this.events.ready(info.version)
     })
-    autoUpdater.on('error', error => this.set({ status: 'failed', message: error.message }))
+    autoUpdater.on('error', error => this.set(updateFailure(error)))
   }
 
   /** Checks now, and keeps checking while the app runs. */
@@ -43,7 +44,7 @@ export class Updater {
 
   check(): void {
     if (!app.isPackaged || this.status.status === 'ready' || this.status.status === 'downloading') return
-    autoUpdater.checkForUpdates().catch(error => this.set({ status: 'failed', message: String(error) }))
+    autoUpdater.checkForUpdates().catch(error => this.set(updateFailure(error)))
   }
 
   dispose(): void {

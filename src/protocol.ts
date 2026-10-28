@@ -91,6 +91,8 @@ export type HostVoice = { name: string; lang: string }
 export type UpdateStatus =
   | { status: 'dev' | 'idle' | 'checking' | 'none' | 'downloading' }
   | { status: 'ready'; version: string }
+  /** Not checked, for a reason that is no fault: the releases are private, or there is no connection. */
+  | { status: 'unavailable'; message: string }
   | { status: 'failed'; message: string }
 
 /** A keyboard layout Windows has: `id` as settings.ts keeps it ("04090409"), `name` as Windows calls its language. */
