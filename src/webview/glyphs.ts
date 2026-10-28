@@ -12,6 +12,8 @@ const GLYPHS = {
   pin: '<path d="M6 2.5h4M7 2.5v3.8L4.5 9h7L9 6.3V2.5M8 9v4.5"/>',
   close: '<path d="M4 4l8 8M12 4l-8 8"/>',
   minimize: '<path d="M4 8h8"/>',
+  maximize: '<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/>',
+  restore: '<rect x="3.5" y="5.5" width="7" height="7" rx="1.5"/><path d="M6 3.5h5a1.5 1.5 0 0 1 1.5 1.5v5"/>',
 }
 
 export type GlyphName = keyof typeof GLYPHS

@@ -32,6 +32,8 @@ const state = {
   /** The most common English words: the others get a dotted line. */
   common: new Set<string>(),
   pinned: false,
+  /** The card fills the screen's work area. */
+  maximized: false,
   /** The translation under the English; the native-language button hides it. */
   showTranslation: true,
   hostVoices: undefined as HostVoice[] | undefined,
@@ -139,8 +141,10 @@ const root = document.getElementById('root') as HTMLDivElement
 const kindLabel = el('span', { class: 'card-kind' })
 const translationButton = el('button', { class: 'toggle', 'aria-pressed': 'true', onclick: () => toggleTranslation() }, 'RU')
 const pinButton = el('button', { class: 'icon-btn', 'aria-pressed': 'false', onclick: () => togglePin() }, glyph('pin'))
+// The card fills the screen and goes back; main says which it is (a double click on the bar does the same).
+const maximizeButton = el('button', { class: 'icon-btn', 'aria-pressed': 'false', onclick: () => post({ type: 'maximize', on: !state.maximized }) }, glyph('maximize'))
 const closeButton = el('button', { class: 'icon-btn', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => post({ type: 'close' }) }, glyph('close'))
-const header = el('header', { class: 'bar' }, kindLabel, el('span', { class: 'grow' }), translationButton, pinButton, closeButton)
+const header = el('header', { class: 'bar' }, kindLabel, el('span', { class: 'grow' }), translationButton, pinButton, maximizeButton, closeButton)
 
 const voiceText = el('span', { class: 'banner-text' })
 const voiceButton = el('button', { class: 'primary-btn', onclick: () => downloadNatural() })
@@ -254,8 +258,12 @@ function markRareWords(): void {
   markRare(body, state.common, state.config.rareWords)
 }
 
-// The window is as tall as the card's content, with the page's border above and below.
-new ResizeObserver(() => post({ type: 'height', px: Math.ceil(document.body.getBoundingClientRect().height) + 2 })).observe(document.body)
+// The window is as tall as the card's content, with the page's border above and below; a maximized card fills the screen instead
+// (its page as tall as the window), so its height says nothing until it is restored.
+function postHeight(): void {
+  if (!state.maximized) post({ type: 'height', px: Math.ceil(document.body.getBoundingClientRect().height) + 2 })
+}
+new ResizeObserver(() => postHeight()).observe(document.body)
 // A wider or narrower card wraps the field's lines anew.
 window.addEventListener('resize', () => fitTextField())
 
@@ -319,6 +327,7 @@ function renderChrome(): void {
   translationButton.title = state.showTranslation ? `Hide the ${c?.native ?? ''} translation` : `Show the ${c?.native ?? ''} translation`
   pinButton.setAttribute('aria-pressed', String(state.pinned))
   pinButton.title = state.pinned ? 'Unpin: close when another window is clicked' : 'Pin: keep open'
+  renderMaximized()
   document.body.classList.toggle('no-translation', !state.showTranslation)
   oneButton.setAttribute('aria-pressed', String(state.config.oneAtATime))
   oneButton.title = state.config.oneAtATime ? 'Listen reads one sentence and waits; ← → step' : 'Read one sentence at a time'
@@ -567,12 +576,15 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
   }
 }
 
-/** The field is as tall as its text, up to a limit (card.css) past which it scrolls. */
+/** The field is as tall as its text, up to a limit (card.css) past which it scrolls; maximized, it fills the rest of the screen at least (card.css). */
 function fitTextField(): void {
   if (textView.hidden) return
   const y = window.scrollY
+  // Measured unstretched, so a field that filled the screen can be as short as its text again.
+  textField.style.flexGrow = '0'
   textField.style.height = 'auto'
   textField.style.height = `${textField.scrollHeight + textField.offsetHeight - textField.clientHeight}px`
+  textField.style.flexGrow = ''
   window.scrollTo({ top: y })
 }
 
@@ -731,6 +743,22 @@ function togglePin(): void {
   renderChrome()
 }
 
+/** The Maximize button as main's state has it: a square to fill the screen, two to go back. */
+function renderMaximized(): void {
+  const on = state.maximized
+  maximizeButton.setAttribute('aria-pressed', String(on))
+  maximizeButton.title = on ? 'Restore' : 'Maximize'
+  maximizeButton.setAttribute('aria-label', on ? 'Restore' : 'Maximize')
+  const shape = maximizeButton.querySelector<SVGSVGElement>('svg.glyph')
+  if (shape && shape.dataset.shape !== (on ? 'restore' : 'maximize')) shape.replaceWith(glyph(on ? 'restore' : 'maximize'))
+  if (document.body.classList.contains('maximized') === on) return
+  document.body.classList.toggle('maximized', on)
+  // Filling the screen, the field takes the height; back, it is as tall as its text again,
+  // and main hears the content's height at once (the page may have kept its size, so the observer stays still).
+  fitTextField()
+  postHeight()
+}
+
 let hintTimer: number | undefined
 function showHint(content: (Node | string)[], ms = 6000): void {
   hint.replaceChildren(...content)
@@ -816,6 +844,7 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
       state.card = m.card
       state.config = m.config
       state.pinned = m.pinned
+      state.maximized = m.maximized
       if (changedPair) hover.forget()
       renderChrome()
       renderState()

@@ -179,7 +179,8 @@ export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 
 export type GlossMissing = 'not-english' | 'no-dictionary' | 'downloading' | 'download-failed' | 'download-off' | 'not-found'
 
 export type ToView =
-  | { type: 'card'; card: CardView; config: ViewConfig; pinned: boolean }
+  /** `maximized`: the card fills the screen's work area (and stays, pinned, until closed or restored). */
+  | { type: 'card'; card: CardView; config: ViewConfig; pinned: boolean; maximized: boolean }
   /** `platform` is Node's name for the system (win32, darwin, linux), for the steps to add a voice. */
   | { type: 'hostVoices'; voices: HostVoice[]; canSpeak: boolean; platform: string }
   | { type: 'progress'; id: number; pos: number; len: number }
@@ -239,6 +240,8 @@ export type ToHost =
   | { type: 'height'; px: number }
   /** A pinned card stays open when another window is clicked. */
   | { type: 'pin'; on: boolean }
+  /** The card fills the screen, or goes back to where and how big it was. */
+  | { type: 'maximize'; on: boolean }
   | { type: 'close' }
   /** Translate the last text again, after a failure. */
   | { type: 'retry' }

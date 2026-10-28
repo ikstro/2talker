@@ -181,6 +181,10 @@ let pasteTarget: { id: number; window: bigint } | undefined
 /** The card's bounds when its edge began to be dragged; the content's height, which the card follows otherwise. */
 let resizeFrom: Rectangle | undefined
 let contentHeight = 160
+/** The card fills the work area: its bounds before, to go back to. */
+let maximizedFrom: Rectangle | undefined
+/** Whether the card was pinned before it was maximized: it goes back to that on restore. */
+let pinnedBefore = false
 /** The tab the app window opens on, once its page is ready. */
 let pendingTab: AppTab | undefined
 /** The transcript it shows then (a note left in Transcripts, from its balloon). */
@@ -406,9 +410,10 @@ function createCard(): BrowserWindow {
   })
   // A drag of an edge (never the card's own growing) sets the width, or how tall a card may grow.
   win.on('will-resize', () => {
-    resizeFrom ??= win.getBounds()
+    if (!maximizedFrom) resizeFrom ??= win.getBounds()
   })
   win.on('resized', () => {
+    if (maximizedFrom) return
     const from = resizeFrom
     resizeFrom = undefined
     if (!from) return
@@ -426,6 +431,12 @@ function createCard(): BrowserWindow {
   // Clicking another window puts the card away, unless it is pinned or has only just opened.
   win.on('blur', () => {
     if (!pinned && Date.now() - shownAt > 400) hideCard()
+  })
+  // A double click on the bar (the drag region, Windows' caption) maximizes or restores it, as a window's title bar does.
+  const WM_NCLBUTTONDBLCLK = 0x00a3
+  const HTCAPTION = 2
+  win.hookWindowMessage(WM_NCLBUTTONDBLCLK, wParam => {
+    if (wParam.readUInt32LE(0) === HTCAPTION) maximizeCard(!maximizedFrom)
   })
   void win.loadFile(path.join(app.getAppPath(), 'media', 'card.html'))
   return win
@@ -567,6 +578,7 @@ function postCard(): void {
     card: { ...shown, target: TARGET, native: settings.native, autoRead: settings.autoRead },
     config: config(),
     pinned,
+    maximized: !!maximizedFrom,
   })
 }
 
@@ -601,12 +613,47 @@ function hideCard(): void {
   post({ type: 'stop' })
   pinned = false
   card?.hide()
+  // The next card opens at its usual size.
+  if (maximizedFrom && card && !card.isDestroyed()) {
+    card.setResizable(true)
+    card.setBounds(maximizedFrom)
+  }
+  maximizedFrom = undefined
 }
 
-/** The card is as tall as its content, up to the height set by hand or most of the screen; never while its edge is dragged. */
+/**
+ * The card fills the work area of its screen (pinned meanwhile: it stays until closed or restored),
+ * or goes back to its bounds and pin state before, kept inside that screen, and to its content's height.
+ */
+function maximizeCard(on: boolean): void {
+  const win = card
+  if (!win || win.isDestroyed() || on === !!maximizedFrom) return
+  if (on) {
+    const bounds = win.getBounds()
+    maximizedFrom = bounds
+    resizeFrom = undefined
+    pinnedBefore = pinned
+    pinned = true
+    win.setResizable(false)
+    win.setBounds(screen.getDisplayMatching(bounds).workArea)
+  } else {
+    const from = maximizedFrom ?? win.getBounds()
+    maximizedFrom = undefined
+    pinned = pinnedBefore
+    const area = screen.getDisplayMatching(win.getBounds()).workArea
+    const width = Math.min(from.width, area.width)
+    const x = Math.min(Math.max(from.x, area.x), area.x + area.width - width)
+    win.setResizable(true)
+    win.setBounds(resize({ ...from, x, width }, from.height, area))
+    fitCard()
+  }
+  postCard()
+}
+
+/** The card is as tall as its content, up to the height set by hand or most of the screen; never while its edge is dragged or it is maximized. */
 function fitCard(): void {
   const win = card
-  if (!win || win.isDestroyed() || resizeFrom) return
+  if (!win || win.isDestroyed() || resizeFrom || maximizedFrom) return
   const bounds = win.getBounds()
   const area = screen.getDisplayMatching(bounds).workArea
   const cap = settings.cardHeight || Math.round(area.height * CARD_AUTO_SHARE)
@@ -690,6 +737,9 @@ function onMessage(message: ToHost): void {
       return
     case 'pin':
       pinned = message.on
+      return
+    case 'maximize':
+      maximizeCard(message.on)
       return
     case 'close':
       hideCard()

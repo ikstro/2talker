@@ -722,6 +722,36 @@ body.no-translation .msg-foot {
   transition: border-color 80ms ease-out, box-shadow 80ms ease-out;
 }
 
+/* Maximized: the page fills the window, and the field the height the rest
+   leaves; a longer text grows it on, the page scrolling. */
+body.maximized {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+body.maximized #root {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+body.maximized .list {
+  flex: 1 0 auto;
+}
+
+body.maximized .text-view {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+body.maximized .text-field {
+  flex: 1 0 auto;
+  max-height: none;
+  overflow-y: hidden;
+}
+
 .text-field:focus {
   border-color: var(--accent);
   outline: none;
