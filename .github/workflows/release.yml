@@ -22,6 +22,13 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
+      # The speech engine's tests, on its core part (no card, no speakers).
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --group dev
+        working-directory: engine
+      - run: npm run test:engine
       # The draft release is made first: electron-builder uploads its files
       # in parallel and, finding none, would make a draft for each of them.
       - run: gh release view "$env:TAG" --json id > $null 2>&1; if (-not $?) { gh release create "$env:TAG" --draft --title "Altype $($env:TAG.Substring(1))" --notes-file .github/release-notes.md }

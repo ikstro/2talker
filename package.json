@@ -21,6 +21,7 @@
     "start": "node esbuild.mjs && electron .",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
+    "test:engine": "uv run --project engine --frozen --no-sync pytest engine/tests -q -p no:cacheprovider",
     "dist": "node esbuild.mjs && electron-builder --win --x64",
     "models": "node scripts/build-mt.mjs"
   },

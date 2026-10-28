@@ -1146,6 +1146,7 @@ function meetRows(v: AppView): HTMLElement[] {
     row('2 · Load unpacked, then pick the extension’s folder', [pathNote(dir)], linkBtn('Show the folder', () => post({ type: 'showInFolder', path: dir }))),
     row('3 · In a meeting: the Altype icon → Record, or the key', ['the call’s sound and your microphone'], caps(MEET_KEY)),
     row('4 · If the key does nothing, set it at chrome://extensions/shortcuts', [], linkBtn('Copy address', () => copyText('chrome://extensions/shortcuts'))),
+    row('After Altype updates, press Reload on the extension at chrome://extensions', ['Chrome keeps the old copy until then'], linkBtn('Copy address', () => copyText('chrome://extensions'))),
   ]
 }
 

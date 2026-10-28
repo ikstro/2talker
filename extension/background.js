@@ -49,7 +49,7 @@ function titleOf(tab) {
 async function start(tab) {
   if (await current()) return { ok: false, error: 'Already recording' }
   if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) return { ok: false, error: 'This tab cannot be recorded' }
-  if (!(await engineReady())) return { ok: false, error: 'Altype is not running, or its speech engine is off: start it from the Start menu' }
+  if (!(await engineReady())) return { ok: false, error: "Altype's speech engine is not running: open Altype → Transcribe to install or start it" }
   let streamId
   try {
     streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id })

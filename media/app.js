@@ -2694,7 +2694,8 @@
       row("1 \xB7 In Chrome, open chrome://extensions and turn on Developer mode", [], linkBtn("Copy address", () => copyText("chrome://extensions"))),
       row("2 \xB7 Load unpacked, then pick the extension\u2019s folder", [pathNote(dir)], linkBtn("Show the folder", () => post({ type: "showInFolder", path: dir }))),
       row("3 \xB7 In a meeting: the Altype icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone"], caps(MEET_KEY)),
-      row("4 \xB7 If the key does nothing, set it at chrome://extensions/shortcuts", [], linkBtn("Copy address", () => copyText("chrome://extensions/shortcuts")))
+      row("4 \xB7 If the key does nothing, set it at chrome://extensions/shortcuts", [], linkBtn("Copy address", () => copyText("chrome://extensions/shortcuts"))),
+      row("After Altype updates, press Reload on the extension at chrome://extensions", ["Chrome keeps the old copy until then"], linkBtn("Copy address", () => copyText("chrome://extensions")))
     ];
   }
   function transcribePage(v) {
