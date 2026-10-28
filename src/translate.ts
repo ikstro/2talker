@@ -107,27 +107,33 @@ export type LanguageWords = { common: Readonly<Record<string, ReadonlySet<string
  * is written in; letters only one language has; else the language most of
  * whose common words the text holds (the person's own, then English, win a
  * tie). A short text without them is English when it has an English word,
- * or in the person's language when it is written in its script. A guess:
- * the card lets it be changed.
+ * or in the person's language when it is written in its script. `pool`: the
+ * languages the person uses (settings.ts myLanguages); when some of them are
+ * written in the text's script, the guess stays among those, so a Russian
+ * speaker's short Cyrillic line is not taken for Bulgarian. Letters only one
+ * language has still win over it. A guess: the card lets it be changed.
  */
-export function languageOf(text: string, native: string, words: LanguageWords): string {
+export function languageOf(text: string, native: string, words: LanguageWords, pool: readonly string[] = []): string {
   const own = langCode(native)
   const script = scriptOf(text)
   if (!script) return 'en'
   const only = SCRIPT_LANGUAGE[script]
   if (only) return only
   for (const [letters, code] of OWN_LETTERS) if (scriptFor(code) === script && letters.test(text)) return code
+  const mine = pool.filter(code => scriptFor(code) === script)
+  const among = (code: string) => mine.length === 0 || mine.includes(code)
   const tokens = text.toLowerCase().replace(/[’ʼ]/g, "'").match(/\p{L}+(?:'\p{L}+)*/gu) ?? []
   let best: { code: string; score: number } | undefined
   for (const [code, common] of Object.entries(words.common)) {
-    if (scriptFor(code) !== script) continue
+    if (scriptFor(code) !== script || !among(code)) continue
     const score = tokens.filter(t => common.has(t)).length
     const wins = !best || score > best.score || (score === best.score && (code === own || (code === 'en' && best.code !== own)))
     if (score > 0 && wins) best = { code, score }
   }
   if (best) return best.code
-  if (script === 'Latin' && tokens.some(t => words.english.has(t))) return 'en'
+  if (script === 'Latin' && among('en') && tokens.some(t => words.english.has(t))) return 'en'
   if (scriptFor(native) === script) return own
+  if (mine[0]) return mine[0]
   return script === 'Cyrillic' ? 'ru' : script === 'Arabic' ? 'ar' : 'en'
 }
 

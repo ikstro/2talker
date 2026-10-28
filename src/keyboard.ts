@@ -12,7 +12,7 @@ import koffi from 'koffi'
 import { isAccelerator } from './hotkey'
 import type { KbdConfig, KbdIn, KbdOut, KeyAction } from './typist'
 import type { KeyboardLayout } from './protocol'
-import type { Settings } from './settings'
+import { myLanguages, type Settings } from './settings'
 import { installedLayouts } from './winkbd'
 
 const user32 = koffi.load('user32.dll')
@@ -49,7 +49,7 @@ export function keyboardLayouts(): KeyboardLayout[] {
     } catch {
       // A tag Intl does not know keeps its own form.
     }
-    return { id: l.id, name, short: (l.tag.split('-')[0] ?? l.id).toUpperCase() }
+    return { id: l.id, name, short: (l.tag.split('-')[0] ?? l.id).toUpperCase(), lang: (l.tag.split('-')[0] ?? '').toLowerCase() }
   })
 }
 
@@ -93,6 +93,7 @@ export class KeyboardHelper {
       autoFix: s.autoFix,
       badge: s.layoutBadge,
       cycle: s.layouts,
+      languages: myLanguages(s),
       fixApps: s.fixApps,
       keepWords: s.keepWords,
       words: Object.fromEntries(FIX_LANGUAGES.map(code => [code, path.join(this.wordsDir, `${code}.txt`)])),

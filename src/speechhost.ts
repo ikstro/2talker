@@ -16,6 +16,7 @@ import type { Settings } from './settings'
 import { DOWNLOAD_MB, hasNvidia, INSTALLED_MB, SpeechPack, type SpeechPart } from './speechpack'
 import { planSpeech, testKey, testRuns, type PlanInput, type SpeechPlan } from './speechplan'
 import { SpeechService, type SpeechResult } from './speechservice'
+import { vocabularyFor } from './vocabulary'
 
 /** "Not now" holds this long at least, even when there is something new to measure. */
 const DECLINE_MS = 24 * 3600_000
@@ -143,18 +144,24 @@ export class SpeechHost {
     this.autoTest()
   }
 
+  /** What the engine is told of Altype's choices: the plan, and the words to spell (vocabulary.ts). */
+  private engineSettings(): { plan: SpeechPlan['engine']; vocabulary: ReturnType<typeof vocabularyFor> } {
+    return { plan: this.plan.engine, vocabulary: vocabularyFor(this.o.settings()) }
+  }
+
   private async push(): Promise<void> {
-    const plan = JSON.stringify(this.plan.engine)
-    if (plan === this.pushed || this.pushing) return
+    const body = this.engineSettings()
+    const sent = JSON.stringify(body)
+    if (sent === this.pushed || this.pushing) return
     this.pushing = true
     try {
-      const r = await this.call('PUT', '/settings', { plan: this.plan.engine })
-      if (r.ok) this.pushed = plan
+      const r = await this.call('PUT', '/settings', body)
+      if (r.ok) this.pushed = sent
     } finally {
       this.pushing = false
     }
-    // The plan may have moved on while it was being sent.
-    if (JSON.stringify(this.plan.engine) !== this.pushed) void this.push()
+    // The plan, or the words, may have moved on while they were being sent.
+    if (JSON.stringify(this.engineSettings()) !== this.pushed) void this.push()
   }
 
   private get testing(): boolean {

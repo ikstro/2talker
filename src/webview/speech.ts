@@ -53,6 +53,8 @@ export type EngineSettings = {
   model: string
   language: string
   hotwords: string
+  /** The words to spell as the engine holds them: Altype's `vocabulary` setting, sent with the plan. */
+  vocabulary: { word: string; heard: string[] }[]
   hasToken: boolean
   dataDir: string
   kbDir: string

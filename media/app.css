@@ -979,6 +979,22 @@ svg.glyph {
   height: 20px;
 }
 
+/* A word to spell: the word as written, then what it may be heard as, quieter. */
+.chip.term {
+  max-width: 100%;
+}
+
+.chip.term b {
+  font-weight: 600;
+}
+
+.chip.term .heard {
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
 button.chip:hover {
   background: var(--overlay);
 }
@@ -1478,6 +1494,12 @@ button.chip:hover {
 
 .field.wide {
   width: 210px;
+}
+
+/* A word to spell and its heard forms: room for the example it shows. */
+.field.term {
+  width: 320px;
+  max-width: 45vw;
 }
 
 .row .field {

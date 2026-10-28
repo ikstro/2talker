@@ -14,7 +14,9 @@
 import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
 import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
-import { RATES, type ThemeMode } from '../settings'
+import { LANGUAGES } from '../languages'
+import { myLanguages, RATES, type ThemeMode } from '../settings'
+import { parseEntry } from '../vocabulary'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
@@ -63,6 +65,10 @@ let pickedLayout = ''
 let addingApp = false
 /** The box for a word to keep as typed on the Keyboard page is open. */
 let addingWord = false
+/** The box for a word to spell on the Dictate page is open. */
+let addingTerm = false
+/** The list of languages to add on the Settings page is open. */
+let addingLanguage = false
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)')
 // #t= and #pt= freeze the moment and a page's growth at a time (seconds), for
@@ -162,7 +168,11 @@ function keysOf(action: Action, s: Settings, chained = false): HTMLElement[] {
 /** The layouts the keys go through, in order: those chosen that Windows has, or all of them. */
 function cycleOf(v: AppView): KeyboardLayout[] {
   const chosen = v.settings.layouts.map(id => v.layouts.find(l => l.id === id)).filter((l): l is KeyboardLayout => !!l)
-  return chosen.length > 0 ? chosen : v.layouts
+  if (chosen.length > 0) return chosen
+  // As the keyboard thread goes (typist.ts cycle): the layouts in the person's languages, when two or more are.
+  const languages = myLanguages(v.settings)
+  const mine = v.layouts.filter(l => languages.includes(l.lang))
+  return mine.length >= 2 ? mine : v.layouts
 }
 
 /** The natural voice reads: it is here and chosen (Automatic picks it). */
@@ -770,6 +780,8 @@ function openPage(name: Page, animate = !reduced.matches): void {
   pickedLayout = ''
   addingApp = false
   addingWord = false
+  addingTerm = false
+  addingLanguage = false
   keyTrouble = undefined
   if (name === 'transcripts') enterTranscripts()
   fillHeader()
@@ -1134,8 +1146,71 @@ function dictatePage(v: AppView): HTMLElement[] {
     row('Tap the key, talk, tap it again', ['the words show as you speak · Esc throws the phrase away, while it records and while it types'], null),
     grp('Knowledge base'),
     ...kbRows(v),
+    grp('Words to spell'),
+    ...termRows(v),
     ...(running(v) ? [grp('Speech model'), ...modelRows(v, 'dictation')] : []),
     el('p', { class: 'privacy' }, icon('lock'), 'Speech is recognized on this computer; nothing is sent anywhere.'),
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
+/**
+ * Words to spell: names and terms dictation and transcripts write as the
+ * person does, each with what it may be heard as (vocabulary.ts). Altype's own
+ * setting, sent to the engine with its plan, so it can be filled in before the
+ * engine is here.
+ */
+function termRows(v: AppView): HTMLElement[] {
+  const s = v.settings
+  const wordOf = (line: string) => parseEntry(line).word.toLowerCase()
+  const add = (text: string) => {
+    const line = text.replace(/\s+/g, ' ').trim()
+    addingTerm = false
+    if (!parseEntry(line).word) return renderBody()
+    // The same word again is the person correcting it: the new line replaces the old.
+    const lines = (view?.settings.vocabulary ?? s.vocabulary).filter(l => wordOf(l) !== wordOf(line))
+    save({ vocabulary: [...lines, line] })
+  }
+  const input = addingTerm
+    ? el('input', {
+        type: 'text',
+        class: 'field term',
+        placeholder: 'Peshynskyi, or Altype (altype, альтайп)',
+        'aria-label': 'Word to spell, and what it is heard as',
+        onkeydown: (event: Event) => {
+          const key = (event as KeyboardEvent).key
+          if (key === 'Enter') add((event.target as HTMLInputElement).value)
+          if (key === 'Escape') (event.preventDefault(), (addingTerm = false), renderBody())
+        },
+      })
+    : null
+  if (input) window.setTimeout(() => input.focus(), 0)
+  const chips = s.vocabulary.map(line => {
+    const { word, heard } = parseEntry(line)
+    return el(
+      'span',
+      { class: 'chip term', title: line },
+      el('b', {}, word),
+      heard.length ? el('span', { class: 'heard' }, ` · ${heard.join(', ')}`) : null,
+      el('button', { class: 'ib', title: 'Remove', 'aria-label': `Remove ${word}`, onclick: () => save({ vocabulary: s.vocabulary.filter(l => l !== line) }) }, icon('close')),
+    )
+  })
+  return [
+    row(
+      'Names and terms',
+      ['Dictation and transcripts spell these as written; a heard form is replaced wherever it is said'],
+      el(
+        'span',
+        { class: 'kchg' },
+        input,
+        input
+          ? null
+          : linkBtn('Add…', () => {
+              addingTerm = true
+              renderBody()
+            }),
+      ),
+    ),
+    chips.length ? el('div', { class: 'chiprow' }, ...chips) : null,
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -1160,6 +1235,8 @@ function transcribePage(v: AppView): HTMLElement[] {
     testOffer(v),
     ...(running(v) ? [grp('New transcription'), ...newRows(v)] : []),
     ...(installed(v) ? [grp('Speakers'), ...speakerRows(v)] : []),
+    grp('Words to spell'),
+    row('Names and terms', ['spelled as the Dictate page’s Words to spell say'], linkBtn('Open Dictate', () => openPage('dictate'))),
     grp('Google Meet'),
     ...meetRows(v),
     ...(running(v)
@@ -1551,6 +1628,54 @@ function speechSettings(v: AppView): HTMLElement[] {
   return out.filter((n): n is HTMLElement => n !== null)
 }
 
+/** The languages the person uses: their own and English always, others added; what dictation, the translator and the screen's text are read as. */
+function languageRows(v: AppView): HTMLElement[] {
+  const s = v.settings
+  const nameOf = (code: string) => LANGUAGES.find(l => l.code === code)?.name ?? code
+  const used = myLanguages(s)
+  const rest = LANGUAGES.filter(l => !used.includes(l.code))
+  const picker = addingLanguage
+    ? select<string>(
+        '',
+        [['', 'Pick a language'], ...rest.map((l): [string, string] => [l.code, `${l.name} · ${l.native}`])],
+        code => {
+          addingLanguage = false
+          if (!code) return renderBody()
+          save({ languages: [...(view?.settings.languages ?? s.languages), code] })
+        },
+      )
+    : null
+  if (picker) {
+    const box = picker.querySelector('select') as HTMLSelectElement
+    box.addEventListener('keydown', event => event.key === 'Escape' && (event.preventDefault(), event.stopPropagation(), (addingLanguage = false), renderBody()))
+    window.setTimeout(() => box.focus(), 0)
+  }
+  return [
+    row(
+      'Languages you use',
+      ['dictation, translation and the screen’s text are read as one of these'],
+      picker ??
+        linkBtn(
+          '+ Add',
+          () => {
+            addingLanguage = true
+            renderBody()
+          },
+          rest.length === 0,
+        ),
+    ),
+    el(
+      'div',
+      { class: 'chiprow' },
+      chip(nameOf(used[0] ?? '')),
+      chip('English'),
+      ...s.languages.map(code =>
+        el('span', { class: 'chip' }, nameOf(code), el('button', { class: 'ib', title: 'Remove', 'aria-label': `Remove ${nameOf(code)}`, onclick: () => save({ languages: s.languages.filter(c => c !== code) }) }, icon('close'))),
+      ),
+    ),
+  ]
+}
+
 function settingsPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const u = v.update
@@ -1574,6 +1699,7 @@ function settingsPage(v: AppView): HTMLElement[] {
         native => save({ native }),
       ),
     ),
+    ...languageRows(v),
     row('Voice', voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, '').replace(/ Desktop$/, '')}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), voice => save({ voice }))),
     naturalRow(v),
     row(

@@ -119,6 +119,17 @@ describe('a text as it is', () => {
     expect(languageOf('кошка', 'Bulgarian', words)).toBe('bg')
   })
 
+  test('the languages the person uses narrow the guess within their script', () => {
+    const text = 'Днес съм вкъщи.'
+    expect(languageOf(text, 'Russian', words)).toBe('bg')
+    expect(languageOf(text, 'Russian', words, ['ru', 'en'])).toBe('ru')
+    expect(languageOf('Ich bin da', 'Russian', words, ['ru', 'en', 'de'])).toBe('de')
+    // A short Latin line stays English; a script none of them uses, and letters only one language has, as before.
+    expect(languageOf('hello', 'Russian', words, ['ru', 'en'])).toBe('en')
+    expect(languageOf('今日はいい天気ですね', 'Russian', words, ['ru', 'en'])).toBe('ja')
+    expect(languageOf('Привіт, як справи?', 'Russian', words, ['ru', 'en'])).toBe('uk')
+  })
+
   test('translated into English from the person\'s language, into it from any other', () => {
     expect(targetFor('ru', 'Russian')).toBe('en')
     expect(targetFor('en', 'Russian')).toBe('ru')

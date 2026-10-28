@@ -26,6 +26,8 @@ export type KbdConfig = {
   badge: boolean
   /** The layouts the keys go through, in order (ids); all of Windows' when empty. */
   cycle: string[]
+  /** The languages the person uses (codes): with no layouts chosen, the keys go through those of Windows' in them. */
+  languages: string[]
   fixApps: string[]
   keepWords: string[]
   /** The word lists by language code (media/layout/<code>.txt). */
@@ -107,7 +109,7 @@ type Typed = Stroke & { end: boolean }
 type Fix = { erase: number; text: string; key?: number; to: string; hwnd: bigint }
 
 export class Typist {
-  private config: KbdConfig = { keys: {}, autoFix: false, badge: false, cycle: [], fixApps: [], keepWords: [], words: {} }
+  private config: KbdConfig = { keys: {}, autoFix: false, badge: false, cycle: [], languages: [], fixApps: [], keepWords: [], words: {} }
   private keys: { action: KeyAction; spec: HotkeySpec }[] = []
   private keep = new Set<string>()
   private lexicons: Readonly<Record<string, Lexicon>> = {}
@@ -155,10 +157,17 @@ export class Typist {
     this.lexicons = lexicons
   }
 
-  /** The layouts the keys go through: those chosen that Windows has, or all of Windows'. */
+  /**
+   * The layouts the keys go through: those chosen that Windows has; else
+   * Windows' layouts in the languages the person uses, when two or more are
+   * (a layout added once for another language stays out of the way); else all.
+   */
   cycle(): string[] {
     const chosen = this.config.cycle.filter(id => this.env.layout(id))
-    return chosen.length > 0 ? chosen : this.env.installed()
+    if (chosen.length > 0) return chosen
+    const all = this.env.installed()
+    const mine = all.filter(id => this.config.languages.includes(this.env.layout(id)?.lang ?? ''))
+    return mine.length >= 2 ? mine : all
   }
 
   // ---------------------------------------------------------------- keys

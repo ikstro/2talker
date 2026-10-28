@@ -2,7 +2,7 @@
 // (%APPDATA%\Altype). The learned language is English: the natural voice and
 // the word dictionaries are English ones.
 
-import { findLanguage } from './languages'
+import { findLanguage, LANGUAGES } from './languages'
 import type { WordHintMode } from './protocol'
 import type { Prefer } from './speechplan'
 
@@ -20,6 +20,12 @@ export const CARD_HEIGHT = { min: 160, max: 2400 }
 export type Settings = {
   /** The person's own language, by its English name. */
   native: string
+  /**
+   * Other languages the person uses, by code, beyond their own and English
+   * (always in): dictation, the translator's guess and the screen's text are
+   * read as one of these.
+   */
+  languages: string[]
   /** "natural:<id>" for a natural voice, a system voice's name, or empty for Automatic. */
   voice: string
   rate: number
@@ -65,6 +71,12 @@ export type Settings = {
   dictateKey: string
   englishKey: string
   noteKey: string
+  /**
+   * Words dictation and transcripts spell as written, one line each as the
+   * person typed it: the word, then what it may be heard as in parentheses
+   * ("Altype (альтайп, all type)"); vocabulary.ts reads them.
+   */
+  vocabulary: string[]
   /** Speech models: the most accurate this computer runs in time, or quicker ones. */
   speechPrefer: Prefer
   /** A speech model the person picked for dictation and for transcripts (models.json names); empty: chosen for this computer. */
@@ -85,6 +97,7 @@ export type Settings = {
 
 export const DEFAULTS: Settings = {
   native: 'Russian',
+  languages: [],
   voice: '',
   rate: 1,
   autoRead: true,
@@ -109,6 +122,7 @@ export const DEFAULTS: Settings = {
   dictateKey: 'Control+Alt+D',
   englishKey: '',
   noteKey: 'Control+Alt+N',
+  vocabulary: [],
   speechPrefer: 'accuracy',
   dictationModel: '',
   transcriptsModel: '',
@@ -120,6 +134,30 @@ export const DEFAULTS: Settings = {
   introSeen: false,
 }
 
+export const VOCABULARY = { lines: 200, chars: 120 }
+
+/** The vocabulary's lines tidied: one line each, single spaces, short; the same word (before its parentheses) once. */
+function vocabularyLines(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const line = item.replace(/\s+/g, ' ').trim().slice(0, VOCABULARY.chars).trim()
+    const word = (line.split('(')[0] ?? '').trim().toLowerCase()
+    if (!word || seen.has(word)) continue
+    seen.add(word)
+    out.push(line)
+    if (out.length >= VOCABULARY.lines) break
+  }
+  return out
+}
+
+/** The languages a text of the person's is read as, by code: their own, English, then the others they named. */
+export function myLanguages(s: Pick<Settings, 'native' | 'languages'>): string[] {
+  return [...new Set([findLanguage(s.native)?.code ?? '', 'en', ...s.languages].filter(Boolean))]
+}
+
 export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings, unknown>>
   const flag = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d)
@@ -129,8 +167,12 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
   const strings = (v: unknown, clean: (s: string) => string = s => s.trim()) =>
     Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string').map(clean).filter(Boolean))] : []
   const known = typeof r.native === 'string' ? findLanguage(r.native) : undefined
+  const own = known && known.name !== TARGET ? known.name : native
+  const ownCode = findLanguage(own)?.code
   return {
-    native: known && known.name !== TARGET ? known.name : native,
+    native: own,
+    // The person's own and English are always in, so they are never listed twice.
+    languages: strings(r.languages, s => s.trim().toLowerCase()).filter(c => c !== 'en' && c !== ownCode && LANGUAGES.some(l => l.code === c)),
     voice: typeof r.voice === 'string' ? r.voice : DEFAULTS.voice,
     rate: typeof r.rate === 'number' && r.rate >= 0.5 && r.rate <= 1.5 ? r.rate : DEFAULTS.rate,
     autoRead: flag(r.autoRead, DEFAULTS.autoRead),
@@ -156,6 +198,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     dictateKey: key(r.dictateKey, DEFAULTS.dictateKey),
     englishKey: key(r.englishKey, DEFAULTS.englishKey),
     noteKey: key(r.noteKey, DEFAULTS.noteKey),
+    vocabulary: vocabularyLines(r.vocabulary),
     speechPrefer: r.speechPrefer === 'speed' ? 'speed' : 'accuracy',
     dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),
     transcriptsModel: key(r.transcriptsModel, DEFAULTS.transcriptsModel),

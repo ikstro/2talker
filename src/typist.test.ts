@@ -63,7 +63,7 @@ class Desk {
         doubleClickMs: 500,
       },
     )
-    this.typist.configure({ keys: {}, autoFix: false, badge: false, cycle: ['en', 'ru'], fixApps: [], keepWords: [], words: {}, ...config }, LEXICONS)
+    this.typist.configure({ keys: {}, autoFix: false, badge: false, cycle: ['en', 'ru'], languages: [], fixApps: [], keepWords: [], words: {}, ...config }, LEXICONS)
   }
 
   flush(): void {
@@ -184,6 +184,13 @@ describe('the fix key', () => {
     desk.tap(VK_PAUSE)
     expect(desk.text).toBe('ghbdtn vbh друг ')
     expect(desk.layout).toBe('ru')
+  })
+
+  test('with no layouts chosen, the keys go through those in the languages the person uses', () => {
+    expect(new Desk({ cycle: [], languages: ['ru', 'en'] }).typist.cycle()).toEqual(['en', 'ru'])
+    // One language's layout alone is no cycle: all of Windows' then.
+    expect(new Desk({ cycle: [], languages: ['ru'] }).typist.cycle()).toEqual(['en', 'ru', 'uk'])
+    expect(new Desk({ cycle: ['uk', 'en'], languages: ['ru', 'en'] }).typist.cycle()).toEqual(['uk', 'en'])
   })
 
   test('again goes on round the cycle, back to the word as typed', () => {

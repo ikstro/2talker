@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { DEFAULTS, normalize } from './settings'
+import { DEFAULTS, myLanguages, normalize } from './settings'
 
 describe('normalize', () => {
   test('a missing or broken file gives the defaults, with the native language from the system', () => {
@@ -37,5 +37,12 @@ describe('normalize', () => {
 
   test('English is the learned language, never the native one', () => {
     expect(normalize({ native: 'English' }).native).toBe('Russian')
+  })
+
+  test('the languages used: valid codes beyond the person’s own and English, each once', () => {
+    const s = normalize({ native: 'Russian', languages: ['UK', 'en', 'ru', 'xx', 'de', 'uk', 7] })
+    expect(s.languages).toEqual(['uk', 'de'])
+    expect(myLanguages(s)).toEqual(['ru', 'en', 'uk', 'de'])
+    expect(myLanguages(normalize({}))).toEqual(['ru', 'en'])
   })
 })

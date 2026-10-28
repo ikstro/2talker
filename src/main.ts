@@ -51,7 +51,7 @@ import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
 import type { AppTab, AppView, CardKind, CardState, DictationMode, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, translationHtml } from './render'
-import { CARD_WIDTH, normalize, TARGET, type Settings } from './settings'
+import { CARD_WIDTH, myLanguages, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
 import { SPEECH_PORT } from './speechservice'
@@ -224,10 +224,10 @@ function saveSettings(patch: Partial<Settings>): void {
   if ('startWithWindows' in patch) applyLoginItem()
   // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
   if ([...ACTION_KEYS, ...DICTATION_KEYS].some(k => k in patch)) registerShortcuts()
-  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
+  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'languages', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
   if ('theme' in patch) applyTheme()
-  // The speech models are chosen from these (speechplan.ts): the plan again, sent to the engine.
-  if (speech && (['native', 'speechPrefer', 'dictationModel', 'transcriptsModel', 'speechTestAgreed'] as const).some(k => k in patch)) speech.replan()
+  // The speech models are chosen from these (speechplan.ts), and the words to spell go with the plan: sent to the engine again.
+  if (speech && (['native', 'speechPrefer', 'dictationModel', 'transcriptsModel', 'speechTestAgreed', 'vocabulary'] as const).some(k => k in patch)) speech.replan()
   refreshTray()
   if (shown) postCard()
   postApp()
@@ -876,7 +876,8 @@ async function recognizeSnip(id: number, png: Buffer): Promise<{ text: string; m
   try {
     fs.writeFileSync(file, png)
     const native = langCode(settings.native)
-    const result = await recognize(file, native === 'en' ? ['en'] : [native, 'en'])
+    // The first of the person's languages Windows reads (their own first: its engine reads Latin too), English last.
+    const result = await recognize(file, [...new Set([native, ...settings.languages, 'en'].filter(Boolean))])
     if (!result.lang) return void setState(id, { status: 'no-ocr' })
     const text = paragraphsOf(result.lines)
     if (!text.trim()) return void setState(id, { status: 'empty' })
@@ -903,7 +904,7 @@ async function readScreenshot(png: Buffer, via?: string): Promise<void> {
 
 /** The translator's state of a text: from the language it seems to be in, into the person's own (from theirs, into English). */
 function textState(text: string): Extract<CardState, { status: 'text' }> {
-  const from = languageOf(text, settings.native, languageWords())
+  const from = languageOf(text, settings.native, languageWords(), myLanguages(settings))
   return { status: 'text', text, from, to: targetFor(from, settings.native), languages: ['en', ...NATIVES], result: { status: 'none' } }
 }
 
@@ -1424,8 +1425,8 @@ function setUpSpeechEngine(): void {
     speech,
     paste: typeText,
     toEnglish: (text, from) => translatePlain(text, from, 'en', translator.translate),
-    expected: () => [...new Set([langCode(settings.native), 'en'])],
-    languageOf: text => languageOf(text, settings.native, languageWords()),
+    expected: () => myLanguages(settings),
+    languageOf: text => languageOf(text, settings.native, languageWords(), myLanguages(settings)),
     balloon,
     needsEngine: () => openApp('dictate'),
     openTranscript,

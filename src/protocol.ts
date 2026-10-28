@@ -96,7 +96,8 @@ export type UpdateStatus =
   | { status: 'failed'; message: string }
 
 /** A keyboard layout Windows has: `id` as settings.ts keeps it ("04090409"), `name` as Windows calls its language. */
-export type KeyboardLayout = { id: string; name: string; short: string }
+/** One of Windows' layouts: `lang` is its language's code, as the layout fixer's word lists are named. */
+export type KeyboardLayout = { id: string; name: string; short: string; lang: string }
 
 /**
  * The speech engine (Dictate, Transcribe, Transcripts): its installed parts,
@@ -206,7 +207,7 @@ export type ToView =
   /**
    * The dictation badge: record, then stop (and type it, or keep it as a note), or throw away.
    * `session`: the engine's dictation heard while spoken (engine/stream.py), when the engine has them;
-   * `expected`: the languages likely spoken (the person's own, English).
+   * `expected`: the languages the person uses (their own, English, the others named); the phrase is one of them.
    */
   | { type: 'dictation'; command: 'start' | 'stop' | 'cancel'; mode: DictationMode; key: string; session?: string; expected?: string[] }
   | { type: 'dictationDone'; text: string }

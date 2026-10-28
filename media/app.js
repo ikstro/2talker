@@ -171,8 +171,66 @@
     }
   };
 
+  // src/languages.ts
+  var LANGUAGES = [
+    { name: "English", native: "English", ru: "\u0430\u043D\u0433\u043B\u0438\u0439\u0441\u043A\u0438\u0439", code: "en" },
+    { name: "Spanish", native: "Espa\xF1ol", ru: "\u0438\u0441\u043F\u0430\u043D\u0441\u043A\u0438\u0439", code: "es" },
+    { name: "German", native: "Deutsch", ru: "\u043D\u0435\u043C\u0435\u0446\u043A\u0438\u0439", code: "de" },
+    { name: "French", native: "Fran\xE7ais", ru: "\u0444\u0440\u0430\u043D\u0446\u0443\u0437\u0441\u043A\u0438\u0439", code: "fr" },
+    { name: "Italian", native: "Italiano", ru: "\u0438\u0442\u0430\u043B\u044C\u044F\u043D\u0441\u043A\u0438\u0439", code: "it" },
+    { name: "Portuguese", native: "Portugu\xEAs", ru: "\u043F\u043E\u0440\u0442\u0443\u0433\u0430\u043B\u044C\u0441\u043A\u0438\u0439", code: "pt" },
+    { name: "Russian", native: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439", ru: "\u0440\u0443\u0441\u0441\u043A\u0438\u0439", code: "ru" },
+    { name: "Ukrainian", native: "\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430", ru: "\u0443\u043A\u0440\u0430\u0438\u043D\u0441\u043A\u0438\u0439", code: "uk" },
+    { name: "Polish", native: "Polski", ru: "\u043F\u043E\u043B\u044C\u0441\u043A\u0438\u0439", code: "pl" },
+    { name: "Czech", native: "\u010Ce\u0161tina", ru: "\u0447\u0435\u0448\u0441\u043A\u0438\u0439", code: "cs" },
+    { name: "Dutch", native: "Nederlands", ru: "\u043D\u0438\u0434\u0435\u0440\u043B\u0430\u043D\u0434\u0441\u043A\u0438\u0439", code: "nl" },
+    { name: "Swedish", native: "Svenska", ru: "\u0448\u0432\u0435\u0434\u0441\u043A\u0438\u0439", code: "sv" },
+    { name: "Norwegian", native: "Norsk", ru: "\u043D\u043E\u0440\u0432\u0435\u0436\u0441\u043A\u0438\u0439", code: "nb" },
+    { name: "Danish", native: "Dansk", ru: "\u0434\u0430\u0442\u0441\u043A\u0438\u0439", code: "da" },
+    { name: "Finnish", native: "Suomi", ru: "\u0444\u0438\u043D\u0441\u043A\u0438\u0439", code: "fi" },
+    { name: "Greek", native: "\u0395\u03BB\u03BB\u03B7\u03BD\u03B9\u03BA\u03AC", ru: "\u0433\u0440\u0435\u0447\u0435\u0441\u043A\u0438\u0439", code: "el" },
+    { name: "Turkish", native: "T\xFCrk\xE7e", ru: "\u0442\u0443\u0440\u0435\u0446\u043A\u0438\u0439", code: "tr" },
+    { name: "Romanian", native: "Rom\xE2n\u0103", ru: "\u0440\u0443\u043C\u044B\u043D\u0441\u043A\u0438\u0439", code: "ro" },
+    { name: "Hungarian", native: "Magyar", ru: "\u0432\u0435\u043D\u0433\u0435\u0440\u0441\u043A\u0438\u0439", code: "hu" },
+    { name: "Bulgarian", native: "\u0411\u044A\u043B\u0433\u0430\u0440\u0441\u043A\u0438", ru: "\u0431\u043E\u043B\u0433\u0430\u0440\u0441\u043A\u0438\u0439", code: "bg" },
+    { name: "Serbian", native: "\u0421\u0440\u043F\u0441\u043A\u0438", ru: "\u0441\u0435\u0440\u0431\u0441\u043A\u0438\u0439", code: "sr" },
+    { name: "Croatian", native: "Hrvatski", ru: "\u0445\u043E\u0440\u0432\u0430\u0442\u0441\u043A\u0438\u0439", code: "hr" },
+    { name: "Georgian", native: "\u10E5\u10D0\u10E0\u10D7\u10E3\u10DA\u10D8", ru: "\u0433\u0440\u0443\u0437\u0438\u043D\u0441\u043A\u0438\u0439", code: "ka" },
+    { name: "Armenian", native: "\u0540\u0561\u0575\u0565\u0580\u0565\u0576", ru: "\u0430\u0440\u043C\u044F\u043D\u0441\u043A\u0438\u0439", code: "hy" },
+    { name: "Kazakh", native: "\u049A\u0430\u0437\u0430\u049B \u0442\u0456\u043B\u0456", ru: "\u043A\u0430\u0437\u0430\u0445\u0441\u043A\u0438\u0439", code: "kk" },
+    { name: "Arabic", native: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629", ru: "\u0430\u0440\u0430\u0431\u0441\u043A\u0438\u0439", code: "ar" },
+    { name: "Hebrew", native: "\u05E2\u05D1\u05E8\u05D9\u05EA", ru: "\u0438\u0432\u0440\u0438\u0442", code: "he" },
+    { name: "Persian", native: "\u0641\u0627\u0631\u0633\u06CC", ru: "\u043F\u0435\u0440\u0441\u0438\u0434\u0441\u043A\u0438\u0439", code: "fa" },
+    { name: "Hindi", native: "\u0939\u093F\u0928\u094D\u0926\u0940", ru: "\u0445\u0438\u043D\u0434\u0438", code: "hi" },
+    { name: "Chinese", native: "\u4E2D\u6587", ru: "\u043A\u0438\u0442\u0430\u0439\u0441\u043A\u0438\u0439", code: "zh" },
+    { name: "Japanese", native: "\u65E5\u672C\u8A9E", ru: "\u044F\u043F\u043E\u043D\u0441\u043A\u0438\u0439", code: "ja" },
+    { name: "Korean", native: "\uD55C\uAD6D\uC5B4", ru: "\u043A\u043E\u0440\u0435\u0439\u0441\u043A\u0438\u0439", code: "ko" },
+    { name: "Vietnamese", native: "Ti\u1EBFng Vi\u1EC7t", ru: "\u0432\u044C\u0435\u0442\u043D\u0430\u043C\u0441\u043A\u0438\u0439", code: "vi" },
+    { name: "Thai", native: "\u0E44\u0E17\u0E22", ru: "\u0442\u0430\u0439\u0441\u043A\u0438\u0439", code: "th" },
+    { name: "Indonesian", native: "Bahasa Indonesia", ru: "\u0438\u043D\u0434\u043E\u043D\u0435\u0437\u0438\u0439\u0441\u043A\u0438\u0439", code: "id" }
+  ];
+  function findLanguage(name) {
+    if (!name) return void 0;
+    const key = name.trim().toLowerCase();
+    return LANGUAGES.find((l) => l.name.toLowerCase() === key || l.native.toLowerCase() === key || l.code === key);
+  }
+
   // src/settings.ts
   var RATES = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
+  function myLanguages(s) {
+    return [...new Set([findLanguage(s.native)?.code ?? "", "en", ...s.languages].filter(Boolean))];
+  }
+
+  // src/vocabulary.ts
+  function parseEntry(line) {
+    const open2 = line.indexOf("(");
+    if (open2 < 0) return { word: line.trim(), heard: [] };
+    const close = line.indexOf(")", open2);
+    const inside = line.slice(open2 + 1, close < 0 ? void 0 : close);
+    const word = line.slice(0, open2).trim();
+    const heard2 = [...new Set(inside.split(",").map((h) => h.trim()).filter((h) => h && h.toLowerCase() !== word.toLowerCase()))];
+    return { word, heard: heard2 };
+  }
 
   // src/webview/dom.ts
   function el(tag, attrs = {}, ...children) {
@@ -1853,6 +1911,8 @@
   var pickedLayout = "";
   var addingApp = false;
   var addingWord = false;
+  var addingTerm = false;
+  var addingLanguage = false;
   var reduced = matchMedia("(prefers-reduced-motion: reduce)");
   var frozenAt = (name) => {
     const m = new RegExp(`(?:^#|&)${name}=([\\d.]+)`).exec(location.hash);
@@ -1919,7 +1979,10 @@
   }
   function cycleOf(v) {
     const chosen = v.settings.layouts.map((id) => v.layouts.find((l) => l.id === id)).filter((l) => !!l);
-    return chosen.length > 0 ? chosen : v.layouts;
+    if (chosen.length > 0) return chosen;
+    const languages2 = myLanguages(v.settings);
+    const mine = v.layouts.filter((l) => languages2.includes(l.lang));
+    return mine.length >= 2 ? mine : v.layouts;
   }
   var naturalOn = (v) => v.natural.status === "ready" && (v.settings.voice === "" || v.settings.voice.startsWith(NATURAL_PREFIX));
   var pairOf = (v) => `${v.settings.native} \u21C4 English`;
@@ -2382,6 +2445,8 @@
     pickedLayout = "";
     addingApp = false;
     addingWord = false;
+    addingTerm = false;
+    addingLanguage = false;
     keyTrouble = void 0;
     if (name === "transcripts") enterTranscripts();
     fillHeader();
@@ -2687,8 +2752,59 @@
       row("Tap the key, talk, tap it again", ["the words show as you speak \xB7 Esc throws the phrase away, while it records and while it types"], null),
       grp("Knowledge base"),
       ...kbRows(v),
+      grp("Words to spell"),
+      ...termRows(v),
       ...running(v) ? [grp("Speech model"), ...modelRows(v, "dictation")] : [],
       el("p", { class: "privacy" }, icon("lock"), "Speech is recognized on this computer; nothing is sent anywhere.")
+    ].filter((n) => n !== null);
+  }
+  function termRows(v) {
+    const s = v.settings;
+    const wordOf = (line) => parseEntry(line).word.toLowerCase();
+    const add = (text) => {
+      const line = text.replace(/\s+/g, " ").trim();
+      addingTerm = false;
+      if (!parseEntry(line).word) return renderBody();
+      const lines = (view?.settings.vocabulary ?? s.vocabulary).filter((l) => wordOf(l) !== wordOf(line));
+      save({ vocabulary: [...lines, line] });
+    };
+    const input = addingTerm ? el("input", {
+      type: "text",
+      class: "field term",
+      placeholder: "Peshynskyi, or Altype (altype, \u0430\u043B\u044C\u0442\u0430\u0439\u043F)",
+      "aria-label": "Word to spell, and what it is heard as",
+      onkeydown: (event) => {
+        const key = event.key;
+        if (key === "Enter") add(event.target.value);
+        if (key === "Escape") event.preventDefault(), addingTerm = false, renderBody();
+      }
+    }) : null;
+    if (input) window.setTimeout(() => input.focus(), 0);
+    const chips = s.vocabulary.map((line) => {
+      const { word, heard: heard2 } = parseEntry(line);
+      return el(
+        "span",
+        { class: "chip term", title: line },
+        el("b", {}, word),
+        heard2.length ? el("span", { class: "heard" }, ` \xB7 ${heard2.join(", ")}`) : null,
+        el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${word}`, onclick: () => save({ vocabulary: s.vocabulary.filter((l) => l !== line) }) }, icon("close"))
+      );
+    });
+    return [
+      row(
+        "Names and terms",
+        ["Dictation and transcripts spell these as written; a heard form is replaced wherever it is said"],
+        el(
+          "span",
+          { class: "kchg" },
+          input,
+          input ? null : linkBtn("Add\u2026", () => {
+            addingTerm = true;
+            renderBody();
+          })
+        )
+      ),
+      chips.length ? el("div", { class: "chiprow" }, ...chips) : null
     ].filter((n) => n !== null);
   }
   var copyText = (text) => void window.tutorHost.call({ call: "copy", text }).then(() => toast(`Copied: ${text}`), fault);
@@ -2709,6 +2825,8 @@
       testOffer(v),
       ...running(v) ? [grp("New transcription"), ...newRows(v)] : [],
       ...installed(v) ? [grp("Speakers"), ...speakerRows(v)] : [],
+      grp("Words to spell"),
+      row("Names and terms", ["spelled as the Dictate page\u2019s Words to spell say"], linkBtn("Open Dictate", () => openPage("dictate"))),
       grp("Google Meet"),
       ...meetRows(v),
       ...running(v) ? [
@@ -3049,6 +3167,49 @@
     );
     return out.filter((n) => n !== null);
   }
+  function languageRows(v) {
+    const s = v.settings;
+    const nameOf = (code) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
+    const used = myLanguages(s);
+    const rest = LANGUAGES.filter((l) => !used.includes(l.code));
+    const picker2 = addingLanguage ? select(
+      "",
+      [["", "Pick a language"], ...rest.map((l) => [l.code, `${l.name} \xB7 ${l.native}`])],
+      (code) => {
+        addingLanguage = false;
+        if (!code) return renderBody();
+        save({ languages: [...view?.settings.languages ?? s.languages, code] });
+      }
+    ) : null;
+    if (picker2) {
+      const box = picker2.querySelector("select");
+      box.addEventListener("keydown", (event) => event.key === "Escape" && (event.preventDefault(), event.stopPropagation(), addingLanguage = false, renderBody()));
+      window.setTimeout(() => box.focus(), 0);
+    }
+    return [
+      row(
+        "Languages you use",
+        ["dictation, translation and the screen\u2019s text are read as one of these"],
+        picker2 ?? linkBtn(
+          "+ Add",
+          () => {
+            addingLanguage = true;
+            renderBody();
+          },
+          rest.length === 0
+        )
+      ),
+      el(
+        "div",
+        { class: "chiprow" },
+        chip(nameOf(used[0] ?? "")),
+        chip("English"),
+        ...s.languages.map(
+          (code) => el("span", { class: "chip" }, nameOf(code), el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${nameOf(code)}`, onclick: () => save({ languages: s.languages.filter((c) => c !== code) }) }, icon("close")))
+        )
+      )
+    ];
+  }
   function settingsPage(v) {
     const s = v.settings;
     const u = v.update;
@@ -3067,6 +3228,7 @@
           (native) => save({ native })
         )
       ),
+      ...languageRows(v),
       row("Voice", voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, "").replace(/ Desktop$/, "")}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
       naturalRow(v),
       row(

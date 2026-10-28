@@ -296,7 +296,7 @@ export class StreamRecorder {
     let at = 0
     for (const c of this.kept) (all.set(c, at), (at += c.length))
     const expected = this.expected.map(encodeURIComponent).join(',')
-    const r = await this.speech<Heard>('POST', `/dictate?language=auto&expected=${expected}&format=pcm16`, new Uint8Array(all.buffer))
+    const r = await this.speech<Heard>('POST', `/dictate?language=auto&expected=${expected}&strict=1&format=pcm16`, new Uint8Array(all.buffer))
     if (!r.ok) throw new Error(r.error)
     return r.data
   }

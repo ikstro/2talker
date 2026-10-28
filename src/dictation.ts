@@ -17,6 +17,8 @@ import type { SpeechHost } from './speechhost'
 
 const BADGE = { width: 300, height: 64 }
 const NOTE_WAIT_MS = 5 * 60_000
+/** The most languages the engine weighs a phrase against. */
+const MOST_EXPECTED = 8
 
 export type DictationOptions = {
   page: string
@@ -27,7 +29,7 @@ export type DictationOptions = {
   paste: (text: string) => Promise<void>
   /** The text in English; `from` is the language the engine heard. */
   toEnglish: (text: string, from: string) => Promise<string>
-  /** The languages a phrase is likely in (the person's own, English): Whisper takes one of them when it is unsure. */
+  /** The languages the person uses (their own, English, the others they named): a phrase is taken as one of them, never another. */
   expected: () => string[]
   /** The language of a text by its letters and words (translate.ts), when Whisper was unsure. */
   languageOf: (text: string) => string
@@ -68,13 +70,13 @@ export class Dictation {
     }
     this.mode = mode
     this.set('recording')
-    const expected = this.o.expected()
+    const expected = this.o.expected().slice(0, MOST_EXPECTED)
     let session: string | undefined
     if (mode !== 'note') {
       // Heard while it is spoken (the engine loads its model meanwhile); an engine without sessions gets the phrase whole.
       this.opening = true
       try {
-        const r = await this.o.speech.call<{ id: string }>('POST', '/dictate/sessions', { expected })
+        const r = await this.o.speech.call<{ id: string }>('POST', '/dictate/sessions', { expected, strict: true })
         if (r.ok) session = r.data.id
         else void this.o.speech.call('POST', '/dictate/prepare')
       } finally {
@@ -131,8 +133,9 @@ export class Dictation {
   }
 
   private async typePhrase(mode: DictationMode, audio: Uint8Array): Promise<void> {
-    const expected = this.o.expected().map(encodeURIComponent).join(',')
-    const r = await this.o.speech.call<{ text: string; language: string; sure?: number }>('POST', `/dictate?language=auto&expected=${expected}`, audio)
+    const expected = this.o.expected().slice(0, MOST_EXPECTED).map(encodeURIComponent).join(',')
+    // strict: a phrase is never taken for a language the person does not use.
+    const r = await this.o.speech.call<{ text: string; language: string; sure?: number }>('POST', `/dictate?language=auto&expected=${expected}&strict=1`, audio)
     if (!r.ok) return this.fail(r.error)
     // An engine before 0.2 says nothing of how sure it is: its language is taken as it is.
     await this.typeHeard(mode, r.data.text, r.data.language, r.data.sure ?? 1)
