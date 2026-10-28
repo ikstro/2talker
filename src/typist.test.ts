@@ -178,17 +178,52 @@ describe('fixing as one types', () => {
 })
 
 describe('the fix key', () => {
-  test('types again what was typed wrong since the click, back to the first right word; again goes on round', () => {
-    const desk = new Desk({ keys: { fix: 'Pause' }, cycle: ['en', 'ru', 'uk'] })
-    desk.keys('I said ghbdtn vbh')
+  test('of three words typed wrong, it converts the last only, with the space after it', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('ghbdtn vbh lheu ')
     desk.tap(VK_PAUSE)
-    expect(desk.text).toBe('I said привет мир')
+    expect(desk.text).toBe('ghbdtn vbh друг ')
+    expect(desk.layout).toBe('ru')
+  })
+
+  test('again goes on round the cycle, back to the word as typed', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' }, cycle: ['en', 'ru', 'uk'] })
+    desk.keys('I said lheu')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('I said друг')
     expect(desk.layout).toBe('ru')
     desk.tap(VK_PAUSE)
     expect(desk.layout).toBe('uk')
     desk.tap(VK_PAUSE)
-    expect(desk.text).toBe('I said ghbdtn vbh')
+    expect(desk.text).toBe('I said lheu')
     expect(desk.layout).toBe('en')
+  })
+
+  test('it takes the layout that makes a word, not the next one', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' }, cycle: ['en', 'ru', 'uk'] })
+    desk.keys('ghbdsn')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('привіт')
+    expect(desk.layout).toBe('uk')
+  })
+
+  test('no word in any layout: the next layout of the cycle', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('hello')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('руддщ')
+    expect(desk.layout).toBe('ru')
+  })
+
+  test('a word with digits, or a kept word, is converted all the same when asked', () => {
+    const digits = new Desk({ keys: { fix: 'Pause' } })
+    digits.keys('ghbdtn1')
+    digits.tap(VK_PAUSE)
+    expect(digits.text).toBe('привет1')
+    const kept = new Desk({ keys: { fix: 'Pause' }, keepWords: ['ghbdtn'] })
+    kept.keys('ghbdtn')
+    kept.tap(VK_PAUSE)
+    expect(kept.text).toBe('привет')
   })
 
   test('a click starts over; a selection goes to the main process', () => {
@@ -201,6 +236,17 @@ describe('the fix key', () => {
     desk.mouse('left-down', 0)
     desk.mouse('left-up', 80)
     desk.tap(VK_PAUSE)
+    expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'] })
+  })
+
+  test('words typed, then selected with Shift and an arrow: the selection goes to the main process, nothing is retyped', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('ghbdtn vbh')
+    desk.event(VK_LSHIFT, true)
+    desk.tap(0x25)
+    desk.event(VK_LSHIFT, false)
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('ghbdtn vbh')
     expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'] })
   })
 
@@ -347,7 +393,7 @@ describe('the layout and Caps Lock as Windows has them', () => {
     expect(desk.text).toBe('Класс')
   })
 
-  test('the fix key stops at a word with digits: R3 stays', () => {
+  test('the fix key takes the last word only: R3 before it stays', () => {
     const desk = new Desk({ keys: { fix: 'Pause' } })
     desk.keys('R3 yhfdbncz')
     desk.tap(VK_PAUSE)

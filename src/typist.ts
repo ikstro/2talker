@@ -5,14 +5,15 @@
 //   - the switch key moves the window in front to the next layout;
 //   - a word typed in the wrong layout is erased and typed again in the right
 //     one when it ends (Backspace at once takes the fix back);
-//   - the fix key types again, in the next layout, what was typed wrong since
-//     the last click, or asks the main process to convert the selection;
+//   - the fix key types the last word again in the layout that makes the best
+//     word of it (again: the next layout), or asks the main process to
+//     convert the selection;
 //   - a change of layout in front is reported, for the badge by the cursor;
 //   - the other keys Electron's shortcuts cannot hold (a double tap of Ctrl,
 //     a mouse button) are reported to the main process, which acts on them.
 
 import { DOUBLE_MS, modOf, parseHotkey, type HotkeySpec, type Mod } from './hotkey'
-import { charOf, chooseFix, coreOf, nextLayout, typeIn, wrongTail, type KeyTable, type Lexicon, type Reading, type Stroke } from './layoutfix'
+import { bestLayout, charOf, chooseFix, coreOf, nextLayout, typeIn, type KeyTable, type Lexicon, type Reading, type Stroke } from './layoutfix'
 import type { Press } from './winkbd'
 
 /** What a key does: switch or fix the layout here; listen to (select, snip) or translate (translate, text) the selection or the screen: the main process's. */
@@ -479,7 +480,12 @@ export class Typist {
     this.schedule({ erase: strokes.length, text: this.reading(strokes, fixed.from).text, to: fixed.from, hwnd: this.runWindow })
   }
 
-  /** The fix key: what was typed wrong since the last click, again in the next layout; or the selection. */
+  /**
+   * The fix key: the last word, again in the layout that makes the best word
+   * of it; pressed again, in the next layout round the cycle; or the
+   * selection. Only the last word: a sweep back over the words before it
+   * retyped whole lines when one word was meant.
+   */
   private fixKey(): void {
     if (this.autoFixed && this.autoFixed.end === this.run.length) return this.takeBack(this.autoFixed)
     if (this.last === 'selected') {
@@ -494,8 +500,13 @@ export class Typist {
       start = this.cycling.start
       to = nextLayout(this.cycle(), this.cycling.to)
     } else {
-      start = this.tailStart()
-      to = nextLayout(this.cycle(), this.run[this.run.length - 1]?.layout)
+      start = this.lastWordStart()
+      const letters = this.run.slice(start).filter(s => !s.end)
+      const own = this.run[this.run.length - 1]?.layout as string
+      const others = this.cycle()
+        .filter(id => id !== own)
+        .map(id => this.reading(letters, id))
+      to = bestLayout(this.reading(letters, own), others, this.lexicons)?.layout ?? nextLayout(this.cycle(), own)
     }
     if (!to) return
     const tail = this.run.slice(start)
@@ -506,34 +517,12 @@ export class Typist {
     this.schedule({ erase: tail.length, text, to, hwnd: this.runWindow })
   }
 
-  /** Where the keys typed in the wrong layout begin: the words back to the first that is right as it is. */
-  private tailStart(): number {
-    type Word = { start: number; strokes: Typed[] }
-    const words: Word[] = []
-    let current: Word | undefined
-    this.run.forEach((s, i) => {
-      current ??= { start: i, strokes: [] }
-      current.strokes.push(s)
-      // A word takes the spaces and signs after it.
-      const next = this.run[i + 1]
-      if (s.end && (!next || !next.end)) {
-        words.push(current)
-        current = undefined
-      }
-    })
-    if (current) words.push(current)
-    const readings = words.map(w => {
-      const letters = w.strokes.filter(s => !s.end)
-      const own = w.strokes[w.strokes.length - 1]?.layout as string
-      return {
-        typed: this.reading(letters, own),
-        others: this.cycle()
-          .filter(id => id !== own)
-          .map(id => this.reading(letters, id)),
-      }
-    })
-    const count = wrongTail(readings, this.lexicons)
-    return words[words.length - count]?.start ?? 0
+  /** The first key of the last word, which takes the spaces and signs after it. */
+  private lastWordStart(): number {
+    let i = this.run.length
+    while (i > 0 && this.run[i - 1]?.end) i--
+    while (i > 0 && !this.run[i - 1]?.end) i--
+    return i
   }
 
   private switchNext(): void {

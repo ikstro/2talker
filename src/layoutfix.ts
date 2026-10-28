@@ -2,8 +2,8 @@
 // without Windows: the keys pressed are kept, not the letters, so a word can
 // be read in every layout ("ghbdtn" in the Russian one is "привет"). A word
 // is fixed by itself only when it is no word as typed and a frequent word in
-// another layout; the fix key takes back everything typed in the wrong layout
-// up to the first word that is right as it is.
+// another layout; the fix key turns the last word into the layout that makes
+// the best word of it.
 
 /** One key with or without Shift: `${vk}:${0|1}`. */
 export type KeyId = string
@@ -116,50 +116,41 @@ export function chooseFix(typed: Reading, others: readonly Reading[], lexicons: 
   if (keep.has(t.toLowerCase())) return undefined
   const letters = [...t].filter(c => /\p{L}/u.test(c)).length
   if (letters < 2) return undefined
+  return bestReading(others, lexicons, core === undefined ? 0 : plausibility(core, own))
+}
+
+/**
+ * The layout the fix key should turn the last word into: the best reading in
+ * another layout with a word list, as `chooseFix` judges one, but without its
+ * caution. The person asked, so digits, an @, a capital inside or a kept word
+ * do not stop it. Undefined when no reading is a word (the key then takes
+ * the next layout of the cycle).
+ */
+export function bestLayout(typed: Reading, others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>): Reading | undefined {
+  const own = lexicons[typed.lang]
+  const core = coreOf(typed.text)
+  // A layout without a word list cannot say the typed piece looks right, so it counts as not.
+  return bestReading(others, lexicons, own && core !== undefined ? plausibility(core, own) : 0)
+}
+
+/**
+ * The reading most likely meant: a known word ranks by how common it is
+ * (lower is better); an unknown one only when it looks like its language
+ * and the typed piece, by `typedLooks` (its plausibility), does not.
+ */
+function bestReading(others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>, typedLooks: number): Reading | undefined {
   let best: { reading: Reading; score: number } | undefined
   for (const other of others) {
     const lexicon = lexicons[other.lang]
     const word = coreOf(other.text)
     if (!lexicon || !word || word.length < 2) continue
     const rank = lexicon.rank.get(word)
-    // A known word ranks by how common it is; an unknown one only when it looks like the language and the typed piece does not.
     let score: number | undefined
     if (rank !== undefined) score = trusted(word, rank) ? rank : undefined
-    else if (word.length >= 5 && plausibility(word, lexicon) === 1 && (core === undefined || plausibility(core, own) < 0.6)) score = 1_000_000
+    else if (word.length >= 5 && plausibility(word, lexicon) === 1 && typedLooks < 0.6) score = 1_000_000
     if (score !== undefined && (!best || score < best.score)) best = { reading: other, score }
   }
   return best?.reading
-}
-
-/**
- * How many of the last words to fix with the fix key: back from the last one
- * (always taken) while a word is not right as it is, stopping at the first
- * that is a word in its own layout, or was typed in another layout. A
- * layout with no word list takes everything typed in it.
- */
-export function wrongTail(words: readonly { typed: Reading; others: readonly Reading[] }[], lexicons: Readonly<Record<string, Lexicon>>): number {
-  const last = words[words.length - 1]
-  if (!last) return 0
-  let count = 1
-  for (let i = words.length - 2; i >= 0; i--) {
-    const w = words[i] as (typeof words)[number]
-    if (w.typed.layout !== last.typed.layout) break
-    // R3, v2, a link or a mail: never typed in the wrong layout.
-    if (/\d|@|:\/\//.test(w.typed.text)) break
-    const lexicon = lexicons[w.typed.lang]
-    const core = coreOf(w.typed.text)
-    if (lexicon && core !== undefined && lexicon.rank.has(core)) {
-      // Right as it is, unless another layout makes a more common word of it (rare, but "ghb" → "при").
-      const better = w.others.some(o => {
-        const word = coreOf(o.text)
-        const rank = word === undefined ? undefined : lexicons[o.lang]?.rank.get(word)
-        return rank !== undefined && rank < (lexicon.rank.get(core) as number) / 20
-      })
-      if (!better) break
-    }
-    count++
-  }
-  return count
 }
 
 // ---------------------------------------------------------------- selected text

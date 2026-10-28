@@ -49,11 +49,11 @@ export type Settings = {
   layouts: string[]
   /** A word typed in the wrong layout is typed again in the right one, and the layout switched. */
   autoFix: boolean
-  /** A key that types again, in the next layout, what was just typed or selected; empty for none. */
+  /** A key that types the last word again in the layout that makes a word of it (again: the next layout), or converts the selection; empty for none. */
   fixKey: string
   /** Programs (their .exe names, lower case) where words are never fixed by themselves. */
   fixApps: string[]
-  /** Words, as typed, never fixed by themselves: the ones a fix was taken back from. */
+  /** Words, as typed (lower case), never fixed by themselves: the ones a fix was taken back from, or added by hand. */
   keepWords: string[]
   /** A badge with the layout by the text cursor whenever the layout changes. */
   layoutBadge: boolean
@@ -150,7 +150,8 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     autoFix: flag(r.autoFix, DEFAULTS.autoFix),
     fixKey: key(r.fixKey, DEFAULTS.fixKey),
     fixApps: strings(r.fixApps, s => s.trim().toLowerCase()),
-    keepWords: strings(r.keepWords),
+    // Lower case, as the keyboard thread compares them; the Set in `strings` drops the same word twice.
+    keepWords: strings(r.keepWords, s => s.trim().toLowerCase()),
     layoutBadge: flag(r.layoutBadge, DEFAULTS.layoutBadge),
     dictateKey: key(r.dictateKey, DEFAULTS.dictateKey),
     englishKey: key(r.englishKey, DEFAULTS.englishKey),

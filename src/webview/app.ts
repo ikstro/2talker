@@ -61,6 +61,8 @@ let keyTrouble: { name: KeyName; text: string } | undefined
 let pickedLayout = ''
 /** The box for a program's name on the Keyboard page is open. */
 let addingApp = false
+/** The box for a word to keep as typed on the Keyboard page is open. */
+let addingWord = false
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)')
 // #t= and #pt= freeze the moment and a page's growth at a time (seconds), for
@@ -767,6 +769,7 @@ function openPage(name: Page, animate = !reduced.matches): void {
   search = ''
   pickedLayout = ''
   addingApp = false
+  addingWord = false
   keyTrouble = undefined
   if (name === 'transcripts') enterTranscripts()
   fillHeader()
@@ -1268,6 +1271,50 @@ function programsRow(v: AppView): HTMLElement[] {
   ].filter((n): n is HTMLElement => n !== null)
 }
 
+/** Words never fixed by themselves: Backspace after a fix adds one, and so can the person, before the fix ever happens. */
+function keptRow(v: AppView): HTMLElement[] {
+  const s = v.settings
+  const add = (text: string) => {
+    const word = text.trim().toLowerCase()
+    addingWord = false
+    if (!word) return renderBody()
+    const words = view?.settings.keepWords ?? s.keepWords
+    save({ keepWords: [...words, word] })
+  }
+  const input = addingWord
+    ? el('input', {
+        type: 'text',
+        class: 'field',
+        placeholder: 'word',
+        'aria-label': 'Word to keep as typed',
+        onkeydown: (event: Event) => {
+          const key = (event as KeyboardEvent).key
+          if (key === 'Enter') add((event.target as HTMLInputElement).value)
+          if (key === 'Escape') (event.preventDefault(), (addingWord = false), renderBody())
+        },
+      })
+    : null
+  if (input) window.setTimeout(() => input.focus(), 0)
+  return [
+    row(
+      'Kept as typed',
+      [s.keepWords.length ? 'never fixed by themselves' : 'none · Backspace right after a fix adds the word'],
+      el(
+        'span',
+        { class: 'kchg' },
+        input,
+        input
+          ? null
+          : linkBtn('Add…', () => {
+              addingWord = true
+              renderBody()
+            }),
+      ),
+    ),
+    s.keepWords.length ? chipList(s.keepWords, word => save({ keepWords: s.keepWords.filter(w => w !== word) })) : null,
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
 /** Other programs at the keyboard, named calmly: no harm, so the person knows who else is there. */
 function othersLine(v: AppView): HTMLElement | null {
   const presses = 'presses keys by itself; Altype ignores those.'
@@ -1286,14 +1333,13 @@ function keyboardPage(v: AppView): HTMLElement[] {
   return [
     grp('Keys'),
     keyRow('switchKey', 'Switch the layout', s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below'),
-    keyRow('fixKey', 'Fix what was typed wrong', 'since the last click, or the selection'),
+    keyRow('fixKey', 'Fix what was typed wrong', 'the last word; again for the next layout; or the selection'),
     grp('Layouts'),
     layoutChips(v),
     toggle('Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} on the space · Backspace takes it back`),
     toggle('Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge })),
     ...(s.autoFix ? programsRow(v) : []),
-    s.keepWords.length ? row('Kept as typed', ['a fix was taken back from them']) : null,
-    s.keepWords.length ? chipList(s.keepWords, word => save({ keepWords: s.keepWords.filter(w => w !== word) })) : null,
+    ...keptRow(v),
     v.rivals.length ? warn(`${v.rivals.join(' and ')} ${v.rivals.length > 1 ? 'are' : 'is'} running: turn off its layout switching, or words get fixed twice.`) : null,
     v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
     othersLine(v),

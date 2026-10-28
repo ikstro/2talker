@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import { EN, LEXICONS, RU, strokes, TABLES, UK } from './layouts.fixture'
-import { chooseFix, convertText, coreOf, nextLayout, sourceLayout, typeIn, wrongTail, type KeyTable, type Reading } from './layoutfix'
+import { bestLayout, chooseFix, convertText, coreOf, nextLayout, sourceLayout, typeIn, type KeyTable, type Reading } from './layoutfix'
 
 /** How the keys typed as `text` in `lang` read in each layout of `cycle`. */
 function readings(text: string, lang: string, cycle = ['en', 'ru', 'uk']): { typed: Reading; others: Reading[] } {
@@ -69,13 +69,30 @@ describe('fixing as one types', () => {
 })
 
 describe('the fix key', () => {
-  test('takes the words typed wrong, back to the first right one', () => {
-    const typed = ['I', 'said', 'ghbdtn', 'vbh']
-    expect(wrongTail(typed.map(w => readings(w, 'en', ['en', 'ru'])), LEXICONS)).toBe(2)
-    expect(wrongTail(['ghbdtn', 'vbh'].map(w => readings(w, 'en', ['en', 'ru'])), LEXICONS)).toBe(2)
+  function best(text: string, lang: string, cycle?: string[]): string | undefined {
+    const { typed, others } = readings(text, lang, cycle)
+    return bestLayout(typed, others, LEXICONS)?.layout
+  }
+
+  test('takes the layout that makes the best word, not the next one', () => {
+    expect(best('ghbdtn', 'en')).toBe('ru')
+    expect(best('ghbdsn', 'en')).toBe('uk')
+    expect(best('руддщ', 'ru')).toBe('en')
   })
 
-  test('the last word is always taken, even a right one', () => {
-    expect(wrongTail([readings('hello', 'en', ['en', 'ru'])], LEXICONS)).toBe(1)
+  test('an explicit press converts what typing leaves alone: digits, a capital inside, a short word', () => {
+    expect(best('ghbdtn1', 'en', ['en', 'ru'])).toBe('ru')
+    expect(best('gHbdtn', 'en', ['en', 'ru'])).toBe('ru')
+    expect(best('yf', 'en', ['en', 'ru'])).toBe('ru')
+  })
+
+  test('no word in any layout: none, so the key takes the next one', () => {
+    expect(best('hello', 'en', ['en', 'ru'])).toBeUndefined()
+    expect(best('R3', 'en', ['en', 'ru'])).toBeUndefined()
+  })
+
+  test('a layout without a word list is never chosen', () => {
+    const { typed, others } = readings('ghbdtn', 'en', ['en', 'ru'])
+    expect(bestLayout(typed, others.map(o => ({ ...o, lang: 'xx' })), LEXICONS)).toBeUndefined()
   })
 })

@@ -210,7 +210,9 @@
     next: '<path d="M12.5 3.5v9"/><path class="f" d="M3.5 3.6v8.8c0 .4.5.7.8.4L10 8.4a.5.5 0 0 0 0-.8L4.3 3.2c-.3-.3-.8 0-.8.4z"/>',
     pin: '<path d="M6 2.5h4M7 2.5v3.8L4.5 9h7L9 6.3V2.5M8 9v4.5"/>',
     close: '<path d="M4 4l8 8M12 4l-8 8"/>',
-    minimize: '<path d="M4 8h8"/>'
+    minimize: '<path d="M4 8h8"/>',
+    maximize: '<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/>',
+    restore: '<rect x="3.5" y="5.5" width="7" height="7" rx="1.5"/><path d="M6 3.5h5a1.5 1.5 0 0 1 1.5 1.5v5"/>'
   };
   function glyph(name) {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1850,6 +1852,7 @@
   var keyTrouble;
   var pickedLayout = "";
   var addingApp = false;
+  var addingWord = false;
   var reduced = matchMedia("(prefers-reduced-motion: reduce)");
   var frozenAt = (name) => {
     const m = new RegExp(`(?:^#|&)${name}=([\\d.]+)`).exec(location.hash);
@@ -2378,6 +2381,7 @@
     search = "";
     pickedLayout = "";
     addingApp = false;
+    addingWord = false;
     keyTrouble = void 0;
     if (name === "transcripts") enterTranscripts();
     fillHeader();
@@ -2802,6 +2806,44 @@
       s.fixApps.length ? chipList(s.fixApps, (exe) => save({ fixApps: s.fixApps.filter((a) => a !== exe) })) : null
     ].filter((n) => n !== null);
   }
+  function keptRow(v) {
+    const s = v.settings;
+    const add = (text) => {
+      const word = text.trim().toLowerCase();
+      addingWord = false;
+      if (!word) return renderBody();
+      const words = view?.settings.keepWords ?? s.keepWords;
+      save({ keepWords: [...words, word] });
+    };
+    const input = addingWord ? el("input", {
+      type: "text",
+      class: "field",
+      placeholder: "word",
+      "aria-label": "Word to keep as typed",
+      onkeydown: (event) => {
+        const key = event.key;
+        if (key === "Enter") add(event.target.value);
+        if (key === "Escape") event.preventDefault(), addingWord = false, renderBody();
+      }
+    }) : null;
+    if (input) window.setTimeout(() => input.focus(), 0);
+    return [
+      row(
+        "Kept as typed",
+        [s.keepWords.length ? "never fixed by themselves" : "none \xB7 Backspace right after a fix adds the word"],
+        el(
+          "span",
+          { class: "kchg" },
+          input,
+          input ? null : linkBtn("Add\u2026", () => {
+            addingWord = true;
+            renderBody();
+          })
+        )
+      ),
+      s.keepWords.length ? chipList(s.keepWords, (word) => save({ keepWords: s.keepWords.filter((w) => w !== word) })) : null
+    ].filter((n) => n !== null);
+  }
   function othersLine(v) {
     const presses = "presses keys by itself; Altype ignores those.";
     const text = v.keyboardApps.length ? `Also using the keyboard: ${v.keyboardApps.join(", ")}.${v.foreignKeys ? ` One of them ${presses}` : ""}` : v.foreignKeys ? `A program ${presses}` : "";
@@ -2814,14 +2856,13 @@
     return [
       grp("Keys"),
       keyRow("switchKey", "Switch the layout", s.switchKey && usage(s.switchKey).startsWith("tap") ? "tap it alone" : "to the next of the layouts below"),
-      keyRow("fixKey", "Fix what was typed wrong", "since the last click, or the selection"),
+      keyRow("fixKey", "Fix what was typed wrong", "the last word; again for the next layout; or the selection"),
       grp("Layouts"),
       layoutChips(v),
       toggle("Fix words as I type", s.autoFix, (autoFix) => save({ autoFix }), `${typed} \u2192 ${fixed} on the space \xB7 Backspace takes it back`),
       toggle("Show the layout by the cursor", s.layoutBadge, (layoutBadge) => save({ layoutBadge })),
       ...s.autoFix ? programsRow(v) : [],
-      s.keepWords.length ? row("Kept as typed", ["a fix was taken back from them"]) : null,
-      s.keepWords.length ? chipList(s.keepWords, (word) => save({ keepWords: s.keepWords.filter((w) => w !== word) })) : null,
+      ...keptRow(v),
       v.rivals.length ? warn(`${v.rivals.join(" and ")} ${v.rivals.length > 1 ? "are" : "is"} running: turn off its layout switching, or words get fixed twice.`) : null,
       v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
       othersLine(v),
