@@ -84,6 +84,7 @@ export class KeyboardHelper {
       ['dictate', s.dictateKey],
       ['english', s.englishKey],
       ['note', s.noteKey],
+      ['again', s.againKey],
     ] as const) {
       if (key && !isAccelerator(key)) keys[action] = key
     }

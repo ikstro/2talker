@@ -44,6 +44,7 @@ const IsHungAppWindow = user32.func('bool __stdcall IsHungAppWindow(intptr hwnd)
 const GetCurrentThreadId = kernel32.func('uint32 __stdcall GetCurrentThreadId()')
 const GetGUIThreadInfo = user32.func('bool __stdcall GetGUIThreadInfo(uint32 tid, _Inout_ KbdGuiThreadInfo *info)')
 const ClientToScreen = user32.func('bool __stdcall ClientToScreen(intptr hwnd, _Inout_ KbdPoint *point)')
+const GetWindowRect = user32.func('bool __stdcall GetWindowRect(intptr hwnd, _Out_ KbdRect *rect)')
 const SendInput = user32.func('uint32 __stdcall SendInput(uint32 n, KbdInput *inputs, int size)')
 const OpenProcess = kernel32.func('intptr __stdcall OpenProcess(uint32 access, bool inherit, uint32 pid)')
 const QueryFullProcessImageNameW = kernel32.func('bool __stdcall QueryFullProcessImageNameW(intptr process, uint32 flags, void *name, _Inout_ uint32 *size)')
@@ -159,6 +160,16 @@ export function caretOf(tid: number): { x: number; y: number; h: number } | unde
   const point = { x: rect.left, y: rect.top }
   if (!ClientToScreen(hwnd, point)) return undefined
   return { x: point.x, y: point.y, h: Math.max(1, rect.bottom - rect.top) }
+}
+
+/** A window's frame on the screen, in physical pixels; undefined for no window or an empty one. */
+export function windowRect(hwnd: bigint): { x: number; y: number; width: number; height: number } | undefined {
+  if (!hwnd) return undefined
+  const rect: Record<string, number> = {}
+  if (!GetWindowRect(hwnd, rect)) return undefined
+  const { left = 0, top = 0, right = 0, bottom = 0 } = rect
+  if (right <= left || bottom <= top) return undefined
+  return { x: left, y: top, width: right - left, height: bottom - top }
 }
 
 const exes = new Map<number, string>()

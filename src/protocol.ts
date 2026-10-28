@@ -1,5 +1,6 @@
 // Messages between the main process and the card, the small window that
 // shows one picked text or one snipped piece of the screen at a time.
+import type { DictationEntry } from './dictationlog'
 import type { DeviceProfile } from './hardware'
 import type { WordTime } from './kokoro'
 import type { Gloss } from './lemma'
@@ -10,7 +11,7 @@ import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
 import type { SavedWord } from './words'
 
-export type { Choice, DeviceProfile, Feature, FeaturePlan, Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechPlan, SpeechResult, WordTime }
+export type { Choice, DeviceProfile, DictationEntry, Feature, FeaturePlan, Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechPlan, SpeechResult, WordTime }
 
 /**
  * What the card is for, and where the text came from. To listen to it, in
@@ -125,7 +126,7 @@ export type SpeechView = {
   /** The speed test: offered now (the person has not agreed, and something is still unmeasured), agreed once, models it would measure. */
   test: { offer: boolean; agreed: boolean; runs: number }
   /** The dictation keys are registered (false: another program holds one). */
-  keysOk: { dictate: boolean; note: boolean; english: boolean }
+  keysOk: { dictate: boolean; note: boolean; english: boolean; again: boolean }
 }
 
 /** Everything the app window shows, sent whole whenever any of it changes. */
@@ -155,6 +156,8 @@ export type AppView = {
   /** Some program pressed keys by itself since the keyboard helper started; Altype ignores those. */
   foreignKeys: boolean
   speech: SpeechView
+  /** The phrases dictated lately, newest first (the last 10). */
+  dictation: { recent: DictationEntry[] }
 }
 
 /** What the tray's panel shows, sent whole whenever any of it changes. */
@@ -284,6 +287,8 @@ export type ToHost =
   | { type: 'restartSpeech' }
   | { type: 'showInFolder'; path: string }
   | { type: 'openPath'; path: string }
+  /** Forget the phrases dictated lately. */
+  | { type: 'clearDictation' }
   // The dictation badge.
   | { type: 'dictationReady' }
   /** A phrase to type: the whole recording, as webm (an engine without sessions). */
@@ -292,6 +297,8 @@ export type ToHost =
   | { type: 'dictationText'; mode: DictationMode; text: string; language: string; sure: number }
   /** A note was recorded into the engine as this transcript. */
   | { type: 'dictationNote'; id: string }
+  /** The badge's content is this tall, in CSS pixels; the window follows, its bottom edge kept. */
+  | { type: 'dictationHeight'; px: number }
   | { type: 'dictationCancelled' }
   | { type: 'dictationFailed'; message: string }
 

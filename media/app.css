@@ -739,6 +739,14 @@ svg.glyph {
   color: var(--red);
 }
 
+/* A phrase dictated lately: one line, the rest in its title. */
+.row.phrase .said {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A whole line that is a switch. */
 .trow {
   cursor: pointer;

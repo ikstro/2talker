@@ -20,31 +20,6 @@
     return node;
   }
 
-  // src/hotkey.ts
-  function hotkeyLabel(hotkey) {
-    const name = (mod) => mod === "Control" ? "Ctrl" : mod === "Super" ? "Win" : mod;
-    return hotkey.split("+").map((part) => {
-      const [key, times] = part.split("*");
-      const side = /^(Left|Right)(Control|Shift|Alt|Super)$/.exec(key ?? "");
-      if (side) return `${side[1]} ${name(side[2])}${times === "2" ? " twice" : ""}`;
-      if (part === "CapsLock") return "Caps Lock";
-      if (part === "ScrollLock") return "Scroll Lock";
-      if (part === "MouseBack") return "Mouse Back";
-      if (part === "MouseForward") return "Mouse Forward";
-      if (part === "CommandOrControl" || part === "CmdOrCtrl") return "Ctrl";
-      return name(part);
-    }).join("+");
-  }
-
-  // src/webview/keycaps.ts
-  function caps(hotkey, chain) {
-    const attrs = chain ? { class: "kg", "data-chain": chain } : { class: "kg" };
-    if (!hotkey) return el("span", attrs, el("span", { class: "key none" }, "not set"));
-    const twice = hotkey.endsWith("*2");
-    const parts = hotkey.replace(/\*2$/, "").split("+");
-    return el("span", attrs, ...parts.map((part) => el("span", { class: "key" }, hotkeyLabel(part))), twice ? el("span", { class: "x2" }, "\xD72") : null);
-  }
-
   // src/webview/recorder.ts
   async function microphone(close) {
     return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: close, noiseSuppression: close, autoGainControl: true, channelCount: 1 } });
@@ -276,7 +251,7 @@
       let at = 0;
       for (const c of this.kept) all.set(c, at), at += c.length;
       const expected = this.expected.map(encodeURIComponent).join(",");
-      const r = await this.speech("POST", `/dictate?language=auto&expected=${expected}&format=pcm16`, new Uint8Array(all.buffer));
+      const r = await this.speech("POST", `/dictate?language=auto&expected=${expected}&strict=1&format=pcm16`, new Uint8Array(all.buffer));
       if (!r.ok) throw new Error(r.error);
       return r.data;
     }
@@ -303,53 +278,72 @@
   // src/webview/dictation.ts
   var host = window.tutorHost;
   var root = document.getElementById("badge");
-  var TITLES = { type: "Dictate", english: "Dictate in English", note: "Note" };
+  var TITLES = { type: "Dictate", english: "Dictate in English", note: "A note" };
   var recorder;
   var mode = "type";
   var starting = Promise.resolve();
   var timer;
   var dropped = false;
   var BEHIND = 4;
-  var heard;
+  var words;
   var dot;
+  var time;
+  var said = "";
+  var fetching = false;
   function clock(seconds) {
     const s = Math.floor(seconds);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
-  function show(kind, ...children) {
+  function show(kind, text, ...line) {
     root.className = `badge ${kind}`;
-    root.replaceChildren(...children);
+    root.replaceChildren(...text ? [text] : [], el("div", { class: "line" }, ...line));
+    if (text) toEnd(text);
+  }
+  function toEnd(text) {
+    text.scrollTop = text.scrollHeight;
+    text.classList.toggle("more", text.scrollHeight > text.clientHeight + 1);
+  }
+  function wordsOf(text, waiting = "") {
+    return el("div", { class: text ? "words" : "words waiting" }, text || waiting);
   }
   function onStatus(status) {
-    if (!heard || !dot) return;
+    if (!words || !dot || !time) return;
     const model = status.model;
-    const fetching = model?.state === "downloading";
-    const words = status.heard.length > 44 ? `\u2026${status.heard.slice(-44)}` : status.heard;
-    if (fetching) heard.replaceChildren(`Getting the speech model ${Math.round((model.progress ?? 0) * 100)}%`);
-    else if (words) heard.replaceChildren(words);
-    heard.classList.toggle("words", fetching || !!words);
+    fetching = model?.state === "downloading";
+    if (fetching) time.textContent = `Getting the speech model ${Math.round((model?.progress ?? 0) * 100)}%`;
+    time.classList.toggle("fetch", fetching);
+    const text = status.heard.trim();
+    if (text && text !== said) {
+      said = text;
+      words.textContent = text;
+      words.classList.remove("waiting");
+      toEnd(words);
+    }
     dot.classList.toggle("behind", status.pending > BEHIND);
     dot.title = status.pending > BEHIND ? "catching up" : "";
   }
-  function recording(key) {
-    const time = el("span", { class: "time" }, "0:00");
+  function recording() {
+    time = el("span", { class: "time" }, "0:00");
     const bars = Array.from({ length: 5 }, () => el("i"));
     dot = el("span", { class: "dot" });
-    heard = el("div", { class: "hint" }, key ? caps(key) : "", el("span", {}, mode === "note" ? "save" : "type it"), caps("Escape"), el("span", {}, "cancel"));
-    show("rec", el("div", { class: "line" }, dot, el("span", { class: "what" }, TITLES[mode]), time, el("span", { class: "meter" }, ...bars)), heard);
+    words = wordsOf("", "Listening\u2026");
+    said = "";
+    fetching = false;
+    show("rec", words, dot, el("span", { class: "what" }, TITLES[mode]), time, el("span", { class: "meter" }, ...bars));
+    postHeight(true);
     clearInterval(timer);
     timer = window.setInterval(() => {
-      if (!recorder) return;
-      time.textContent = clock(recorder.seconds);
+      if (!recorder || !time) return;
+      if (!fetching) time.textContent = clock(recorder.seconds);
       const level = recorder.level();
       bars.forEach((bar, i) => bar.classList.toggle("on", level > (i + 0.5) / bars.length));
     }, 80);
   }
-  async function start(next, key, session, expected = []) {
+  async function start(next, session, expected = []) {
     mode = next;
     dropped = false;
     recorder = mode === "note" ? new ChunkRecorder(host.call, { source: "note", slice: 2e3 }) : session ? new StreamRecorder(host.call, session, expected, onStatus) : new PhraseRecorder();
-    recording(key);
+    recording();
     try {
       starting = recorder.start();
       await starting;
@@ -366,11 +360,7 @@
     recorder = void 0;
     if (!r) return;
     const behind = dot?.classList.contains("behind");
-    show(
-      "busy",
-      el("div", { class: "line" }, el("span", { class: "spin" }), el("span", { class: "what" }, mode === "note" ? "Saving the note\u2026" : behind ? "Catching up\u2026" : "Typing\u2026")),
-      ...mode === "note" ? [] : [el("div", { class: "hint" }, caps("Escape"), el("span", {}, "cancel"))]
-    );
+    show("busy", said ? wordsOf(said) : null, el("span", { class: "spin" }), el("span", { class: "what" }, mode === "note" ? "Saving the note\u2026" : behind ? "Catching up\u2026" : "Typing\u2026"));
     busy = r;
     try {
       if (r instanceof ChunkRecorder) host.post({ type: "dictationNote", id: await r.finish() });
@@ -399,14 +389,22 @@
     const message = event.data;
     if (event.source !== window || !message || typeof message.type !== "string") return;
     if (message.type === "dictation") {
-      if (message.command === "start") void start(message.mode, message.key, message.session, message.expected);
+      if (message.command === "start") void start(message.mode, message.session, message.expected);
       else if (message.command === "stop") void stop();
       else void cancel();
     } else if (message.type === "dictationDone") {
-      show("done", el("div", { class: "line" }, el("span", { class: "check" }, "\u2713"), el("span", { class: "what" }, mode === "note" ? "Saved" : "Typed")), el("div", { class: "hint name" }, message.text));
+      show("done", wordsOf(message.text), el("span", { class: "check" }, "\u2713"), el("span", { class: "what" }, mode === "note" ? "Saved" : "Typed"));
     } else if (message.type === "dictationError") {
-      show("error", el("div", { class: "line" }, el("span", { class: "what" }, mode === "note" ? "The note was not saved" : "Nothing typed")), el("div", { class: "hint name" }, message.message));
+      show("error", wordsOf(message.message), el("span", { class: "what" }, mode === "note" ? "The note was not saved" : "Nothing typed"));
     }
   });
+  var posted = 0;
+  function postHeight(again = false) {
+    const px = Math.ceil(root.getBoundingClientRect().height);
+    if (px === posted && !again) return;
+    posted = px;
+    host.post({ type: "dictationHeight", px });
+  }
+  new ResizeObserver(() => postHeight()).observe(root);
   host.post({ type: "dictationReady" });
 })();

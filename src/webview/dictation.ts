@@ -1,11 +1,11 @@
-// Dictate's badge by the pointer. The main process says when to start, stop
-// or throw away; the badge records, shows the time, the level and the last
-// words the engine heard (a phrase is recognized while it is spoken), and then
-// hands over the text (to be typed) or finishes the note in the engine.
+// Dictate's badge at the bottom of the screen. The main process says when to
+// start, stop or throw away; the badge records, shows the phrase as the engine
+// hears it (recognized while it is spoken), the time and the level, and then
+// hands over the text (to be typed) or finishes the note in the engine. Its
+// window follows the panel's height; the keys are on the Dictate page, not here.
 
 import type { DictationMode, ToView, TutorHost } from '../protocol'
 import { el } from './dom'
-import { caps } from './keycaps'
 import { ChunkRecorder, micTrouble, PhraseRecorder, StreamRecorder, type StreamStatus } from './recorder'
 
 declare global {
@@ -16,7 +16,7 @@ declare global {
 
 const host = window.tutorHost
 const root = document.getElementById('badge')!
-const TITLES: Record<DictationMode, string> = { type: 'Dictate', english: 'Dictate in English', note: 'Note' }
+const TITLES: Record<DictationMode, string> = { type: 'Dictate', english: 'Dictate in English', note: 'A note' }
 
 type Recorder = PhraseRecorder | ChunkRecorder | StreamRecorder
 let recorder: Recorder | undefined
@@ -28,48 +28,75 @@ let timer: number | undefined
 let dropped = false
 /** Seconds of sound waiting behind the piece being recognized: the engine is behind the voice. */
 const BEHIND = 4
-let heard: HTMLElement | undefined
+let words: HTMLElement | undefined
 let dot: HTMLElement | undefined
+let time: HTMLElement | undefined
+/** The phrase heard so far, kept for the panel while it is typed. */
+let said = ''
+/** The model is being fetched: its progress stands in the time's place. */
+let fetching = false
 
 function clock(seconds: number): string {
   const s = Math.floor(seconds)
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-function show(kind: string, ...children: (Node | string)[]): void {
+/** The panel: the words on top (none when there are none to show), the status line under them. */
+function show(kind: string, text: HTMLElement | null, ...line: (Node | string)[]): void {
   root.className = `badge ${kind}`
-  root.replaceChildren(...children)
+  root.replaceChildren(...(text ? [text] : []), el('div', { class: 'line' }, ...line))
+  if (text) toEnd(text)
 }
 
-/** The last words the engine heard, in place of the keys' hint; behind: the voice is ahead of the engine. */
+/** The latest words in view; the top fades when earlier ones are above. */
+function toEnd(text: HTMLElement): void {
+  text.scrollTop = text.scrollHeight
+  text.classList.toggle('more', text.scrollHeight > text.clientHeight + 1)
+}
+
+/** The words area: the phrase, or a muted line while there is none yet. */
+function wordsOf(text: string, waiting = ''): HTMLElement {
+  return el('div', { class: text ? 'words' : 'words waiting' }, text || waiting)
+}
+
+/** The whole phrase the engine heard so far; behind: the voice is ahead of the engine. */
 function onStatus(status: StreamStatus): void {
-  if (!heard || !dot) return
+  if (!words || !dot || !time) return
   const model = status.model
-  const fetching = model?.state === 'downloading'
-  const words = status.heard.length > 44 ? `…${status.heard.slice(-44)}` : status.heard
-  if (fetching) heard.replaceChildren(`Getting the speech model ${Math.round((model.progress ?? 0) * 100)}%`)
-  else if (words) heard.replaceChildren(words)
-  heard.classList.toggle('words', fetching || !!words)
+  fetching = model?.state === 'downloading'
+  if (fetching) time.textContent = `Getting the speech model ${Math.round((model?.progress ?? 0) * 100)}%`
+  time.classList.toggle('fetch', fetching)
+  const text = status.heard.trim()
+  if (text && text !== said) {
+    said = text
+    words.textContent = text
+    words.classList.remove('waiting')
+    toEnd(words)
+  }
   dot.classList.toggle('behind', status.pending > BEHIND)
   dot.title = status.pending > BEHIND ? 'catching up' : ''
 }
 
-function recording(key: string): void {
-  const time = el('span', { class: 'time' }, '0:00')
+function recording(): void {
+  time = el('span', { class: 'time' }, '0:00')
   const bars = Array.from({ length: 5 }, () => el('i'))
   dot = el('span', { class: 'dot' })
-  heard = el('div', { class: 'hint' }, key ? caps(key) : '', el('span', {}, mode === 'note' ? 'save' : 'type it'), caps('Escape'), el('span', {}, 'cancel'))
-  show('rec', el('div', { class: 'line' }, dot, el('span', { class: 'what' }, TITLES[mode]), time, el('span', { class: 'meter' }, ...bars)), heard)
+  words = wordsOf('', 'Listening…')
+  said = ''
+  fetching = false
+  show('rec', words, dot, el('span', { class: 'what' }, TITLES[mode]), time, el('span', { class: 'meter' }, ...bars))
+  // A new phrase's window starts at its smallest: told the panel's height even when it is the last one's.
+  postHeight(true)
   clearInterval(timer)
   timer = window.setInterval(() => {
-    if (!recorder) return
-    time.textContent = clock(recorder.seconds)
+    if (!recorder || !time) return
+    if (!fetching) time.textContent = clock(recorder.seconds)
     const level = recorder.level()
     bars.forEach((bar, i) => bar.classList.toggle('on', level > (i + 0.5) / bars.length))
   }, 80)
 }
 
-async function start(next: DictationMode, key: string, session?: string, expected: string[] = []): Promise<void> {
+async function start(next: DictationMode, session?: string, expected: string[] = []): Promise<void> {
   mode = next
   dropped = false
   recorder =
@@ -78,7 +105,7 @@ async function start(next: DictationMode, key: string, session?: string, expecte
       : session
         ? new StreamRecorder(host.call, session, expected, onStatus)
         : new PhraseRecorder()
-  recording(key)
+  recording()
   try {
     starting = recorder.start()
     await starting
@@ -96,11 +123,7 @@ async function stop(): Promise<void> {
   recorder = undefined
   if (!r) return
   const behind = dot?.classList.contains('behind')
-  show(
-    'busy',
-    el('div', { class: 'line' }, el('span', { class: 'spin' }), el('span', { class: 'what' }, mode === 'note' ? 'Saving the note…' : behind ? 'Catching up…' : 'Typing…')),
-    ...(mode === 'note' ? [] : [el('div', { class: 'hint' }, caps('Escape'), el('span', {}, 'cancel'))]),
-  )
+  show('busy', said ? wordsOf(said) : null, el('span', { class: 'spin' }), el('span', { class: 'what' }, mode === 'note' ? 'Saving the note…' : behind ? 'Catching up…' : 'Typing…'))
   busy = r
   try {
     if (r instanceof ChunkRecorder) host.post({ type: 'dictationNote', id: await r.finish() })
@@ -133,14 +156,24 @@ window.addEventListener('message', event => {
   const message = event.data as ToView
   if (event.source !== window || !message || typeof message.type !== 'string') return
   if (message.type === 'dictation') {
-    if (message.command === 'start') void start(message.mode, message.key, message.session, message.expected)
+    if (message.command === 'start') void start(message.mode, message.session, message.expected)
     else if (message.command === 'stop') void stop()
     else void cancel()
   } else if (message.type === 'dictationDone') {
-    show('done', el('div', { class: 'line' }, el('span', { class: 'check' }, '✓'), el('span', { class: 'what' }, mode === 'note' ? 'Saved' : 'Typed')), el('div', { class: 'hint name' }, message.text))
+    show('done', wordsOf(message.text), el('span', { class: 'check' }, '✓'), el('span', { class: 'what' }, mode === 'note' ? 'Saved' : 'Typed'))
   } else if (message.type === 'dictationError') {
-    show('error', el('div', { class: 'line' }, el('span', { class: 'what' }, mode === 'note' ? 'The note was not saved' : 'Nothing typed')), el('div', { class: 'hint name' }, message.message))
+    show('error', wordsOf(message.message), el('span', { class: 'what' }, mode === 'note' ? 'The note was not saved' : 'Nothing typed'))
   }
 })
+
+// The window is as tall as the panel: the main process keeps its bottom edge in place.
+let posted = 0
+function postHeight(again = false): void {
+  const px = Math.ceil(root.getBoundingClientRect().height)
+  if (px === posted && !again) return
+  posted = px
+  host.post({ type: 'dictationHeight', px })
+}
+new ResizeObserver(() => postHeight()).observe(root)
 
 host.post({ type: 'dictationReady' })

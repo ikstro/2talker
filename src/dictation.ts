@@ -1,21 +1,28 @@
 // Dictate: a key, in any program, starts recording in the badge (a small
-// window by the pointer that never takes the focus, so the program being
-// typed in keeps it); the same key again stops. Then, by the key:
+// window at the bottom of the screen being typed in, where the person last
+// dropped it, that never takes the focus, so the program keeps it); the same
+// key again stops. Then, by the key:
 //   type     the text is typed where the cursor is (through the clipboard,
 //            which is put back as it was),
 //   english  the same, translated into English first by Altype's translator,
 //   note     the recording goes into the knowledge base as a .md file
 //            (through the engine's library), and a balloon says where.
-// Esc while recording throws it away.
+// Esc while recording throws it away. Typed phrases go into the log
+// (dictationlog.ts), so the again key can type the last one once more.
 
 import * as path from 'node:path'
 
 import { BrowserWindow, globalShortcut, screen, shell } from 'electron'
 
+import type { DictationLog } from './dictationlog'
+import { badgeOffset, placeBadge, type Rect } from './placement'
 import type { DictationMode, ToHost, ToView } from './protocol'
+import type { Settings } from './settings'
 import type { SpeechHost } from './speechhost'
+import { foreground, windowRect } from './winkbd'
 
-const BADGE = { width: 300, height: 64 }
+/** The badge is as wide as this; as tall as its page, from one line of words to about six (then they scroll). */
+const BADGE = { width: 360, min: 64, max: 180 }
 const NOTE_WAIT_MS = 5 * 60_000
 /** The most languages the engine weighs a phrase against. */
 const MOST_EXPECTED = 8
@@ -39,6 +46,13 @@ export type DictationOptions = {
   /** The app window on a transcript: a note that stayed in Transcripts. */
   openTranscript: (id: string) => void
   onChange: () => void
+  /** The phrases typed lately. */
+  log: DictationLog
+  /** A phrase went into the log, or the log was cleared: the Dictate page shows the latest. */
+  logged: () => void
+  /** Where the person last dropped the badge, from the bottom centre of the work area; and keeping a new place. */
+  offset: () => Settings['dictationBadge']
+  moved: (offset: Settings['dictationBadge']) => void
 }
 
 type Transcript = { title: string; note?: string; noteError?: string }
@@ -52,6 +66,8 @@ export class Dictation {
   private waiting: ToView[] = []
   /** The engine is being asked for a session: a second press now would come before the badge starts. */
   private opening = false
+  /** The height the badge's page asked for: its bottom edge stays where it is when it changes. */
+  private height = BADGE.min
 
   constructor(private readonly o: DictationOptions) {}
 
@@ -69,6 +85,8 @@ export class Dictation {
       return
     }
     this.mode = mode
+    // The screen to show on is the one with the window the text goes into, taken now, while it is in front.
+    const area = this.workArea()
     this.set('recording')
     const expected = this.o.expected().slice(0, MOST_EXPECTED)
     let session: string | undefined
@@ -85,7 +103,8 @@ export class Dictation {
     }
     if (this.state !== 'recording') return
     const badge = this.window()
-    this.place(badge)
+    this.height = BADGE.min
+    badge.setBounds(placeBadge(this.o.offset(), { width: BADGE.width, height: this.height }, area))
     badge.showInactive()
     this.send({ type: 'dictation', command: 'start', mode, key, ...(session ? { session } : {}), expected })
     globalShortcut.register('Escape', () => this.cancel())
@@ -119,6 +138,9 @@ export class Dictation {
         return true
       case 'dictationNote':
         void this.awaitNote(message.id)
+        return true
+      case 'dictationHeight':
+        this.fit(message.px)
         return true
       case 'dictationCancelled':
         this.over()
@@ -156,6 +178,21 @@ export class Dictation {
     this.badge?.hide()
     this.over()
     await this.o.paste(text)
+    this.o.log.add(mode === 'english' ? { mode, text, heard } : { mode: 'type', text })
+    this.o.logged()
+  }
+
+  /** The again key: the last phrase typed once more where the cursor is (not logged again). */
+  typeAgain(): void {
+    if (this.state !== 'idle' || this.opening) return
+    const last = this.o.log.last()
+    if (!last) return this.o.balloon('Altype', 'Nothing dictated yet')
+    this.o.paste(last.text).catch(error => console.warn('Altype: could not type the phrase again', error))
+  }
+
+  clearLog(): void {
+    this.o.log.clear()
+    this.o.logged()
   }
 
   private async awaitNote(id: string): Promise<void> {
@@ -214,10 +251,13 @@ export class Dictation {
   private window(): BrowserWindow {
     if (this.badge && !this.badge.isDestroyed()) return this.badge
     const b = new BrowserWindow({
-      ...BADGE,
+      width: BADGE.width,
+      height: BADGE.min,
       show: false,
       frame: false,
       resizable: false,
+      // Its status line is a drag region (dictation.css): the person puts it where it bothers least.
+      movable: true,
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
@@ -233,6 +273,8 @@ export class Dictation {
     b.removeMenu()
     b.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     b.webContents.on('will-navigate', event => event.preventDefault())
+    // 'moved' comes once, when a drag by the person ends (never for setBounds).
+    b.on('moved', () => this.dropped())
     b.on('closed', () => {
       this.badge = undefined
       this.badgeReady = false
@@ -242,12 +284,40 @@ export class Dictation {
     return b
   }
 
-  private place(b: BrowserWindow): void {
-    const at = screen.getCursorScreenPoint()
-    const area = screen.getDisplayNearestPoint(at).workArea
-    const x = Math.min(Math.max(at.x + 16, area.x + 8), area.x + area.width - BADGE.width - 8)
-    const y = Math.min(Math.max(at.y + 20, area.y + 8), area.y + area.height - BADGE.height - 8)
-    b.setBounds({ x, y, ...BADGE })
+  /**
+   * The work area of the screen holding the window in front (the one the text
+   * goes into); with no window there, or one Windows gives no size, the
+   * screen under the pointer.
+   */
+  private workArea(): Rect {
+    try {
+      const rect = windowRect(foreground().hwnd)
+      if (rect) return screen.getDisplayMatching(screen.screenToDipRect(null, rect)).workArea
+    } catch (error) {
+      console.warn('Altype: could not find the window in front', error)
+    }
+    return screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  }
+
+  /** The page's new height, the bottom edge kept, inside the work area. */
+  private fit(px: number): void {
+    const b = this.badge
+    if (!b || b.isDestroyed() || !Number.isFinite(px)) return
+    const height = Math.round(Math.min(BADGE.max, Math.max(BADGE.min, px)))
+    if (height === this.height) return
+    this.height = height
+    const now = b.getBounds()
+    const area = screen.getDisplayMatching(now).workArea
+    const y = Math.max(area.y, now.y + now.height - height)
+    b.setBounds({ x: now.x, y, width: BADGE.width, height })
+  }
+
+  /** The person dropped the badge: the place is kept from that screen's bottom centre, for every screen. */
+  private dropped(): void {
+    const b = this.badge
+    if (!b || b.isDestroyed()) return
+    const bounds = b.getBounds()
+    this.o.moved(badgeOffset(bounds, screen.getDisplayMatching(bounds).workArea))
   }
 
   dispose(): void {

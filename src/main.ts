@@ -20,6 +20,7 @@
 // %APPDATA%\Altype\ (moved over from 2Talker's or tu-talk's folder, once)
 //   settings.json   see settings.ts
 //   words.json      the word notebook (words.ts)
+//   dictation.json  the phrases dictated lately, 30 days at most (dictationlog.ts)
 //   voice\          the natural voice, downloaded on request
 //   dict\           word dictionaries for languages other than Russian
 //   models\         the translator's models, one folder per language pair
@@ -35,6 +36,7 @@ import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, i
 
 import { DoubleCopy } from './clipboard'
 import { Dictation } from './dictation'
+import { DictationLog } from './dictationlog'
 import { DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { createTranslator, NATIVES } from './engine'
@@ -113,7 +115,7 @@ const LINKS = new Set([
 ])
 
 /** The settings that are Dictate's keys: registered only once the speech engine is installed. */
-const DICTATION_KEYS: readonly (keyof Settings)[] = ['dictateKey', 'englishKey', 'noteKey']
+const DICTATION_KEYS: readonly (keyof Settings)[] = ['dictateKey', 'englishKey', 'noteKey', 'againKey']
 
 // One Altype at a time, whichever folder it keeps its things in: the lock is taken on Altype's own
 // folder first, before a test run moves to its own. A second copy (another start, `npm start`, a test
@@ -154,7 +156,7 @@ let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
 let keysOk = { snip: true, select: true, translate: true, text: true }
-let speechKeysOk = { dictate: true, note: true, english: true }
+let speechKeysOk = { dictate: true, note: true, english: true, again: true }
 let speech: SpeechHost
 let dictation: Dictation
 /** What a click on the tray's balloon does, for the balloon shown last. */
@@ -190,6 +192,7 @@ let pendingTab: AppTab | undefined
 /** The transcript it shows then (a note left in Transcripts, from its balloon). */
 let pendingTranscript: string | undefined
 let words: WordStore
+let dictationLog: DictationLog
 let updater: Updater
 /** The most common English words, for the card's dotted lines; read once. */
 let common: string[] | undefined
@@ -502,6 +505,7 @@ function appView(): AppView {
     keyboardApps,
     foreignKeys,
     speech: speech.view(speechKeysOk),
+    dictation: { recent: dictationLog.list(10) },
   }
 }
 
@@ -670,6 +674,9 @@ function setCardHeight(px: number): void {
 function onMessage(message: ToHost): void {
   if (dictation?.onMessage(message)) return
   switch (message.type) {
+    case 'clearDictation':
+      dictation.clearLog()
+      return
     case 'installSpeech':
       speech.install(message.parts).then(
         () => (registerShortcuts(), applyKeyboard()),
@@ -1088,6 +1095,7 @@ function registerShortcuts(): void {
     dictate: dictate('type', settings.dictateKey),
     english: dictate('english', settings.englishKey),
     note: dictate('note', settings.noteKey),
+    again: speech?.installed ? register(settings.againKey, () => dictation.typeAgain()) : true,
   }
   const taken = [
     !keysOk.snip && settings.snipKey,
@@ -1097,6 +1105,7 @@ function registerShortcuts(): void {
     !speechKeysOk.dictate && settings.dictateKey,
     !speechKeysOk.english && settings.englishKey,
     !speechKeysOk.note && settings.noteKey,
+    !speechKeysOk.again && settings.againKey,
   ].filter((k): k is string => !!k)
   // The settings window shows the trouble itself; the balloon is for a start without it.
   if (taken.length > 0 && !(appWin?.isVisible() ?? false)) {
@@ -1113,7 +1122,7 @@ function applyKeyboard(): void {
   keyboardTrouble = undefined
   try {
     // Dictate's keys work only once the engine is installed, here as with Electron's shortcuts.
-    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '' })
+    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '' })
   } catch (error) {
     keyboardTrouble = messageOf(error)
   }
@@ -1431,6 +1440,10 @@ function setUpSpeechEngine(): void {
     needsEngine: () => openApp('dictate'),
     openTranscript,
     onChange: () => refreshTray(),
+    log: dictationLog,
+    logged: () => postApp(),
+    offset: () => settings.dictationBadge,
+    moved: offset => saveSettings({ dictationBadge: offset }),
   })
   speech.start()
   // Windows is asked about the cards and the battery once Altype is up: it takes a second or two.
@@ -1475,6 +1488,7 @@ function start(): void {
   applyLoginItem()
   setUpSpeech()
   words = new WordStore(path.join(userDir(), 'words.json'))
+  dictationLog = new DictationLog(path.join(userDir(), 'dictation.json'))
   updater = new Updater({
     change: () => postApp(),
     ready: version => tray?.displayBalloon({ title: 'Altype', content: `Version ${version} is ready. It installs when Altype quits.` }),
@@ -1497,6 +1511,7 @@ function start(): void {
       if (action === 'dictate') dictation.press('type', settings.dictateKey)
       else if (action === 'english') dictation.press('english', settings.englishKey)
       else if (action === 'note') dictation.press('note', settings.noteKey)
+      else if (action === 'again') dictation.typeAgain()
       else if (action === 'select') selection('listen', settings.selectKey)
       else if (action === 'translate') selection('translate', settings.translateKey)
       else if (action === 'text') snip('translate', settings.textKey)

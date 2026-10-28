@@ -71,6 +71,14 @@ export type Settings = {
   dictateKey: string
   englishKey: string
   noteKey: string
+  /** Types the last dictated phrase again where the cursor is (dictationlog.ts); empty for none. */
+  againKey: string
+  /**
+   * Where the dictation badge sits: its bottom centre from the bottom centre of
+   * the work area of the screen being typed in, in CSS pixels, as the person
+   * last dropped it (0, 0 is 12 px above the taskbar's edge, in the middle).
+   */
+  dictationBadge: { dx: number; dy: number }
   /**
    * Words dictation and transcripts spell as written, one line each as the
    * person typed it: the word, then what it may be heard as in parentheses
@@ -122,6 +130,8 @@ export const DEFAULTS: Settings = {
   dictateKey: 'Control+Alt+D',
   englishKey: '',
   noteKey: 'Control+Alt+N',
+  againKey: '',
+  dictationBadge: { dx: 0, dy: 0 },
   vocabulary: [],
   speechPrefer: 'accuracy',
   dictationModel: '',
@@ -156,6 +166,13 @@ function vocabularyLines(raw: unknown): string[] {
 /** The languages a text of the person's is read as, by code: their own, English, then the others they named. */
 export function myLanguages(s: Pick<Settings, 'native' | 'languages'>): string[] {
   return [...new Set([findLanguage(s.native)?.code ?? '', 'en', ...s.languages].filter(Boolean))]
+}
+
+/** The badge's offset as numbers, whatever the file held; a screen is never wider than this. */
+function badgeOffset(v: unknown): Settings['dictationBadge'] {
+  const r = (v && typeof v === 'object' ? v : {}) as { dx?: unknown; dy?: unknown }
+  const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(Math.max(-20000, Math.min(20000, x))) : 0)
+  return { dx: n(r.dx), dy: n(r.dy) }
 }
 
 export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
@@ -198,6 +215,8 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     dictateKey: key(r.dictateKey, DEFAULTS.dictateKey),
     englishKey: key(r.englishKey, DEFAULTS.englishKey),
     noteKey: key(r.noteKey, DEFAULTS.noteKey),
+    againKey: key(r.againKey, DEFAULTS.againKey),
+    dictationBadge: badgeOffset(r.dictationBadge),
     vocabulary: vocabularyLines(r.vocabulary),
     speechPrefer: r.speechPrefer === 'speed' ? 'speed' : 'accuracy',
     dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),

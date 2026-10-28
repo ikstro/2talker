@@ -50,3 +50,32 @@ export function resize(bounds: Rect, height: number, area: Rect): Rect {
   const y = Math.min(bounds.y, area.y + area.height - h)
   return { ...bounds, y: Math.max(y, area.y), height: h }
 }
+
+/** The dictation badge's gap above the work area's bottom edge, with no offset of the person's. */
+export const BADGE_GAP = 12
+
+/**
+ * The dictation badge: its bottom centre at the work area's bottom centre
+ * (BADGE_GAP above it) moved by the person's offset, and never outside the
+ * work area, so an offset kept from a larger screen still shows.
+ */
+export function placeBadge(offset: { dx: number; dy: number }, size: { width: number; height: number }, area: Rect): Rect {
+  const width = Math.min(size.width, area.width)
+  const height = Math.min(size.height, area.height)
+  const x = area.x + area.width / 2 + offset.dx - width / 2
+  const y = area.y + area.height - BADGE_GAP + offset.dy - height
+  return {
+    x: Math.round(Math.min(Math.max(x, area.x), area.x + area.width - width)),
+    y: Math.round(Math.min(Math.max(y, area.y), area.y + area.height - height)),
+    width,
+    height,
+  }
+}
+
+/** The offset a badge dropped at `bounds` keeps: placeBadge's in reverse. */
+export function badgeOffset(bounds: Rect, area: Rect): { dx: number; dy: number } {
+  return {
+    dx: Math.round(bounds.x + bounds.width / 2 - (area.x + area.width / 2)),
+    dy: Math.round(bounds.y + bounds.height - (area.y + area.height - BADGE_GAP)),
+  }
+}

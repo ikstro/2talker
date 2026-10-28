@@ -2566,7 +2566,8 @@
     fixKey: "fixing the layout",
     dictateKey: "dictating",
     englishKey: "dictating in English",
-    noteKey: "dictating a note"
+    noteKey: "dictating a note",
+    againKey: "typing the last phrase again"
   };
   function saveKey(name, key) {
     const s = view?.settings;
@@ -2749,11 +2750,14 @@
       keyRow("dictateKey", "Dictate", "types what you say where the cursor is", !k.dictate),
       keyRow("englishKey", "Dictate in English", `say it in ${s.native}, English is typed`, !k.english),
       keyRow("noteKey", "A note", "kept in the knowledge base as a .md file", !k.note),
+      keyRow("againKey", "Type the last phrase again", "what was dictated last, where the cursor is", !k.again),
       row("Tap the key, talk, tap it again", ["the words show as you speak \xB7 Esc throws the phrase away, while it records and while it types"], null),
       grp("Knowledge base"),
       ...kbRows(v),
       grp("Words to spell"),
       ...termRows(v),
+      grp("Recent phrases"),
+      ...recentRows(v),
       ...running(v) ? [grp("Speech model"), ...modelRows(v, "dictation")] : [],
       el("p", { class: "privacy" }, icon("lock"), "Speech is recognized on this computer; nothing is sent anywhere.")
     ].filter((n) => n !== null);
@@ -2806,6 +2810,32 @@
       ),
       chips.length ? el("div", { class: "chiprow" }, ...chips) : null
     ].filter((n) => n !== null);
+  }
+  function recentRows(v) {
+    const recent = v.dictation.recent;
+    if (recent.length === 0) return [row("None yet", ["kept 30 days on this computer"], null)];
+    return [
+      ...recent.map(
+        (e) => el(
+          "div",
+          { class: "row phrase" },
+          el("div", { class: "l" }, el("span", { class: "said", title: e.heard ? `${e.text}
+
+Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()))),
+          linkBtn("Copy", () => copyText(e.text))
+        )
+      ),
+      row("Kept 30 days on this computer", [], linkBtn("Clear", () => post({ type: "clearDictation" })))
+    ];
+  }
+  function whenSaid(iso, now) {
+    const at = new Date(iso);
+    const time = at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((day(new Date(now)) - day(at)) / 864e5);
+    if (days === 0) return time;
+    if (days === 1) return `yesterday ${time}`;
+    return `${at.getDate()} ${at.toLocaleDateString("en-GB", { month: "short" })} ${time}`;
   }
   var copyText = (text) => void window.tutorHost.call({ call: "copy", text }).then(() => toast(`Copied: ${text}`), fault);
   function meetRows(v) {

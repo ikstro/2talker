@@ -17,7 +17,7 @@ import { bestLayout, charOf, chooseFix, coreOf, nextLayout, typeIn, type KeyTabl
 import type { Press } from './winkbd'
 
 /** What a key does: switch or fix the layout here; listen to (select, snip) or translate (translate, text) the selection or the screen: the main process's. */
-export type KeyAction = 'switch' | 'fix' | 'select' | 'snip' | 'translate' | 'text' | 'dictate' | 'english' | 'note'
+export type KeyAction = 'switch' | 'fix' | 'select' | 'snip' | 'translate' | 'text' | 'dictate' | 'english' | 'note' | 'again'
 
 export type KbdConfig = {
   /** The key of each action this thread watches for (hotkey.ts); an action left out has none here. */
