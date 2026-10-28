@@ -27,6 +27,8 @@ npm run test:engine               # engine/tests in engine/.venv (uv run --no-sy
 
 One Altype at a time, always: `main.ts` takes the single-instance lock on Altype's own folder before anything else, so a second start (installed, `npm start` or a test run) hands its arguments to the first and quits. A test run (`ALTYPE_TEST_HOME=<folder>`: its own settings and speech engine folder, `ALTYPE_TEST_PORT`, 8797 by default, Windows' startup list left alone) therefore needs the installed Altype quit first.
 
+Uninstall (`build/installer.nsh`, `customUnInstall`) asks once whether the data goes too: Yes removes `%APPDATA%\Altype` (and `2Talker`, `tu-talk`), `%LOCALAPPDATA%\Altype` (the speech engine) and `Documents\Altype` (transcripts); No keeps everything for a later install; an update (`--updated`) and a silent uninstall never ask or delete; notes in the knowledge base are never touched.
+
 Release: bump `version` in package.json, commit, tag `v<version>`, push the tag. `.github/workflows/release.yml` builds the installer on windows-latest and publishes the GitHub release with `latest.yml`; installed copies update from it (`src/update.ts`, electron-updater, checked at start and every 6 h, installed on quit). The installer is unsigned.
 
 A shell started from VS Code or Claude Code may carry `ELECTRON_RUN_AS_NODE=1`; Electron then runs as plain Node and `electron.app` is undefined. Run with it unset (`env -u ELECTRON_RUN_AS_NODE …`).

@@ -46,6 +46,8 @@ nsis:
   perMachine: false
   runAfterFinish: true
   artifactName: Altype-Setup-${version}.${ext}
+  # Uninstall asks whether the data goes too (build/installer.nsh); an update keeps it.
+  include: build/installer.nsh
 # Releases on GitHub: the updater (src/update.ts) reads latest.yml from there.
 # The installer is not signed (a free app): Windows warns once at install.
 publish:
