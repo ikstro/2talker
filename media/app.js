@@ -325,6 +325,166 @@
   var aside = (glyphName, ...text) => el("p", { class: "aside" }, icon(glyphName), el("span", {}, ...text));
   var warn = (...text) => el("p", { class: "warn" }, icon("warning"), el("span", {}, ...text));
 
+  // engine/models.json
+  var models_default = {
+    about: "The speech models Altype can use, read by the engine (asr.py) and by Altype (src/speechplan.ts). rank: how accurate, higher is better. phrase: seconds to recognize a 7 s phrase as Dictate does; rtf: seconds per second of a long recording as Transcribe does (words with their times). Both are first guesses, measured on an i9-9900K (cpu, int8) and an RTX 2080 SUPER (cuda, float16) on 2026-10-28, until this computer is tested. Whisper pads every phrase to a 30 s window, so a phrase costs one window whatever its length; turbo's decoder is light, so on long recordings it is nearly as quick as small. ramMb: memory on the processor; vramMb: on the card, per compute type.",
+    speakers: {
+      cpu: {
+        rtf: 0.8
+      },
+      cuda: {
+        rtf: 0.03
+      }
+    },
+    models: [
+      {
+        name: "tiny",
+        label: "Whisper tiny",
+        about: "fastest, rough",
+        backend: "whisper",
+        repo: "Systran/faster-whisper-tiny",
+        bytes: 77e6,
+        rank: 1,
+        languages: "all",
+        cpu: {
+          phrase: 0.25,
+          rtf: 0.05
+        },
+        cuda: {
+          phrase: 0.1,
+          rtf: 0.02
+        },
+        ramMb: 300,
+        vramMb: {
+          float16: 400,
+          int8_float16: 300
+        }
+      },
+      {
+        name: "base",
+        label: "Whisper base",
+        about: "fast, fair",
+        backend: "whisper",
+        repo: "Systran/faster-whisper-base",
+        bytes: 147e6,
+        rank: 2,
+        languages: "all",
+        cpu: {
+          phrase: 0.45,
+          rtf: 0.09
+        },
+        cuda: {
+          phrase: 0.12,
+          rtf: 0.03
+        },
+        ramMb: 450,
+        vramMb: {
+          float16: 500,
+          int8_float16: 400
+        }
+      },
+      {
+        name: "small",
+        label: "Whisper small",
+        about: "good",
+        backend: "whisper",
+        repo: "Systran/faster-whisper-small",
+        bytes: 486e6,
+        rank: 3,
+        languages: "all",
+        cpu: {
+          phrase: 1.4,
+          rtf: 0.2
+        },
+        cuda: {
+          phrase: 0.22,
+          rtf: 0.055
+        },
+        ramMb: 900,
+        vramMb: {
+          float16: 1e3,
+          int8_float16: 700
+        }
+      },
+      {
+        name: "large-v3-turbo",
+        label: "Whisper turbo",
+        about: "very good",
+        backend: "whisper",
+        repo: "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+        bytes: 162e7,
+        rank: 5,
+        languages: "all",
+        cpu: {
+          phrase: 4.5,
+          rtf: 0.25
+        },
+        cuda: {
+          phrase: 0.26,
+          rtf: 0.025
+        },
+        ramMb: 2e3,
+        vramMb: {
+          float16: 2600,
+          int8_float16: 1600
+        }
+      },
+      {
+        name: "large-v3",
+        label: "Whisper large",
+        about: "the most accurate, slow",
+        backend: "whisper",
+        repo: "Systran/faster-whisper-large-v3",
+        bytes: 309e7,
+        rank: 6,
+        languages: "all",
+        cpu: {
+          phrase: 9,
+          rtf: 0.8
+        },
+        cuda: {
+          phrase: 0.5,
+          rtf: 0.06
+        },
+        ramMb: 3600,
+        vramMb: {
+          float16: 4600,
+          int8_float16: 2700
+        }
+      }
+    ]
+  };
+
+  // src/hardware.ts
+  function nvidiaCard(p) {
+    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function mainCard(p) {
+    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function shortCpu(name) {
+    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
+  }
+  function cardText(g) {
+    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
+    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
+  }
+
+  // src/speechplan.ts
+  var MODELS = models_default.models;
+  var SPEAKERS = models_default.speakers;
+  function seconds(s) {
+    return s < 10 ? `${(Math.round(s * 10) / 10).toFixed(1)} s` : `${Math.round(s)} s`;
+  }
+  function minutes(m) {
+    const r = Math.max(1, Math.round(m));
+    return r >= 60 ? `${Math.floor(r / 60)} h${r % 60 ? ` ${r % 60} min` : ""}` : `${r} min`;
+  }
+  function estimateText(feature, c) {
+    return feature === "dictation" ? `\u2248${seconds(c.estimate)} a phrase` : `\u2248${minutes(c.estimate)} an hour`;
+  }
+  var BASIS_TEXT = { measured: "measured here", scaled: "from this computer\u2019s test", guess: "first guess" };
+
   // src/webview/speech.ts
   var SpeechError = class extends Error {
     constructor(message, status) {
@@ -345,20 +505,20 @@
     redraw = fn;
   }
   var redrawPage = () => redraw();
-  function clock(seconds) {
-    const s = Math.max(0, Math.floor(seconds));
+  function clock(seconds2) {
+    const s = Math.max(0, Math.floor(seconds2));
     const h = Math.floor(s / 3600);
     const m = Math.floor(s % 3600 / 60);
     const ss = String(s % 60).padStart(2, "0");
     return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
   }
   function minutesPerHour(v) {
-    return v.speech.health?.parts.gpu ? 5 : 70;
+    return Math.max(1, Math.round(v.speech.plan.transcripts.chosen.estimate));
   }
-  function length(seconds) {
-    if (seconds < 60) return `${Math.round(seconds)} s`;
-    const minutes = Math.round(seconds / 60);
-    return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
+  function length(seconds2) {
+    if (seconds2 < 60) return `${Math.round(seconds2)} s`;
+    const minutes2 = Math.round(seconds2 / 60);
+    return minutes2 >= 60 ? `${Math.floor(minutes2 / 60)} h ${minutes2 % 60} min` : `${minutes2} min`;
   }
   var toasts = el("div", { class: "toasts", role: "status" });
   document.body.append(toasts);
@@ -429,17 +589,27 @@
     if (!installed(v)) {
       const gpu = s.pack.nvidia && withGpu;
       const mb = s.download.core + (gpu ? s.download.gpu : 0);
+      const first = gpu ? s.firstModel.cuda : s.firstModel.cpu;
+      const keeps = s.installed.core + (gpu ? s.installed.gpu : 0) + first.mb;
+      const needs = Math.round((keeps + mb) * 1.1);
+      const short = s.disk.freeMb > 0 && s.disk.freeMb < needs;
       const go = () => post({ type: "installSpeech", parts: gpu ? ["core", "gpu"] : ["core"] });
       const failed = s.pack.status === "failed";
+      const card = nvidiaCard(s.device);
+      const download = btn(failed ? "Try again" : "Download", go, "primary");
+      download.disabled = short;
       return [
         row(
           `${feature} needs the speech engine`,
-          [failed ? bad(`The download stopped: ${s.pack.message ?? "unknown error"}`) : `\u2248${mb} MB \xB7 downloads once, then works offline`],
-          btn(failed ? "Try again" : "Download", go, "primary")
+          [
+            failed ? bad(`The download stopped: ${s.pack.message ?? "unknown error"}`) : `\u2248${size(mb)} download \xB7 ${size(keeps)} on the disk with ${first.model} \xB7 then works offline`,
+            short ? bad(`Needs \u2248${size(needs)} free; ${s.disk.drive} has ${size(s.disk.freeMb)}`) : s.disk.freeMb > 0 ? `${size(s.disk.freeMb)} free on ${s.disk.drive}` : null
+          ],
+          download
         ),
         s.pack.nvidia ? row(
           "Use the graphics card",
-          [`NVIDIA found \xB7 \u2248${s.download.gpu} MB more \xB7 much faster`],
+          [`${card ? cardText(card) : "NVIDIA"} \xB7 \u2248${size(s.download.gpu)} more \xB7 a phrase in \u2248${seconds(s.firstModel.cuda.phrase)}, not \u2248${seconds(s.firstModel.cpu.phrase)}`],
           toggleKnob(withGpu, (on) => (withGpu = on, redraw()), "Use the graphics card")
         ) : null
       ].filter((n) => n !== null);
@@ -449,11 +619,98 @@
     if (s.service === "down") return [row("The speech engine does not run", [bad(s.trouble ?? "it stopped")], linkBtn("Restart", () => post({ type: "restartSpeech" })))];
     return [];
   }
-  function modelRow(label, m, later, now) {
-    if (!m) return null;
-    if (m.state === "ready") return row(label, [`${m.name} \xB7 on this computer`], chip("ready"));
-    if (m.state === "downloading") return row(label, [`${m.name} \xB7 downloading once`, bar(m.progress ?? 0)], el("span", { class: "pct" }, `${Math.round((m.progress ?? 0) * 100)}%`));
-    return row(label, [`${m.name} \xB7 ${later}`], now ? linkBtn("Download now", now) : chip("not yet", "off"));
+  function size(mb) {
+    return mb >= 1e3 ? `${(Math.round(mb / 100) / 10).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
+  }
+  var where = (c) => c.device === "cuda" ? "graphics card" : "processor";
+  function liveModel(v, feature) {
+    return v.speech.health?.models[feature === "dictation" ? "dictation" : "transcripts"];
+  }
+  function modelRows(v, feature) {
+    const p = feature === "dictation" ? v.speech.plan.dictation : v.speech.plan.transcripts;
+    const key = feature === "dictation" ? "dictationModel" : "transcriptsModel";
+    const save2 = (model) => post({ type: "saveSettings", patch: { [key]: model } });
+    const live = liveModel(v, feature);
+    const budget = feature === "dictation" ? `answers in \u2248${seconds(p.budget)}` : `writes an hour\u2019s words in \u2248${minutes(p.budget)}`;
+    const out = [
+      row(
+        "Automatic",
+        [`the most accurate model that ${budget} on this computer \xB7 now ${p.chosen.label}`, v.settings.speechPrefer === "speed" ? "quicker ones preferred (Settings)" : null],
+        toggleKnob(!p.pinned, (on) => save2(on ? "" : p.chosen.model), "Automatic")
+      )
+    ];
+    for (const c of p.choices) {
+      const chosen = c.model === p.chosen.model;
+      const fetching = live && live.name === c.model && live.state === "downloading";
+      const notes = c.why ? [`${c.about} \xB7 ${c.why}`] : [
+        `${estimateText(feature, c)} \xB7 ${where(c)} \xB7 ${BASIS_TEXT[c.basis]}${!c.fits && chosen && p.pinned ? " \xB7 slower than usual here" : ""}`,
+        `${c.about}${c.downloaded ? "" : ` \xB7 ${size(c.mb)}, ${chosen ? "downloads with its first use" : "downloads when picked"}`}${p.better?.model === c.model ? " \xB7 fits this computer best" : ""}`,
+        fetching ? bar(live.progress ?? 0) : null
+      ];
+      const control = c.why ? null : fetching ? el("span", { class: "pct" }, `${Math.round((live.progress ?? 0) * 100)}%`) : chosen ? chip(p.pinned ? "picked" : "in use", "lit") : linkBtn("Use", () => {
+        if (!c.downloaded) post({ type: "downloadSpeechModel", model: c.model });
+        save2(c.model);
+      });
+      const node = row(c.label, notes, control);
+      if (c.why) node.classList.add("dim");
+      out.push(node);
+    }
+    return out;
+  }
+  function testWork(v) {
+    const t = v.speech.health?.calibration;
+    if (!t || t.state !== "running" && t.state !== "waiting") return null;
+    const share = t.total ? t.done / t.total : 0;
+    const what = t.state === "waiting" ? "waits until the engine is free" : `${t.current || "starting"} \xB7 step ${Math.min(t.total, t.done + 1)} of ${t.total}`;
+    return row("Testing this computer", [what, bar(share)], el("span", { class: "pct" }, `${Math.round(share * 100)}%`));
+  }
+  function testOffer(v) {
+    const work = testWork(v);
+    if (work) return work;
+    const t = v.speech.test;
+    if (!t.offer) return null;
+    return el(
+      "div",
+      { class: "offer" },
+      icon("dashboard"),
+      el(
+        "div",
+        { class: "ot" },
+        el("b", {}, "Test this computer and pick the speech models for it?"),
+        el("small", {}, `Each downloaded model runs once on a short clip, about ${t.runs > 1 ? "a minute or two" : "a minute"}, in the background. Until then the times here are first guesses.`),
+        el("span", { class: "acts" }, btn("Run the test", () => post({ type: "testSpeech" }), "primary"), linkBtn("Not now", () => post({ type: "declineSpeechTest" })))
+      )
+    );
+  }
+  function computerRows(v) {
+    const d = v.speech.device;
+    const card = mainCard(d);
+    const cpu = `${shortCpu(d.cpu.name)} \xB7 ${d.cpu.cores} cores \xB7 ${d.ramGb} GB${d.laptop ? " \xB7 a laptop" : ""}`;
+    const cards = card ? cardText(card) : d.at ? "no graphics card of its own" : "looking at the graphics card\u2026";
+    const plan = v.speech.plan;
+    const tested = plan.measured ? "the speech models\u2019 times are measured here" : running(v) ? "the times are first guesses until the test" : "tested once the speech engine is here";
+    const t = testWork(v);
+    return [
+      row(
+        "This computer",
+        [cpu, cards, tested],
+        running(v) && !t ? linkBtn(v.speech.test.agreed && plan.measured ? "Test again" : "Test", () => post({ type: "testSpeech" }), v.speech.test.runs === 0 && !plan.dictation.choices.some((c) => c.downloaded)) : null
+      ),
+      ...t ? [t] : []
+    ];
+  }
+  function cardNote(v) {
+    const s = v.speech;
+    const card = mainCard(s.device);
+    const gpuPart = hasPart(v, "gpu");
+    if (!card) return s.device.at ? "none of its own \xB7 speech runs on the processor" : "looking\u2026";
+    const name = cardText(card);
+    if (card.vendor !== "nvidia") return `${name} \xB7 speech runs on the processor: only NVIDIA cards run it for now`;
+    if (!s.pack.nvidia && !gpuPart) return `${name} \xB7 too old or too small for speech \xB7 the processor does it`;
+    if (!gpuPart) return `${name} \xB7 add its part to use it`;
+    if (s.health?.fallback) return `${name} \xB7 it would not take the model, so the processor does it`;
+    if (s.plan.device === "cpu") return `${name}, but the engine runs on the processor`;
+    return `${name} \xB7 speech is recognized on it`;
   }
   var HF = {
     join: "https://huggingface.co/join",
@@ -1250,7 +1507,7 @@
     if (!way) return aside("person", `${why} This meeting can no longer be split: its words were not kept.`);
     const run = () => void splitSpeakers(t.id);
     if (way === "words") return aside("person", `${why} The text is not recognized again; edits stay.`, " ", linkBtn("Split by speaker", run));
-    const minutes = Math.max(1, Math.round(t.duration / 3600 * minutesPerHour(v)));
+    const minutes2 = Math.max(1, Math.round(t.duration / 3600 * minutesPerHour(v)));
     if (tx.redoing) {
       return aside(
         "person",
@@ -1260,7 +1517,7 @@
         linkBtn("Not now", () => (tx.redoing = false, redrawPage()))
       );
     }
-    return aside("person", `${why} It can be transcribed again, with speakers: about ${minutes} min.`, " ", linkBtn("Transcribe again", () => (tx.redoing = true, redrawPage())));
+    return aside("person", `${why} It can be transcribed again, with speakers: about ${minutes2} min.`, " ", linkBtn("Transcribe again", () => (tx.redoing = true, redrawPage())));
   }
   async function splitSpeakers(id) {
     tx.redoing = false;
@@ -1571,8 +1828,9 @@
     const p = v.speech.pack;
     if (p.status === "installing" && !installed(v)) return `downloading ${Math.round((p.progress ?? 0) * 100)}%`;
     if (!installed(v)) return "downloads once";
-    const d = v.speech.health?.device;
-    return d === "cuda" ? "Whisper \xB7 graphics card" : d === "cpu" ? "Whisper \xB7 processor" : "Whisper";
+    if (!running(v)) return "Whisper";
+    const c = v.speech.plan.dictation.chosen;
+    return `${c.label} \xB7 ${c.device === "cuda" ? "graphics card" : "processor"} \xB7 \u2248${seconds(c.estimate)}`;
   }
   function actionText(action, v) {
     const title = TITLES[action];
@@ -1642,7 +1900,9 @@
     }[v.translator];
     const n = v.natural;
     const voice = n.status === "downloading" ? [el("b", {}, "natural voice"), ` ${Math.round(n.progress * 100)}%`] : n.status === "failed" ? [el("b", {}, "Windows voice"), " ready (the natural voice could not download)"] : [el("b", {}, naturalOn(v) ? "natural voice" : "Windows voice"), " ready"];
-    return [el("b", {}, pairOf(v)), ` ${translator} \xB7 `, ...voice, " \xB7 runs on this computer"];
+    const sp = v.speech;
+    const speech = !installed(v) ? sp.pack.status === "installing" ? [" \xB7 ", el("b", {}, "speech"), ` ${Math.round((sp.pack.progress ?? 0) * 100)}%`] : [] : [" \xB7 ", el("b", {}, "speech"), running(v) ? " ready" : sp.service === "down" ? " stopped" : " starting"];
+    return [el("b", {}, pairOf(v)), ` ${translator} \xB7 `, ...voice, ...speech, " \xB7 runs on this computer"];
   }
   function homeRow(action, v) {
     const t = actionText(action, v);
@@ -2296,13 +2556,6 @@
     ];
   }
   var pathNote = (path) => el("small", { class: "path", title: path }, el("bdi", {}, path));
-  async function prepareDictation() {
-    try {
-      await api("POST", "/dictate/prepare");
-    } catch (error) {
-      fault(error);
-    }
-  }
   function kbRows(v) {
     const e = engineSettings(v);
     if (!running(v) || !e) return [row("Folder", [installed(v) ? "shown once the speech engine runs" : "chosen once the speech engine is here"], null)];
@@ -2326,6 +2579,7 @@
     const offer = engineRows(v, "Dictate");
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
+      testOffer(v),
       grp("Keys"),
       keyRow("dictateKey", "Dictate", "types what you say where the cursor is", !k.dictate),
       keyRow("englishKey", "Dictate in English", `say it in ${s.native}, English is typed`, !k.english),
@@ -2333,7 +2587,7 @@
       row("Tap the key, talk, tap it again", ["Esc while it records throws it away"], null),
       grp("Knowledge base"),
       ...kbRows(v),
-      ...running(v) ? [grp("Speech model"), modelRow("Dictation", v.speech.health?.models.dictation, "downloads with the first phrase", () => void prepareDictation())] : [],
+      ...running(v) ? [grp("Speech model"), ...modelRows(v, "dictation")] : [],
       el("p", { class: "privacy" }, icon("lock"), "Speech is recognized on this computer; nothing is sent anywhere.")
     ].filter((n) => n !== null);
   }
@@ -2351,13 +2605,14 @@
     const offer = engineRows(v, "Transcribe");
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
+      testOffer(v),
       ...running(v) ? [grp("New transcription"), ...newRows(v)] : [],
       ...installed(v) ? [grp("Speakers"), ...speakerRows(v)] : [],
       grp("Google Meet"),
       ...meetRows(v),
       ...running(v) ? [
         grp("Speech model"),
-        modelRow("Transcription", v.speech.health?.models.transcripts, "downloads with the first transcription"),
+        ...modelRows(v, "transcripts"),
         row("Every transcript, searched by its words", [], linkBtn("Transcripts", () => openPage("transcripts")))
       ] : []
     ].filter((n) => n !== null);
@@ -2619,12 +2874,18 @@
     out.push(...work);
     const service = { off: "off", starting: "starting\u2026", ready: h?.busy ? "running \xB7 transcribing now" : "running", down: "stopped" }[sp.service];
     out.push(
+      row("Graphics card", [cardNote(v)], null),
       row(
-        "Graphics card",
-        [
-          !p.nvidia ? "none found \xB7 runs on the processor" : !hasPart(v, "gpu") ? "NVIDIA found \xB7 add its part to use it" : h?.device === "cpu" ? "NVIDIA found, but the engine runs on the processor" : "NVIDIA \xB7 speech is recognized on it"
-        ],
-        null
+        "Speech models",
+        [v.settings.speechPrefer === "speed" ? "quicker ones, a little less accurate" : "the most accurate ones this computer runs in time"],
+        seg(
+          v.settings.speechPrefer,
+          [
+            ["accuracy", "Accuracy"],
+            ["speed", "Speed"]
+          ],
+          (speechPrefer) => post({ type: "saveSettings", patch: { speechPrefer } })
+        )
       ),
       row("Service", [`${service} \xB7 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn("Restart", () => post({ type: "restartSpeech" }), p.status !== "ready"))
     );
@@ -2706,6 +2967,7 @@
         )
       ),
       grp("This computer"),
+      ...computerRows(v),
       toggle("Start with Windows", s.startWithWindows, (startWithWindows) => save({ startWithWindows })),
       row(
         `Version ${v.version}`,

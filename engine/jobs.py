@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 import queue
 import shutil
 import threading
@@ -21,12 +22,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+import asr
 import audio
 import merge
 import notes
-from asr import Transcriber
+from asr import CudaFailed, Transcriber
+from bench import Bench
 from diarize import Diarizer, NeedsPart, NeedsToken
-from settings import Settings
+from settings import CPU_DICTATION, Settings
 from store import Store
 
 log = logging.getLogger("altype.jobs")
@@ -74,13 +77,19 @@ class Worker:
     def __init__(self, settings: Settings, get_store: Callable[[], Store]):
         self.settings = settings
         self.get_store = get_store
-        self.transcriber = Transcriber()
-        # Dictation on the CPU uses a smaller model than transcripts (settings.CPU_DICTATION).
+        # Two workers: a dictated phrase need not wait for a long recording's window when both use one model.
+        self.transcriber = Transcriber(workers=2)
+        # Dictation's own model, when the plan gives it another one than transcripts (on the CPU, a quicker one).
         self.dictator = Transcriber()
         self.diarizer = Diarizer()
+        self.bench = Bench(settings)
         self.queue: queue.Queue[str] = queue.Queue()
         self.current: str | None = None
         self.last_work = time.monotonic()
+        # Why the card is not used though it is there (it would not take a model); the processor's plan applies until a restart.
+        self.fallback: str | None = None
+        # Grows with every phrase and job started: the speed test sees it was disturbed.
+        self.activity = 0
         self._thread = threading.Thread(target=self._run, name="altype-worker", daemon=True)
 
     def start(self) -> None:
@@ -94,7 +103,66 @@ class Worker:
 
     @property
     def device(self) -> str | None:
-        return self.transcriber.device
+        return self.transcriber.device or self.dictator.device
+
+    # ------------------------------------------------------------ the plan
+
+    def use_cuda(self) -> bool:
+        return not self.fallback and asr.gpu()
+
+    def threads(self) -> int:
+        """The processor's threads for one model: the plan's (the physical cores), else half the logical ones."""
+        return int(self.settings["plan"].get("threads") or max(1, (os.cpu_count() or 2) // 2))
+
+    def entry(self, feature: str, device: str | None = None) -> tuple[str, dict]:
+        """The device and {model, compute?, beam?} for dictation or transcripts: Altype's plan, else the rule before plans."""
+        device = device or ("cuda" if self.use_cuda() else "cpu")
+        planned = self.settings["plan"].get(device, {}).get(feature)
+        if planned:
+            return device, planned
+        model = self.settings["model"]
+        if feature == "dictation" and device == "cpu":
+            model = CPU_DICTATION
+        return device, {"model": model}
+
+    def _load(self, t: Transcriber, feature: str) -> tuple[str, dict]:
+        device, entry = self.entry(feature)
+        try:
+            t.load(entry["model"], device, entry.get("compute"), self.threads())
+        except CudaFailed as error:
+            self.fallback = str(error)
+            log.warning("the card would not take %s; the processor's plan from now on", entry["model"])
+            device, entry = self.entry(feature, "cpu")
+            t.load(entry["model"], device, None, self.threads())
+        return device, entry
+
+    def words_model(self) -> Transcriber:
+        self._load(self.transcriber, "transcripts")
+        return self.transcriber
+
+    def dictation_model(self) -> tuple[Transcriber, dict]:
+        """Dictation's model, loaded: the transcripts' own when the plan gives both the same (one copy in memory)."""
+        device, entry = self.entry("dictation")
+        _, words = self.entry("transcripts", device)
+        same = words["model"] == entry["model"] and words.get("compute") == entry.get("compute")
+        t = self.transcriber if same else self.dictator
+        _, entry = self._load(t, "dictation")
+        return t, entry
+
+    def unload_all(self) -> None:
+        self.transcriber.unload()
+        self.dictator.unload()
+        self.diarizer.unload()
+        gc.collect()
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    def idle(self) -> bool:
+        return self.current is None and self.queue.empty()
 
     def _run(self) -> None:
         while True:
@@ -104,6 +172,7 @@ class Worker:
                 self._housekeeping()
                 continue
             self.current = id
+            self.activity += 1
             try:
                 self._process(id)
             except Exception as error:
@@ -131,16 +200,7 @@ class Worker:
             if (now - touched).total_seconds() > STALE and finish_recording(store, row["id"], interrupted=True):
                 self.submit(row["id"])
         if time.monotonic() - self.last_work > IDLE_UNLOAD and (self.transcriber.loaded or self.dictator.loaded or self.diarizer.loaded):
-            self.transcriber.unload()
-            self.dictator.unload()
-            self.diarizer.unload()
-            gc.collect()
-            try:
-                import torch
-
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
+            self.unload_all()
             log.info("models unloaded after %d s idle", IDLE_UNLOAD)
 
     def _process(self, id: str) -> None:
@@ -165,7 +225,12 @@ class Worker:
         """Speaker turns and how it went: ok, no-part, needs-token or failed (the text is kept either way)."""
         progress("speakers")
         try:
-            return self.diarizer.diarize(samples, self.settings["hfToken"], wanted, lambda p: progress("speakers", p)), "ok"
+            token = self.settings["hfToken"]
+            self.diarizer.load(token)
+            started = time.perf_counter()
+            turns = self.diarizer.diarize(samples, token, wanted, lambda p: progress("speakers", p))
+            self.bench.speakers(self.diarizer.device, audio.duration(samples), time.perf_counter() - started)
+            return turns, "ok"
         except NeedsPart:
             return None, "no-part"
         except NeedsToken:
@@ -196,12 +261,16 @@ class Worker:
 
         language = job.get("language") or settings["language"]
         language = None if language == "auto" else language
-        model, hotwords = settings["model"], settings["hotwords"]
+        hotwords = settings["hotwords"]
         speakers_status = "single"
 
         def words(samples, share=(0.0, 1.0)):
             a, b = share
-            return self.transcriber.transcribe(samples, model, language, hotwords, lambda p: progress("words", a + (b - a) * p))
+            t = self.words_model()
+            started = time.perf_counter()
+            out = t.transcribe(samples, language, hotwords, lambda p: progress("words", a + (b - a) * p))
+            self.bench.words(t.name, t.device, t.compute, audio.duration(samples), time.perf_counter() - started)
+            return out
 
         # Loading the model, finding the language and cutting the silence come before the first words.
         progress("words")

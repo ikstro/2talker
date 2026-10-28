@@ -28,10 +28,16 @@ SETTINGS_FILE = APP_DIR / "speech.json"
 OLD_SETTINGS = Path(os.environ.get("APPDATA", Path.home())) / "Altscribe" / "engine.json"
 OLD_MODELS = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Altscribe" / "models"
 
-MODELS = ("large-v3-turbo", "large-v3")
-# Dictation on the CPU: large-v3-turbo takes ~6 s for a 7 s phrase there, small ~2 s.
+# The speech models Altype can use: engine/models.json, shared with src/speechplan.ts.
+CATALOG = json.loads((Path(__file__).resolve().parent / "models.json").read_text("utf-8"))
+MODELS = tuple(m["name"] for m in CATALOG["models"] if m["backend"] == "whisper")
+# Dictation on the CPU while Altype has sent no plan (an older Altype, or the plan
+# not made yet): large-v3-turbo takes ~6 s for a 7 s phrase there, small ~2 s.
 CPU_DICTATION = "small"
 LANGUAGES = ("auto", "ru", "en")
+DEVICES = ("cpu", "cuda")
+FEATURES = ("dictation", "transcripts")
+COMPUTE = {"cpu": ("int8",), "cuda": ("float16", "int8_float16")}
 
 
 def documents_dir() -> Path:
@@ -58,6 +64,11 @@ def defaults() -> dict:
         "dataDir": str(documents_dir() / "Altype" / "Transcripts"),
         "kbDir": "",
         "kbInbox": "Inbox",
+        # What runs where, made by Altype from this computer's measurements (src/speechplan.ts):
+        # {threads, cpu: {dictation: {model, beam}, transcripts: {model}}, cuda: {... compute}}.
+        "plan": {},
+        # How fast each model runs here: {fingerprint, at, runs: {"model|device|compute": {phrase, rtf, n, at}}}.
+        "bench": {},
     }
 
 
@@ -81,6 +92,30 @@ def adopt_altscribe(file: Path = SETTINGS_FILE) -> None:
             log.warning("could not adopt Altscribe's models: %s", error)
 
 
+def clean_plan(plan: dict) -> dict:
+    """A plan as Altype sends it, with anything this engine does not know left out."""
+    out: dict = {}
+    if isinstance(plan.get("fingerprint"), str):
+        out["fingerprint"] = plan["fingerprint"][:64]
+    if isinstance(plan.get("threads"), int) and 1 <= plan["threads"] <= 256:
+        out["threads"] = plan["threads"]
+    for device in DEVICES:
+        entries = plan.get(device)
+        if not isinstance(entries, dict):
+            continue
+        for feature in FEATURES:
+            entry = entries.get(feature)
+            if not isinstance(entry, dict) or entry.get("model") not in MODELS:
+                continue
+            clean = {"model": entry["model"]}
+            if entry.get("compute") in COMPUTE[device]:
+                clean["compute"] = entry["compute"]
+            if isinstance(entry.get("beam"), int) and 1 <= entry["beam"] <= 10:
+                clean["beam"] = entry["beam"]
+            out.setdefault(device, {})[feature] = clean
+    return out
+
+
 class Settings:
     def __init__(self, file: Path = SETTINGS_FILE):
         self.file = file
@@ -100,9 +135,12 @@ class Settings:
 
     def _check(self) -> None:
         if self._values["model"] not in MODELS:
-            self._values["model"] = MODELS[0]
+            self._values["model"] = "large-v3-turbo"
         if self._values["language"] not in LANGUAGES:
             self._values["language"] = "auto"
+        self._values["plan"] = clean_plan(self._values["plan"])
+        if not isinstance(self._values["bench"].get("runs"), dict):
+            self._values["bench"] = {}
 
     def get(self) -> dict:
         with self._lock:

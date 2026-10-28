@@ -27,6 +27,8 @@ export const UV = {
 
 /** What each part downloads, roughly, in MB: what an install costs, and how far it is. */
 export const DOWNLOAD_MB = { core: 160, gpu: 1150, speakers: 250, speakersGpu: 3000 }
+/** What each part takes on the disk once installed, roughly, in MB (engine/pyproject.toml). */
+export const INSTALLED_MB = { core: 330, gpu: 1700, speakers: 900, speakersGpu: 4000 }
 
 export type SpeechPackState = {
   status: 'absent' | 'installing' | 'ready' | 'failed' | 'removing'
@@ -42,20 +44,37 @@ export type SpeechPackState = {
   nvidia: boolean
 }
 
-/** The extras uv installs for these parts; speakers on the card carries the CUDA libraries itself. */
-export function extrasFor(parts: SpeechPart[]): string[] {
+/**
+ * The extras uv installs for these parts. Speakers on the card carry the CUDA
+ * libraries themselves (speakers-gpu, ~4 GB); a card with too little memory for
+ * both models keeps Whisper on it and the speakers on the processor (gpu + speakers).
+ */
+export function extrasFor(parts: SpeechPart[], gpuSpeakers = true): string[] {
   const set = new Set(parts)
-  if (set.has('speakers')) return [set.has('gpu') ? 'speakers-gpu' : 'speakers']
+  if (set.has('speakers')) {
+    if (!set.has('gpu')) return ['speakers']
+    return gpuSpeakers ? ['speakers-gpu'] : ['gpu', 'speakers']
+  }
   return set.has('gpu') ? ['gpu'] : []
 }
 
-/** The download for these parts, in MB. */
-export function downloadMb(parts: SpeechPart[]): number {
-  const set = new Set(parts)
-  let mb = DOWNLOAD_MB.core
-  if (set.has('speakers')) mb += set.has('gpu') ? DOWNLOAD_MB.speakersGpu : DOWNLOAD_MB.speakers
-  else if (set.has('gpu')) mb += DOWNLOAD_MB.gpu
+function sizeOf(table: typeof DOWNLOAD_MB, parts: SpeechPart[], gpuSpeakers: boolean): number {
+  const extras = extrasFor(parts, gpuSpeakers)
+  let mb = table.core
+  if (extras.includes('speakers-gpu')) mb += table.speakersGpu
+  if (extras.includes('speakers')) mb += table.speakers
+  if (extras.includes('gpu')) mb += table.gpu
   return mb
+}
+
+/** The download for these parts, in MB. */
+export function downloadMb(parts: SpeechPart[], gpuSpeakers = true): number {
+  return sizeOf(DOWNLOAD_MB, parts, gpuSpeakers)
+}
+
+/** What these parts take on the disk once installed, in MB. */
+export function installedMb(parts: SpeechPart[], gpuSpeakers = true): number {
+  return sizeOf(INSTALLED_MB, parts, gpuSpeakers)
 }
 
 /** Parts in their fixed order, without repeats, core always first. */
@@ -72,12 +91,14 @@ export type SpeechPackOptions = {
   /** The engine's source: app.py, pyproject.toml, uv.lock. */
   engineDir: string
   nvidia: boolean
+  /** Speakers go on the card too (it has the memory for both models); else Whisper alone does. */
+  gpuSpeakers?: () => boolean
   open: (url: string) => Promise<AsyncIterable<Uint8Array>>
   run?: Run
   onChange: () => void
 }
 
-type Marker = { parts: SpeechPart[]; lock: string }
+type Marker = { parts: SpeechPart[]; lock: string; extras?: string[] }
 
 export class SpeechPack {
   private status: SpeechPackState['status']
@@ -153,7 +174,7 @@ export class SpeechPack {
       await this.ensureUv()
       this.set('installing', 'packages', 0)
       await this.sync(parts)
-      fs.writeFileSync(path.join(this.o.root, 'installed.json'), JSON.stringify({ parts, lock: this.lockHash() } satisfies Marker))
+      fs.writeFileSync(path.join(this.o.root, 'installed.json'), JSON.stringify({ parts, lock: this.lockHash(), extras: this.extras(parts) } satisfies Marker))
       fs.rmSync(path.join(this.o.root, 'cache'), { recursive: true, force: true })
       this.installing = undefined
       this.set(this.marker() ? 'ready' : 'failed', undefined, 1)
@@ -196,10 +217,18 @@ export class SpeechPack {
     fs.rmSync(zip, { force: true })
   }
 
+  /** The extras for these parts: as installed before when the parts are the same (an update keeps them), else as this card can take. */
+  private extras(parts: SpeechPart[]): string[] {
+    const m = this.marker()
+    if (m?.extras && m.parts.join() === parts.join()) return m.extras
+    return extrasFor(parts, this.o.gpuSpeakers?.() ?? true)
+  }
+
   private async sync(parts: SpeechPart[]): Promise<void> {
     const root = this.o.root
     const cache = path.join(root, 'cache')
-    const args = ['sync', '--frozen', '--no-dev', '--project', this.o.engineDir, '--python', '3.12', ...extrasFor(parts).flatMap(e => ['--extra', e])]
+    const extras = this.extras(parts)
+    const args = ['sync', '--frozen', '--no-dev', '--project', this.o.engineDir, '--python', '3.12', ...extras.flatMap(e => ['--extra', e])]
     const job = this.runner(this.uvExe, args, {
       UV_PROJECT_ENVIRONMENT: path.join(root, 'env'),
       UV_PYTHON_INSTALL_DIR: path.join(root, 'python'),
@@ -208,7 +237,7 @@ export class SpeechPack {
       UV_NO_PROGRESS: '1',
     })
     // uv shows no numbers when nobody watches it; the download cache growing against the expected size does.
-    const expected = downloadMb(parts) * 1e6
+    const expected = downloadMb(parts, !extras.includes('speakers') || extras.includes('speakers-gpu')) * 1e6
     const timer = setInterval(() => this.tick(Math.min(0.97, folderBytes(cache) / expected)), 1500)
     try {
       const code = await job.exit

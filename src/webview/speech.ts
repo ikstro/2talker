@@ -4,7 +4,9 @@
 // feature can work: the engine's parts to download, and the Hugging Face key
 // that lets speakers be told apart.
 
-import type { AppView, SpeechHealth, SpeechPart, SpeechResult } from '../protocol'
+import { cardText, mainCard, nvidiaCard, shortCpu } from '../hardware'
+import type { AppView, Choice, Feature, SpeechHealth, SpeechPart, SpeechResult } from '../protocol'
+import { BASIS_TEXT, estimateText, minutes, seconds } from '../speechplan'
 import { el, icon } from './dom'
 import { aside, bad, bar, btn, chip, link, linkBtn, post, row, toggleKnob } from './ui'
 
@@ -98,12 +100,9 @@ export function clock(seconds: number): string {
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
 }
 
-/**
- * Minutes an hour of sound takes here, speakers included, as measured: ~4 on an
- * RTX 2080 Super, ~70 on an i9-9900K's eight cores (Whisper turbo int8 and pyannote on the CPU).
- */
+/** Minutes an hour of sound takes here with the model chosen for transcripts, speakers included when their part is here. */
 export function minutesPerHour(v: AppView): number {
-  return v.speech.health?.parts.gpu ? 5 : 70
+  return Math.max(1, Math.round(v.speech.plan.transcripts.chosen.estimate))
 }
 
 /** 40 s, 12 min, 1 h 4 min. */
@@ -211,18 +210,29 @@ export function engineRows(v: AppView, feature: string): HTMLElement[] {
   if (!installed(v)) {
     const gpu = s.pack.nvidia && withGpu
     const mb = s.download.core + (gpu ? s.download.gpu : 0)
+    const first = gpu ? s.firstModel.cuda : s.firstModel.cpu
+    // On the disk: the parts and the first model; while installing, the download's cache too.
+    const keeps = s.installed.core + (gpu ? s.installed.gpu : 0) + first.mb
+    const needs = Math.round((keeps + mb) * 1.1)
+    const short = s.disk.freeMb > 0 && s.disk.freeMb < needs
     const go = () => post({ type: 'installSpeech', parts: gpu ? ['core', 'gpu'] : ['core'] })
     const failed = s.pack.status === 'failed'
+    const card = nvidiaCard(s.device)
+    const download = btn(failed ? 'Try again' : 'Download', go, 'primary')
+    download.disabled = short
     return [
       row(
         `${feature} needs the speech engine`,
-        [failed ? bad(`The download stopped: ${s.pack.message ?? 'unknown error'}`) : `≈${mb} MB · downloads once, then works offline`],
-        btn(failed ? 'Try again' : 'Download', go, 'primary'),
+        [
+          failed ? bad(`The download stopped: ${s.pack.message ?? 'unknown error'}`) : `≈${size(mb)} download · ${size(keeps)} on the disk with ${first.model} · then works offline`,
+          short ? bad(`Needs ≈${size(needs)} free; ${s.disk.drive} has ${size(s.disk.freeMb)}`) : s.disk.freeMb > 0 ? `${size(s.disk.freeMb)} free on ${s.disk.drive}` : null,
+        ],
+        download,
       ),
       s.pack.nvidia
         ? row(
             'Use the graphics card',
-            [`NVIDIA found · ≈${s.download.gpu} MB more · much faster`],
+            [`${card ? cardText(card) : 'NVIDIA'} · ≈${size(s.download.gpu)} more · a phrase in ≈${seconds(s.firstModel.cuda.phrase)}, not ≈${seconds(s.firstModel.cpu.phrase)}`],
             toggleKnob(withGpu, on => ((withGpu = on), redraw()), 'Use the graphics card'),
           )
         : null,
@@ -234,12 +244,129 @@ export function engineRows(v: AppView, feature: string): HTMLElement[] {
   return []
 }
 
-/** A model's line: here, downloading, or still to come (and when). */
-export function modelRow(label: string, m: SpeechHealth['models']['dictation'] | undefined, later: string, now?: () => void): HTMLElement | null {
-  if (!m) return null
-  if (m.state === 'ready') return row(label, [`${m.name} · on this computer`], chip('ready'))
-  if (m.state === 'downloading') return row(label, [`${m.name} · downloading once`, bar(m.progress ?? 0)], el('span', { class: 'pct' }, `${Math.round((m.progress ?? 0) * 100)}%`))
-  return row(label, [`${m.name} · ${later}`], now ? linkBtn('Download now', now) : chip('not yet', 'off'))
+/** 480 MB, 1.6 GB. */
+export function size(mb: number): string {
+  return mb >= 1000 ? `${(Math.round(mb / 100) / 10).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`
+}
+
+const where = (c: Choice) => (c.device === 'cuda' ? 'graphics card' : 'processor')
+
+/** The model a feature uses now, as the engine has it: downloading shows how far. */
+function liveModel(v: AppView, feature: Feature): SpeechHealth['models']['dictation'] | undefined {
+  return v.speech.health?.models[feature === 'dictation' ? 'dictation' : 'transcripts']
+}
+
+/**
+ * The speech models for a feature, each with its time on this computer:
+ * Automatic (the most accurate one within the budget, chosen here) or one the
+ * person picks, which then stays whatever it costs. A model not downloaded
+ * downloads when picked.
+ */
+export function modelRows(v: AppView, feature: Feature): HTMLElement[] {
+  const p = feature === 'dictation' ? v.speech.plan.dictation : v.speech.plan.transcripts
+  const key = feature === 'dictation' ? 'dictationModel' : 'transcriptsModel'
+  const save = (model: string) => post({ type: 'saveSettings', patch: { [key]: model } })
+  const live = liveModel(v, feature)
+  const budget = feature === 'dictation' ? `answers in ≈${seconds(p.budget)}` : `writes an hour’s words in ≈${minutes(p.budget)}`
+  const out: HTMLElement[] = [
+    row(
+      'Automatic',
+      [`the most accurate model that ${budget} on this computer · now ${p.chosen.label}`, v.settings.speechPrefer === 'speed' ? 'quicker ones preferred (Settings)' : null],
+      toggleKnob(!p.pinned, on => save(on ? '' : p.chosen.model), 'Automatic'),
+    ),
+  ]
+  for (const c of p.choices) {
+    const chosen = c.model === p.chosen.model
+    const fetching = live && live.name === c.model && live.state === 'downloading'
+    const notes: (string | HTMLElement | null)[] = c.why
+      ? [`${c.about} · ${c.why}`]
+      : [
+          `${estimateText(feature, c)} · ${where(c)} · ${BASIS_TEXT[c.basis]}${!c.fits && chosen && p.pinned ? ' · slower than usual here' : ''}`,
+          `${c.about}${c.downloaded ? '' : ` · ${size(c.mb)}, ${chosen ? 'downloads with its first use' : 'downloads when picked'}`}${p.better?.model === c.model ? ' · fits this computer best' : ''}`,
+          fetching ? bar(live.progress ?? 0) : null,
+        ]
+    const control = c.why
+      ? null
+      : fetching
+        ? el('span', { class: 'pct' }, `${Math.round((live.progress ?? 0) * 100)}%`)
+        : chosen
+          ? chip(p.pinned ? 'picked' : 'in use', 'lit')
+          : linkBtn('Use', () => {
+              if (!c.downloaded) post({ type: 'downloadSpeechModel', model: c.model })
+              save(c.model)
+            })
+    const node = row(c.label, notes, control)
+    if (c.why) node.classList.add('dim')
+    out.push(node)
+  }
+  return out
+}
+
+/** The speed test going on: which model, how far. */
+function testWork(v: AppView): HTMLElement | null {
+  const t = v.speech.health?.calibration
+  if (!t || (t.state !== 'running' && t.state !== 'waiting')) return null
+  const share = t.total ? t.done / t.total : 0
+  const what = t.state === 'waiting' ? 'waits until the engine is free' : `${t.current || 'starting'} · step ${Math.min(t.total, t.done + 1)} of ${t.total}`
+  return row('Testing this computer', [what, bar(share)], el('span', { class: 'pct' }, `${Math.round(share * 100)}%`))
+}
+
+/**
+ * The offer of the speed test, once there is something to measure and the
+ * person has not answered it: each downloaded model runs once on a short clip,
+ * then the models are chosen from what this computer really does.
+ */
+export function testOffer(v: AppView): HTMLElement | null {
+  const work = testWork(v)
+  if (work) return work
+  const t = v.speech.test
+  if (!t.offer) return null
+  return el(
+    'div',
+    { class: 'offer' },
+    icon('dashboard'),
+    el(
+      'div',
+      { class: 'ot' },
+      el('b', {}, 'Test this computer and pick the speech models for it?'),
+      el('small', {}, `Each downloaded model runs once on a short clip, about ${t.runs > 1 ? 'a minute or two' : 'a minute'}, in the background. Until then the times here are first guesses.`),
+      el('span', { class: 'acts' }, btn('Run the test', () => post({ type: 'testSpeech' }), 'primary'), linkBtn('Not now', () => post({ type: 'declineSpeechTest' }))),
+    ),
+  )
+}
+
+/** Settings: this computer, the test, and accuracy or speed. */
+export function computerRows(v: AppView): HTMLElement[] {
+  const d = v.speech.device
+  const card = mainCard(d)
+  const cpu = `${shortCpu(d.cpu.name)} · ${d.cpu.cores} cores · ${d.ramGb} GB${d.laptop ? ' · a laptop' : ''}`
+  const cards = card ? cardText(card) : d.at ? 'no graphics card of its own' : 'looking at the graphics card…'
+  const plan = v.speech.plan
+  const tested = plan.measured ? 'the speech models’ times are measured here' : running(v) ? 'the times are first guesses until the test' : 'tested once the speech engine is here'
+  const t = testWork(v)
+  return [
+    row(
+      'This computer',
+      [cpu, cards, tested],
+      running(v) && !t ? linkBtn(v.speech.test.agreed && plan.measured ? 'Test again' : 'Test', () => post({ type: 'testSpeech' }), v.speech.test.runs === 0 && !plan.dictation.choices.some(c => c.downloaded)) : null,
+    ),
+    ...(t ? [t] : []),
+  ]
+}
+
+/** What the graphics card does for speech, said plainly. */
+export function cardNote(v: AppView): string {
+  const s = v.speech
+  const card = mainCard(s.device)
+  const gpuPart = hasPart(v, 'gpu')
+  if (!card) return s.device.at ? 'none of its own · speech runs on the processor' : 'looking…'
+  const name = cardText(card)
+  if (card.vendor !== 'nvidia') return `${name} · speech runs on the processor: only NVIDIA cards run it for now`
+  if (!s.pack.nvidia && !gpuPart) return `${name} · too old or too small for speech · the processor does it`
+  if (!gpuPart) return `${name} · add its part to use it`
+  if (s.health?.fallback) return `${name} · it would not take the model, so the processor does it`
+  if (s.plan.device === 'cpu') return `${name}, but the engine runs on the processor`
+  return `${name} · speech is recognized on it`
 }
 
 // ---------------------------------------------------------------- speakers

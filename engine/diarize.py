@@ -121,6 +121,7 @@ class Diarizer:
     def __init__(self):
         self._pipeline = None
         self._lock = threading.Lock()
+        self.device = "cpu"
 
     @property
     def loaded(self) -> bool:
@@ -140,8 +141,14 @@ class Diarizer:
             from pyannote.audio import Pipeline
 
             pipeline = Pipeline.from_pretrained(str(LOCAL))
+            self.device = "cpu"
             if torch.cuda.is_available():
-                pipeline.to(torch.device("cuda"))
+                try:
+                    pipeline.to(torch.device("cuda"))
+                    self.device = "cuda"
+                except Exception as error:  # the card is full (Whisper on it): slower, but it still works
+                    log.warning("speakers on the GPU failed (%s); using the CPU", error)
+                    pipeline.to(torch.device("cpu"))
             self._pipeline = pipeline
 
     def unload(self) -> None:

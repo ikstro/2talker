@@ -4,6 +4,7 @@
 
 import { findLanguage } from './languages'
 import type { WordHintMode } from './protocol'
+import type { Prefer } from './speechplan'
 
 export const TARGET = 'English'
 
@@ -64,6 +65,16 @@ export type Settings = {
   dictateKey: string
   englishKey: string
   noteKey: string
+  /** Speech models: the most accurate this computer runs in time, or quicker ones. */
+  speechPrefer: Prefer
+  /** A speech model the person picked for dictation and for transcripts (models.json names); empty: chosen for this computer. */
+  dictationModel: string
+  transcriptsModel: string
+  /** The person agreed to the speed test: it runs again by itself when something changes (a model, a card). */
+  speechTestAgreed: boolean
+  /** "Not now" to the test: what it would have measured then, and when; it is offered again when that changes, a day later at the soonest. */
+  speechTestDeclinedKey: string
+  speechTestDeclinedAt: number
   /** Start Altype when Windows starts. */
   startWithWindows: boolean
   /** The offer of the natural voice was closed. */
@@ -98,6 +109,12 @@ export const DEFAULTS: Settings = {
   dictateKey: 'Control+Alt+D',
   englishKey: '',
   noteKey: 'Control+Alt+N',
+  speechPrefer: 'accuracy',
+  dictationModel: '',
+  transcriptsModel: '',
+  speechTestAgreed: false,
+  speechTestDeclinedKey: '',
+  speechTestDeclinedAt: 0,
   startWithWindows: true,
   naturalDismissed: false,
   introSeen: false,
@@ -138,6 +155,12 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     dictateKey: key(r.dictateKey, DEFAULTS.dictateKey),
     englishKey: key(r.englishKey, DEFAULTS.englishKey),
     noteKey: key(r.noteKey, DEFAULTS.noteKey),
+    speechPrefer: r.speechPrefer === 'speed' ? 'speed' : 'accuracy',
+    dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),
+    transcriptsModel: key(r.transcriptsModel, DEFAULTS.transcriptsModel),
+    speechTestAgreed: flag(r.speechTestAgreed, DEFAULTS.speechTestAgreed),
+    speechTestDeclinedKey: key(r.speechTestDeclinedKey, DEFAULTS.speechTestDeclinedKey),
+    speechTestDeclinedAt: typeof r.speechTestDeclinedAt === 'number' && Number.isFinite(r.speechTestDeclinedAt) ? r.speechTestDeclinedAt : 0,
     startWithWindows: flag(r.startWithWindows, DEFAULTS.startWithWindows),
     naturalDismissed: flag(r.naturalDismissed, DEFAULTS.naturalDismissed),
     introSeen: flag(r.introSeen, DEFAULTS.introSeen),

@@ -8,18 +8,32 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+import type { Bench } from './speechplan'
+
 export const SPEECH_PORT = 8765
 
 const RETRIES = [2, 5, 10, 30] // seconds before each new start; after the last it stays down
 
 export type SpeechServiceState = 'off' | 'starting' | 'ready' | 'down'
 
-/** The engine's /health, as much of it as Altype reads. */
+export type SpeechTestState = { state: 'idle' | 'waiting' | 'running' | 'done' | 'failed'; done: number; total: number; current: string; message: string; at: string }
+
+/** The engine's /health, as much of it as Altype reads (the optional parts come from engines of 0.2 on). */
 export type SpeechHealth = {
   version: string
   device: 'cuda' | 'cpu' | null
   parts: { core: boolean; gpu: boolean; speakers: boolean }
-  models: Record<'transcripts' | 'dictation', { name: string; state: 'ready' | 'missing' | 'downloading'; progress?: number }>
+  /** The model each feature has now, from the plan, and where it runs. */
+  models: Record<'transcripts' | 'dictation', { name: string; state: 'ready' | 'missing' | 'downloading'; progress?: number; device?: 'cuda' | 'cpu'; compute?: string }>
+  /** The models downloaded (catalog names). */
+  downloaded?: string[]
+  /** Why the card is not used though it is there. */
+  fallback?: string | null
+  /** The speed test. */
+  calibration?: SpeechTestState
+  bench?: Bench
+  /** Where speakers are told apart: on the card when torch's CUDA build is installed. */
+  speakersDevice?: 'cuda' | 'cpu'
   diarization: 'ready' | 'missing' | 'needs-token' | 'checking' | 'downloading' | 'bad-token' | 'no-access' | 'failed'
   diarizationMessage: string
   busy: string | null

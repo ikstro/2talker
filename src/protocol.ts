@@ -1,14 +1,16 @@
 // Messages between the main process and the card, the small window that
 // shows one picked text or one snipped piece of the screen at a time.
+import type { DeviceProfile } from './hardware'
 import type { WordTime } from './kokoro'
 import type { Gloss } from './lemma'
 import type { NaturalState } from './natural'
 import type { Settings } from './settings'
 import type { SpeechPackState, SpeechPart } from './speechpack'
+import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
 import type { SavedWord } from './words'
 
-export type { Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechResult, WordTime }
+export type { Choice, DeviceProfile, Feature, FeaturePlan, Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechPlan, SpeechResult, WordTime }
 
 /**
  * What the card is for, and where the text came from. To listen to it, in
@@ -107,6 +109,18 @@ export type SpeechView = {
   /** The Chrome extension's folder, for Load unpacked. */
   extensionDir: string
   download: { core: number; gpu: number; speakers: number }
+  /** What each choice takes on the disk once installed, in MB. */
+  installed: { core: number; gpu: number; speakers: number }
+  /** The model dictation downloads at its first use (0 MB: it is here), on the processor or on the card, and its time for a phrase. */
+  firstModel: { cpu: { model: string; mb: number; phrase: number }; cuda: { model: string; mb: number; phrase: number } }
+  /** Free space where the engine goes. */
+  disk: { freeMb: number; drive: string }
+  /** This computer: processor, memory, cards. */
+  device: DeviceProfile
+  /** Which model runs where and how long each takes here. */
+  plan: SpeechPlan
+  /** The speed test: offered now (the person has not agreed, and something is still unmeasured), agreed once, models it would measure. */
+  test: { offer: boolean; agreed: boolean; runs: number }
   /** The dictation keys are registered (false: another program holds one). */
   keysOk: { dictate: boolean; note: boolean; english: boolean }
 }
@@ -251,6 +265,11 @@ export type ToHost =
   | { type: 'trayClose' }
   // The speech engine.
   | { type: 'installSpeech'; parts: SpeechPart[] }
+  /** Run the speed test (the person agreed), or not now. */
+  | { type: 'testSpeech' }
+  | { type: 'declineSpeechTest' }
+  /** A speech model downloaded now, ahead of its use. */
+  | { type: 'downloadSpeechModel'; model: string }
   | { type: 'removeSpeech' }
   | { type: 'restartSpeech' }
   | { type: 'showInFolder'; path: string }

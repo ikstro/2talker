@@ -27,6 +27,10 @@ export type DictationOptions = {
   paste: (text: string) => Promise<void>
   /** The text in English; `from` is the language the engine heard. */
   toEnglish: (text: string, from: string) => Promise<string>
+  /** The languages a phrase is likely in (the person's own, English): Whisper takes one of them when it is unsure. */
+  expected: () => string[]
+  /** The language of a text by its letters and words (translate.ts), when Whisper was unsure. */
+  languageOf: (text: string) => string
   balloon: (title: string, content: string, click?: () => void) => void
   /** The engine is not installed yet: Dictate's page offers it. */
   needsEngine: () => void
@@ -108,12 +112,15 @@ export class Dictation {
   }
 
   private async typePhrase(mode: DictationMode, audio: Uint8Array): Promise<void> {
-    const r = await this.o.speech.call<{ text: string; language: string }>('POST', '/dictate?language=auto', audio)
+    const expected = this.o.expected().map(encodeURIComponent).join(',')
+    const r = await this.o.speech.call<{ text: string; language: string; sure?: number }>('POST', `/dictate?language=auto&expected=${expected}`, audio)
     if (!r.ok) return this.fail(r.error)
     let text = r.data.text.trim()
     if (!text) return this.fail('Nothing was heard')
     try {
-      if (mode === 'english' && r.data.language !== 'en') text = await this.o.toEnglish(text, r.data.language)
+      // An engine before 0.2 says nothing of how sure it is: its language is taken as it is.
+      const language = (r.data.sure ?? 1) >= 0.5 ? r.data.language : this.o.languageOf(text)
+      if (mode === 'english' && language !== 'en') text = await this.o.toEnglish(text, language)
     } catch (error) {
       return this.fail(`Could not translate: ${error instanceof Error ? error.message : String(error)}`)
     }

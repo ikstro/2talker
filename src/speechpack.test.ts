@@ -4,7 +4,7 @@ import * as path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { downloadMb, extrasFor, normalizeParts, SpeechPack, UV, type Run } from './speechpack'
+import { downloadMb, extrasFor, installedMb, normalizeParts, SpeechPack, UV, type Run } from './speechpack'
 
 describe('parts', () => {
   it('maps parts to extras, speakers on the card replacing gpu', () => {
@@ -12,12 +12,16 @@ describe('parts', () => {
     expect(extrasFor(['core', 'gpu'])).toEqual(['gpu'])
     expect(extrasFor(['core', 'speakers'])).toEqual(['speakers'])
     expect(extrasFor(['core', 'gpu', 'speakers'])).toEqual(['speakers-gpu'])
+    // A card too small for both models: Whisper on it, speakers on the processor.
+    expect(extrasFor(['core', 'gpu', 'speakers'], false)).toEqual(['gpu', 'speakers'])
   })
 
   it('counts the download', () => {
     expect(downloadMb(['core'])).toBe(160)
     expect(downloadMb(['core', 'gpu'])).toBe(160 + 1150)
     expect(downloadMb(['core', 'gpu', 'speakers'])).toBe(160 + 3000)
+    expect(downloadMb(['core', 'gpu', 'speakers'], false)).toBe(160 + 1150 + 250)
+    expect(installedMb(['core', 'gpu'])).toBe(330 + 1700)
   })
 
   it('keeps core first and drops repeats', () => {

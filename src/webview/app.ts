@@ -19,7 +19,8 @@ import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
 import { bad, btn, chip, grp, link, linkBtn, post, row, seg, select, toggle, toggleKnob, warn } from './ui'
-import { api, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRow, onRedraw, pickKb, running, saveEngine, speakerRows, toast } from './speech'
+import { seconds } from '../speechplan'
+import { api, cardNote, computerRows, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, speakerRows, testOffer, toast } from './speech'
 import { backToList, enterTranscripts, leaveTranscripts, newRows, openTranscript, setTranscriptHooks, transcriptsBody, transcriptsCap } from './transcripts'
 
 declare global {
@@ -166,13 +167,14 @@ function cycleOf(v: AppView): KeyboardLayout[] {
 const naturalOn = (v: AppView) => v.natural.status === 'ready' && (v.settings.voice === '' || v.settings.voice.startsWith(NATURAL_PREFIX))
 const pairOf = (v: AppView) => `${v.settings.native} ⇄ English`
 
-/** What Dictate runs on: the speech engine, once it is here. */
+/** What Dictate runs on, and how quick it is here: the speech engine's model, once the engine is here. */
 function engineCap(v: AppView): string {
   const p = v.speech.pack
   if (p.status === 'installing' && !installed(v)) return `downloading ${Math.round((p.progress ?? 0) * 100)}%`
   if (!installed(v)) return 'downloads once'
-  const d = v.speech.health?.device
-  return d === 'cuda' ? 'Whisper · graphics card' : d === 'cpu' ? 'Whisper · processor' : 'Whisper'
+  if (!running(v)) return 'Whisper'
+  const c = v.speech.plan.dictation.chosen
+  return `${c.label} · ${c.device === 'cuda' ? 'graphics card' : 'processor'} · ≈${seconds(c.estimate)}`
 }
 
 /** What an action is called, what it runs on, and what it does. */
@@ -263,7 +265,13 @@ function readiness(v: AppView): (Node | string)[] {
       : n.status === 'failed'
         ? [el('b', {}, 'Windows voice'), ' ready (the natural voice could not download)']
         : [el('b', {}, naturalOn(v) ? 'natural voice' : 'Windows voice'), ' ready']
-  return [el('b', {}, pairOf(v)), ` ${translator} · `, ...voice, ' · runs on this computer']
+  const sp = v.speech
+  const speech: (Node | string)[] = !installed(v)
+    ? sp.pack.status === 'installing'
+      ? [' · ', el('b', {}, 'speech'), ` ${Math.round((sp.pack.progress ?? 0) * 100)}%`]
+      : []
+    : [' · ', el('b', {}, 'speech'), running(v) ? ' ready' : sp.service === 'down' ? ' stopped' : ' starting']
+  return [el('b', {}, pairOf(v)), ` ${translator} · `, ...voice, ...speech, ' · runs on this computer']
 }
 
 function homeRow(action: Action, v: AppView): HTMLElement {
@@ -1089,13 +1097,6 @@ function screenPage(v: AppView): HTMLElement[] {
 /** A folder or file, in a note: its end shows when it is long. */
 const pathNote = (path: string) => el('small', { class: 'path', title: path }, el('bdi', {}, path))
 
-async function prepareDictation(): Promise<void> {
-  try {
-    await api('POST', '/dictate/prepare')
-  } catch (error) {
-    fault(error)
-  }
-}
 
 /** Where notes go: the knowledge base folder and the folder inside it, the engine's own settings. */
 function kbRows(v: AppView): HTMLElement[] {
@@ -1122,6 +1123,7 @@ function dictatePage(v: AppView): HTMLElement[] {
   const offer = engineRows(v, 'Dictate')
   return [
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
+    testOffer(v),
     grp('Keys'),
     keyRow('dictateKey', 'Dictate', 'types what you say where the cursor is', !k.dictate),
     keyRow('englishKey', 'Dictate in English', `say it in ${s.native}, English is typed`, !k.english),
@@ -1129,7 +1131,7 @@ function dictatePage(v: AppView): HTMLElement[] {
     row('Tap the key, talk, tap it again', ['Esc while it records throws it away'], null),
     grp('Knowledge base'),
     ...kbRows(v),
-    ...(running(v) ? [grp('Speech model'), modelRow('Dictation', v.speech.health?.models.dictation, 'downloads with the first phrase', () => void prepareDictation())] : []),
+    ...(running(v) ? [grp('Speech model'), ...modelRows(v, 'dictation')] : []),
     el('p', { class: 'privacy' }, icon('lock'), 'Speech is recognized on this computer; nothing is sent anywhere.'),
   ].filter((n): n is HTMLElement => n !== null)
 }
@@ -1151,6 +1153,7 @@ function transcribePage(v: AppView): HTMLElement[] {
   const offer = engineRows(v, 'Transcribe')
   return [
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
+    testOffer(v),
     ...(running(v) ? [grp('New transcription'), ...newRows(v)] : []),
     ...(installed(v) ? [grp('Speakers'), ...speakerRows(v)] : []),
     grp('Google Meet'),
@@ -1158,7 +1161,7 @@ function transcribePage(v: AppView): HTMLElement[] {
     ...(running(v)
       ? [
           grp('Speech model'),
-          modelRow('Transcription', v.speech.health?.models.transcripts, 'downloads with the first transcription'),
+          ...modelRows(v, 'transcripts'),
           row('Every transcript, searched by its words', [], linkBtn('Transcripts', () => openPage('transcripts'))),
         ]
       : []),
@@ -1461,18 +1464,18 @@ function speechSettings(v: AppView): HTMLElement[] {
   out.push(...work)
   const service = { off: 'off', starting: 'starting…', ready: h?.busy ? 'running · transcribing now' : 'running', down: 'stopped' }[sp.service]
   out.push(
+    row('Graphics card', [cardNote(v)], null),
     row(
-      'Graphics card',
-      [
-        !p.nvidia
-          ? 'none found · runs on the processor'
-          : !hasPart(v, 'gpu')
-            ? 'NVIDIA found · add its part to use it'
-            : h?.device === 'cpu'
-              ? 'NVIDIA found, but the engine runs on the processor'
-              : 'NVIDIA · speech is recognized on it',
-      ],
-      null,
+      'Speech models',
+      [v.settings.speechPrefer === 'speed' ? 'quicker ones, a little less accurate' : 'the most accurate ones this computer runs in time'],
+      seg(
+        v.settings.speechPrefer,
+        [
+          ['accuracy', 'Accuracy'],
+          ['speed', 'Speed'],
+        ],
+        speechPrefer => post({ type: 'saveSettings', patch: { speechPrefer } }),
+      ),
     ),
     row('Service', [`${service} · 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn('Restart', () => post({ type: 'restartSpeech' }), p.status !== 'ready')),
   )
@@ -1557,6 +1560,7 @@ function settingsPage(v: AppView): HTMLElement[] {
       ),
     ),
     grp('This computer'),
+    ...computerRows(v),
     toggle('Start with Windows', s.startWithWindows, startWithWindows => save({ startWithWindows })),
     row(
       `Version ${v.version}`,

@@ -1,0 +1,128 @@
+{
+  "about": "The speech models Altype can use, read by the engine (asr.py) and by Altype (src/speechplan.ts). rank: how accurate, higher is better. phrase: seconds to recognize a 7 s phrase as Dictate does; rtf: seconds per second of a long recording as Transcribe does (words with their times). Both are first guesses, measured on an i9-9900K (cpu, int8) and an RTX 2080 SUPER (cuda, float16) on 2026-10-28, until this computer is tested. Whisper pads every phrase to a 30 s window, so a phrase costs one window whatever its length; turbo's decoder is light, so on long recordings it is nearly as quick as small. ramMb: memory on the processor; vramMb: on the card, per compute type.",
+  "speakers": {
+    "cpu": {
+      "rtf": 0.8
+    },
+    "cuda": {
+      "rtf": 0.03
+    }
+  },
+  "models": [
+    {
+      "name": "tiny",
+      "label": "Whisper tiny",
+      "about": "fastest, rough",
+      "backend": "whisper",
+      "repo": "Systran/faster-whisper-tiny",
+      "bytes": 77000000,
+      "rank": 1,
+      "languages": "all",
+      "cpu": {
+        "phrase": 0.25,
+        "rtf": 0.05
+      },
+      "cuda": {
+        "phrase": 0.1,
+        "rtf": 0.02
+      },
+      "ramMb": 300,
+      "vramMb": {
+        "float16": 400,
+        "int8_float16": 300
+      }
+    },
+    {
+      "name": "base",
+      "label": "Whisper base",
+      "about": "fast, fair",
+      "backend": "whisper",
+      "repo": "Systran/faster-whisper-base",
+      "bytes": 147000000,
+      "rank": 2,
+      "languages": "all",
+      "cpu": {
+        "phrase": 0.45,
+        "rtf": 0.09
+      },
+      "cuda": {
+        "phrase": 0.12,
+        "rtf": 0.03
+      },
+      "ramMb": 450,
+      "vramMb": {
+        "float16": 500,
+        "int8_float16": 400
+      }
+    },
+    {
+      "name": "small",
+      "label": "Whisper small",
+      "about": "good",
+      "backend": "whisper",
+      "repo": "Systran/faster-whisper-small",
+      "bytes": 486000000,
+      "rank": 3,
+      "languages": "all",
+      "cpu": {
+        "phrase": 1.4,
+        "rtf": 0.2
+      },
+      "cuda": {
+        "phrase": 0.22,
+        "rtf": 0.055
+      },
+      "ramMb": 900,
+      "vramMb": {
+        "float16": 1000,
+        "int8_float16": 700
+      }
+    },
+    {
+      "name": "large-v3-turbo",
+      "label": "Whisper turbo",
+      "about": "very good",
+      "backend": "whisper",
+      "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+      "bytes": 1620000000,
+      "rank": 5,
+      "languages": "all",
+      "cpu": {
+        "phrase": 4.5,
+        "rtf": 0.25
+      },
+      "cuda": {
+        "phrase": 0.26,
+        "rtf": 0.025
+      },
+      "ramMb": 2000,
+      "vramMb": {
+        "float16": 2600,
+        "int8_float16": 1600
+      }
+    },
+    {
+      "name": "large-v3",
+      "label": "Whisper large",
+      "about": "the most accurate, slow",
+      "backend": "whisper",
+      "repo": "Systran/faster-whisper-large-v3",
+      "bytes": 3090000000,
+      "rank": 6,
+      "languages": "all",
+      "cpu": {
+        "phrase": 9.0,
+        "rtf": 0.8
+      },
+      "cuda": {
+        "phrase": 0.5,
+        "rtf": 0.06
+      },
+      "ramMb": 3600,
+      "vramMb": {
+        "float16": 4600,
+        "int8_float16": 2700
+      }
+    }
+  ]
+}

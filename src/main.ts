@@ -221,6 +221,8 @@ function saveSettings(patch: Partial<Settings>): void {
   if ([...ACTION_KEYS, ...DICTATION_KEYS].some(k => k in patch)) registerShortcuts()
   if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
   if ('theme' in patch) applyTheme()
+  // The speech models are chosen from these (speechplan.ts): the plan again, sent to the engine.
+  if (speech && (['native', 'speechPrefer', 'dictationModel', 'transcriptsModel', 'speechTestAgreed'] as const).some(k => k in patch)) speech.replan()
   refreshTray()
   if (shown) postCard()
   postApp()
@@ -601,6 +603,16 @@ function onMessage(message: ToHost): void {
         () => (registerShortcuts(), applyKeyboard()),
         error => console.warn('Altype: the speech engine did not install', error),
       )
+      return
+    case 'testSpeech':
+      saveSettings({ speechTestAgreed: true })
+      void speech.test(true)
+      return
+    case 'declineSpeechTest':
+      saveSettings({ speechTestDeclinedKey: speech.declineKey(), speechTestDeclinedAt: Date.now() })
+      return
+    case 'downloadSpeechModel':
+      void speech.downloadModel(message.model).then(() => postApp())
       return
     case 'removeSpeech':
       void speech.remove().then(() => (registerShortcuts(), applyKeyboard()))
@@ -1324,6 +1336,7 @@ function setUpSpeechEngine(): void {
     port: speechPort,
     open: url => openStream(url),
     ...(TEST_HOME ? { testHome: TEST_HOME } : {}),
+    settings: () => settings,
     onChange: () => {
       postApp()
       refreshTray()
@@ -1336,12 +1349,16 @@ function setUpSpeechEngine(): void {
     speech,
     paste: typeText,
     toEnglish: (text, from) => translatePlain(text, from, 'en', translator.translate),
+    expected: () => [...new Set([langCode(settings.native), 'en'])],
+    languageOf: text => languageOf(text, settings.native, languageWords()),
     balloon,
     needsEngine: () => openApp('dictate'),
     openTranscript,
     onChange: () => refreshTray(),
   })
   speech.start()
+  // Windows is asked about the cards and the battery once Altype is up: it takes a second or two.
+  setTimeout(() => void speech.probe().catch(error => console.warn('Altype: could not look at this computer', error)), 4000)
 }
 
 /** A page's request with an answer: the speech engine's API, a folder to pick, a transcript to save. */

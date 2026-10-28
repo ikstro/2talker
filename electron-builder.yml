@@ -18,6 +18,8 @@ files:
   # an environment installed outside the app (src/speechpack.ts). The extension
   # is a folder Chrome loads unpacked.
   - engine/*.py
+  - engine/models.json
+  - engine/calibration/**
   - engine/pyproject.toml
   - engine/uv.lock
   - extension/**

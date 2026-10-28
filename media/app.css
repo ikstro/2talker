@@ -1064,6 +1064,55 @@ button.chip:hover {
   color: var(--muted);
 }
 
+/* An offer answered once, Run or Not now: the speed test. */
+.offer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 2px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border-soft));
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.offer > .codicon {
+  flex: none;
+  margin-top: 1px;
+  font-size: 16px;
+  color: var(--accent);
+}
+
+.offer .ot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.offer b {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--strong);
+}
+
+.offer small {
+  font: 400 var(--t-caption) / 1.5 var(--mono);
+  color: var(--muted);
+}
+
+.offer .acts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+/* A model that cannot run here: shown, with why, but quiet. */
+.row.dim .l {
+  opacity: 0.55;
+}
+
 .warn .codicon,
 .aside .codicon,
 .privacy .codicon {

@@ -4,11 +4,16 @@ Run: python app.py [--port 8765]. Only this computer can reach it; a web page
 cannot call it either (see `guard`), only the app (no Origin) and the extension.
 
 What other apps may use, and keep using:
-  POST /dictate?language=auto|ru|en   a short recording (any format) -> {text, language}
+  POST /dictate?language=auto|<code>&expected=ru,en
+                                      a short recording (any format) -> {text, language, sure}
+                                      (`expected`: the languages likely spoken, when Whisper is unsure)
   POST /dictate/prepare               loads the dictation model, so the next phrase is quick
   POST /transcripts {path}            a file on this computer -> a transcript in the library
   POST /recordings ...                a recording that arrives in chunks (the extension)
   GET  /health                        what is installed (parts), loaded and busy
+
+Altype alone uses: PUT /settings {plan} (which model runs where, made from this
+computer's measurements), POST /calibrate (the speed test), POST /models/<name>/download.
 """
 
 from __future__ import annotations
@@ -37,11 +42,12 @@ import audio
 import diarize
 import export
 import notes
+from bench import Calibrator
 from jobs import Worker, finish_recording
-from settings import APP_DIR, CPU_DICTATION, Settings, adopt_altscribe
+from settings import APP_DIR, MODELS, Settings, adopt_altscribe
 from store import Store, now_iso
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 PORT = 8765
 SOURCES = ("file", "mic", "meet", "note")
 TRACKS = ("main", "mic", "tab")
@@ -66,6 +72,8 @@ class State:
 state = State()
 worker = Worker(settings, state.get_store)
 setup = diarize.Setup()
+# The speed test runs only while nothing else does: no transcription, no phrase being recognized.
+calibrator = Calibrator(worker.bench, lambda: worker.idle() and not _dictating.locked(), worker.unload_all, lambda: worker.activity, worker.threads)
 app = FastAPI(title="Altype speech", version=VERSION)
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"chrome-extension://[a-p]{32}", allow_methods=["*"], allow_headers=["*"])
 
@@ -89,24 +97,28 @@ def whisper_status(model: str) -> str:
     return "ready" if asr.downloaded(model) else "missing"
 
 
-def dictation() -> tuple:
-    """Who dictates: on the card, the transcripts' own model (already loaded, two workers); on the CPU, a small one."""
-    if asr.gpu():
-        return worker.transcriber, settings["model"]
-    return worker.dictator, CPU_DICTATION
+def planned(feature: str) -> dict:
+    """The model the plan gives a feature on the device in use, how far it is downloaded, and where it runs."""
+    device, entry = worker.entry(feature)
+    return {**asr.model_state(entry["model"]), "device": device, "compute": entry.get("compute") or ("int8" if device == "cpu" else "float16")}
 
 
 @app.get("/health")
 def health():
     s = settings.get()
-    _, dictation_model = dictation()
+    bench = s["bench"]
     return {
         "ok": True,
         "version": VERSION,
         "device": worker.device,
         "parts": {"core": True, "gpu": asr.gpu(), "speakers": diarize.installed()},
         "whisper": whisper_status(s["model"]),
-        "models": {"transcripts": asr.model_state(s["model"]), "dictation": asr.model_state(dictation_model)},
+        "models": {"transcripts": planned("transcripts"), "dictation": planned("dictation")},
+        "downloaded": [m for m in MODELS if asr.downloaded(m)],
+        "fallback": worker.fallback,
+        "calibration": calibrator.status(),
+        "bench": {"fingerprint": bench.get("fingerprint", ""), "runs": bench.get("runs", {})},
+        "speakersDevice": "cuda" if asr.torch_cuda() and asr.gpu() else "cpu",
         "diarization": diarize.status(s["hfToken"], setup),
         "diarizationMessage": setup.message,
         "busy": worker.current,
@@ -123,9 +135,9 @@ _dictating = threading.Lock()
 
 
 def _prepare() -> None:
-    transcriber, model = dictation()
     try:
-        transcriber.warm(model)
+        transcriber, _ = worker.dictation_model()
+        transcriber.warm()
     except Exception:
         log.exception("could not load the dictation model")
 
@@ -134,12 +146,11 @@ def _prepare() -> None:
 def prepare_dictation():
     """Loads (and the first time downloads) the dictation model in the background; /health shows how far."""
     threading.Thread(target=_prepare, name="altype-prepare", daemon=True).start()
-    _, model = dictation()
-    return asr.model_state(model)
+    return planned("dictation")
 
 
 @app.post("/dictate")
-async def dictate(request: Request, language: str = "auto"):
+async def dictate(request: Request, language: str = "auto", expected: str = ""):
     """A short recording to its text. Nothing is kept: the sound is read and thrown away."""
     data = await request.body()
     if not data:
@@ -159,17 +170,55 @@ async def dictate(request: Request, language: str = "auto"):
     if seconds > DICTATION_LONGEST:
         raise HTTPException(413, "Too long for dictation: transcribe it instead")
     if seconds < 0.3:
-        return {"text": "", "language": language, "seconds": round(seconds, 2)}
+        return {"text": "", "language": language, "sure": 0, "seconds": round(seconds, 2)}
+    likely = [c.strip() for c in expected.split(",") if c.strip()][:4]
 
     def run():
         with _dictating:
-            transcriber, model = dictation()
-            return transcriber.dictate(samples, model, None if language == "auto" else language, settings["hotwords"])
+            worker.activity += 1
+            transcriber, entry = worker.dictation_model()
+            beam = entry.get("beam") or (5 if transcriber.device == "cuda" else 2)
+            started = time.perf_counter()
+            out = transcriber.dictate(samples, None if language == "auto" else language, likely, settings["hotwords"], beam)
+            worker.bench.phrase(transcriber.name, transcriber.device, transcriber.compute, seconds, time.perf_counter() - started)
+            return out
 
     started = time.perf_counter()
-    text, spoken = await run_in_threadpool(run)
+    text, spoken, sure = await run_in_threadpool(run)
     worker.last_work = time.monotonic()
-    return {"text": text, "language": spoken, "seconds": round(seconds, 2), "took": round(time.perf_counter() - started, 2)}
+    return {"text": text, "language": spoken, "sure": round(sure, 3), "seconds": round(seconds, 2), "took": round(time.perf_counter() - started, 2)}
+
+
+# How fast this computer is ------------------------------------------------
+
+@app.post("/calibrate", status_code=202)
+def calibrate(body: dict = Body(...)):
+    """The speed test, in the background: {runs: [{model, device, compute?, beam?}], expected: [codes]}.
+
+    Only models already downloaded are tested; /health's `calibration` says how far it is."""
+    runs = [r for r in body.get("runs") or [] if isinstance(r, dict) and r.get("model") in MODELS and asr.downloaded(r["model"])]
+    if not runs:
+        raise HTTPException(409, "No downloaded model to test")
+    expected = [c for c in body.get("expected") or [] if isinstance(c, str)][:4]
+    if not calibrator.start(runs, expected):
+        raise HTTPException(409, "A test is running")
+    return calibrator.status()
+
+
+@app.post("/models/{name}/download")
+def download_model(name: str):
+    """A model downloaded now (it would be at its first use otherwise); /health's `downloaded` shows when it is here."""
+    if name not in MODELS:
+        raise HTTPException(404, "No such model")
+    if not asr.downloaded(name) and name not in asr.fetching:
+        def fetch():
+            try:
+                asr.fetch(name)
+            except Exception:
+                log.exception("could not download %s", name)
+
+        threading.Thread(target=fetch, name=f"altype-fetch-{name}", daemon=True).start()
+    return asr.model_state(name)
 
 
 # Settings -----------------------------------------------------------------
@@ -187,7 +236,13 @@ def get_settings():
 
 @app.put("/settings")
 def put_settings(changes: dict = Body(...)):
-    """A new Hugging Face token is checked, and the speakers' model downloaded, right away."""
+    """A new Hugging Face token is checked, and the speakers' model downloaded, right away.
+
+    A plan from another computer (its fingerprint) starts the speed numbers again."""
+    changes = {k: v for k, v in changes.items() if k != "bench"}
+    plan = changes.get("plan")
+    if isinstance(plan, dict) and isinstance(plan.get("fingerprint"), str) and plan["fingerprint"] != settings["bench"].get("fingerprint", ""):
+        worker.bench.reset(plan["fingerprint"])
     settings.update(changes)
     if isinstance(changes.get("hfToken"), str) and changes["hfToken"].strip():
         setup.start(settings["hfToken"])
