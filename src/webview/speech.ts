@@ -189,7 +189,7 @@ export const running = (v: AppView) => installed(v) && v.speech.service === 'rea
 let withGpu = true
 
 /** A part being installed or removed now: its line with the bar, or undefined. */
-function packWork(v: AppView): HTMLElement | undefined {
+export function packWork(v: AppView): HTMLElement | undefined {
   const p = v.speech.pack
   if (p.status === 'removing') return row('Removing the speech engine…', [], null)
   if (p.status !== 'installing') return undefined

@@ -24,6 +24,7 @@ import { caps, COPY_TWICE } from './keycaps'
 import { lucide, type LucideName } from './lucide'
 import { aside, bad, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, warn } from './ui'
 import { seconds } from '../speechplan'
+import { resetSetup, setupNodes } from './setup'
 import { api, cardNote, computerRows, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, speakerRows, testOffer, toast } from './speech'
 import { backToList, enterTranscripts, leaveTranscripts, newRows, openTranscript, setTranscriptHooks, transcriptsBody, transcriptsCap } from './transcripts'
 
@@ -1999,6 +2000,8 @@ function showTab(tab: AppTab): void {
 
 /** The first `app` message: Home, the moment if it has not played yet, or the place asked for. */
 function start(v: AppView): void {
+  // The setup comes first; the moment plays after it.
+  if (!v.settings.setupDone) return
   const asked = askedTab && askedTab !== 'home' && askedTab !== 'howto' ? askedTab : undefined
   // A place asked for wins; the moment waits for an opening that starts at Home.
   if (askedTranscript) return openTranscript(askedTranscript)
@@ -2028,6 +2031,27 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
   view = m.view
   if (m.view.speech.service !== 'ready') forgetEngine()
   updateNav()
+  // A fresh install: the setup takes Home's place until it is finished or skipped.
+  if (!m.view.settings.setupDone) {
+    if (open) closePage(false)
+    if (moment) finishMoment()
+    root.classList.add('setup')
+    home.classList.add('setup')
+    renderSetup()
+    return
+  }
+  if (root.classList.contains('setup')) {
+    root.classList.remove('setup')
+    home.classList.remove('setup')
+    resetSetup()
+    renderHome(true)
+    // The opening moment plays once the setup is over, as it would on a first opening.
+    if (!m.view.settings.introSeen) {
+      if (reduced.matches) save({ introSeen: true })
+      else playMoment(true)
+    }
+    return
+  }
   renderHome()
   if (open) {
     fillHeader()
@@ -2035,6 +2059,12 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
   }
   if (first) start(m.view)
 })
+
+/** The setup's steps in Home's place, drawn again on every snapshot and on every change made in it. */
+function renderSetup(): void {
+  if (!view) return
+  home.replaceChildren(...setupNodes(view, { save, post, redraw: renderSetup }))
+}
 
 // A click or a key during the moment takes it to its end.
 window.addEventListener('pointerdown', () => moment && moment.raf && finishMoment(), true)

@@ -38,7 +38,7 @@ import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
 import { Dictation } from './dictation'
 import { DictationLog } from './dictationlog'
-import { DictionaryStore } from './dictstore'
+import { DOWNLOADABLE, DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { frameWindow, WIN11 } from './dwm'
 import { createTranslator, NATIVES } from './engine'
@@ -54,7 +54,7 @@ import { recognize } from './ocr'
 import { adoptOldFolders } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
-import type { AppTab, AppView, CardKind, CardState, DictationMode, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
+import type { AppTab, AppView, CardKind, CardState, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, translationHtml } from './render'
 import { CARD_WIDTH, myLanguages, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
@@ -334,6 +334,8 @@ function setUpSpeech(): void {
       return new Uint8Array(await res.arrayBuffer())
     },
     onReady: () => post({ type: 'dictReady' }),
+    // The setup page follows the download: started, here or failed.
+    onChange: () => postApp(),
   })
 }
 
@@ -355,6 +357,27 @@ function voiceMade(took: number, seconds: number): void {
 function naturalState(): NaturalState {
   const rtf = voiceSpeed && voiceSpeed.n >= VOICE_SURE_AFTER ? Math.round(voiceSpeed.rtf * 100) / 100 : undefined
   return { ...voiceStore.state, dismissed: settings.naturalDismissed, ...(rtf !== undefined ? { rtf } : {}) }
+}
+
+/** The word dictionary for the person's language as the window shows it; "absent" is one that can be downloaded. */
+function dictionaryStatus(): DictionaryStatus {
+  const code = langCode(settings.native)
+  const status = dictionaries.status(code)
+  if (status === 'off') return DOWNLOADABLE.has(code) ? 'absent' : 'none'
+  return status
+}
+
+/** The translator for the person's language downloaded ahead of its first use; the window follows it at most four times a second. */
+function prepareTranslator(): void {
+  let last = 0
+  translator
+    .prepare(langCode(settings.native), () => {
+      if (Date.now() - last < 250) return
+      last = Date.now()
+      postApp()
+    })
+    .catch(error => console.warn('Altype: the translator did not download', error))
+    .finally(() => postApp())
 }
 
 function stopSpeaking(): void {
@@ -524,6 +547,8 @@ function appView(): AppView {
     update: updater.status,
     keysOk,
     translator: translator.state(langCode(settings.native)).status,
+    translatorState: translator.state(langCode(settings.native)),
+    dictionary: { status: dictionaryStatus() },
     layouts: keyboardLayouts(),
     ...(keyboardTrouble ? { keyboardTrouble } : {}),
     ...(lastApp ? { lastApp } : {}),
@@ -713,10 +738,16 @@ function onMessage(message: ToHost): void {
       dictation.clearLog()
       return
     case 'installSpeech':
-      speech.install(message.parts).then(
+      speech.install(message.parts, message.models).then(
         () => (registerShortcuts(), applyKeyboard()),
         error => console.warn('Altype: the speech engine did not install', error),
       )
+      return
+    case 'prepareTranslator':
+      prepareTranslator()
+      return
+    case 'prepareDictionary':
+      dictionaries.get(langCode(settings.native), true)
       return
     case 'testSpeech':
       saveSettings({ speechTestAgreed: true })
@@ -1566,7 +1597,8 @@ function start(): void {
   log(`start: Altype ${app.getVersion()}, Electron ${process.versions.electron}, Windows ${process.getSystemVersion()}${TEST_HOME ? ', test home' : ''}`)
   const firstRun = !fs.existsSync(settingsFile())
   settings = readSettings()
-  if (firstRun) saveSettings({})
+  // Only a fresh install sees the setup; a settings file from before it counts as set up (the default).
+  if (firstRun) saveSettings({ setupDone: false })
   applyTheme()
   // Windows' own light or dark, switched while Altype runs (the theme "system"), repaints the windows' ground and edge.
   nativeTheme.on('updated', applyColors)

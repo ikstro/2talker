@@ -22,6 +22,9 @@ import { vocabularyFor } from './vocabulary'
 const DECLINE_MS = 24 * 3600_000
 /** A test run by itself is not run again for the same models sooner than this (one that failed, say). */
 const RETEST_MS = 3600_000
+/** How often a model being downloaded is asked about, and how many asks it has to show as running (each ask may start it again). */
+const MODEL_PROBE_MS = 3000
+const MODEL_START_PROBES = 2
 
 export type SpeechHostOptions = {
   /** %LOCALAPPDATA%\Altype\speech: the environment, models, uv. */
@@ -228,20 +231,56 @@ export class SpeechHost {
     }
   }
 
-  /** Installs parts (with the ones there), then starts the service, sends it the plan and has it fetch the dictation model. */
-  async install(parts: SpeechPart[]): Promise<void> {
+  /**
+   * Installs parts (with the ones there), then starts the service, sends it the plan and has it fetch the dictation model;
+   * then `models` (the setup's picks), one after another.
+   */
+  async install(parts: SpeechPart[], models: string[] = []): Promise<void> {
     this.service.stop()
     try {
       await this.pack.install(parts)
     } finally {
       if (this.installed) {
         await this.service.start()
-        void this.whenReady().then(async () => {
+        void this.whenReady().then(async ready => {
+          if (!ready) return
           this.replan()
           await this.push()
           await this.call('POST', '/dictate/prepare')
+          await this.fetchModels(models)
         })
       }
+    }
+  }
+
+  /** Each model downloaded in turn, the ones here skipped; a failure is logged and the next one goes on. */
+  private async fetchModels(models: string[]): Promise<void> {
+    for (const model of models) {
+      if (this.service.health?.downloaded?.includes(model)) continue
+      try {
+        await this.fetchModel(model)
+      } catch (error) {
+        console.warn(`Altype: the speech model ${model} did not download`, error)
+      }
+    }
+  }
+
+  /**
+   * Starts a model's download and waits until it is here. The engine downloads in the background and
+   * only its download route says how a model stands, which starts the download again once one has
+   * failed; so the first "missing" after "downloading" ends the wait (that second try runs on by itself).
+   */
+  private async fetchModel(model: string): Promise<void> {
+    let seen = false
+    for (let probe = 0; ; probe++) {
+      const r = await this.call<{ state: 'ready' | 'missing' | 'downloading' }>('POST', `/models/${encodeURIComponent(model)}/download`)
+      if (!r.ok) throw new Error(r.error)
+      if (r.data.state === 'ready') return
+      if (r.data.state === 'downloading') seen = true
+      else if (seen) throw new Error('the download stopped')
+      // A download that never shows as running after a few seconds failed at once.
+      else if (probe >= MODEL_START_PROBES) throw new Error('the download did not start')
+      await new Promise(resolve => setTimeout(resolve, MODEL_PROBE_MS))
     }
   }
 

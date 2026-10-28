@@ -18,9 +18,17 @@ function setup(fetchGz: (url: string) => Promise<Uint8Array>) {
   fs.mkdirSync(bundledDir)
   fs.writeFileSync(path.join(bundledDir, 'en-ru.json'), JSON.stringify({ go: [['verb', 'идти']] }))
   const ready: string[] = []
+  const changes: string[] = []
   let now = 1_000
-  const store = new DictionaryStore({ bundledDir, cacheDir: path.join(root, 'cache'), fetchGz, onReady: c => ready.push(c), now: () => now })
-  return { store, ready, root, tick: (ms: number) => (now += ms) }
+  const store = new DictionaryStore({
+    bundledDir,
+    cacheDir: path.join(root, 'cache'),
+    fetchGz,
+    onReady: c => ready.push(c),
+    onChange: c => changes.push(`${c} ${store.status(c)}`),
+    now: () => now,
+  })
+  return { store, ready, changes, root, tick: (ms: number) => (now += ms) }
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -79,5 +87,29 @@ describe('dictionary store', () => {
     tick(RETRY_MS + 1)
     expect(store.get('pl', true).status).toBe('downloading')
     expect(asked).toBe(2)
+  })
+
+  test('the status reads no file and starts no download', async () => {
+    let asked = 0
+    const { store } = setup(async () => (asked++, gzipSync(JSON.stringify({ go: [['verb', 'ir']] }))))
+    expect(store.status('ru')).toBe('ready')
+    expect(store.status('ko')).toBe('none')
+    expect(store.status('es')).toBe('off')
+    expect(asked).toBe(0)
+    store.get('es', true)
+    expect(store.status('es')).toBe('downloading')
+    await flush()
+    expect(store.status('es')).toBe('ready')
+  })
+
+  test('says when a download starts, ends and fails', async () => {
+    const ok = setup(async () => gzipSync(JSON.stringify({ go: [['verb', 'gehen']] })))
+    ok.store.get('de', true)
+    await flush()
+    expect(ok.changes).toEqual(['de downloading', 'de ready'])
+    const bad = setup(() => Promise.reject(new Error('offline')))
+    bad.store.get('pl', true)
+    await flush()
+    expect(bad.changes).toEqual(['pl downloading', 'pl failed'])
   })
 })

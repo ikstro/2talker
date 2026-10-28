@@ -229,6 +229,29 @@
     const key = name.trim().toLowerCase();
     return LANGUAGES.find((l) => l.name.toLowerCase() === key || l.native.toLowerCase() === key || l.code === key);
   }
+  var SCRIPT_BY_CODE = {
+    ru: "Cyrillic",
+    uk: "Cyrillic",
+    bg: "Cyrillic",
+    sr: "Cyrillic",
+    kk: "Cyrillic",
+    el: "Greek",
+    ar: "Arabic",
+    fa: "Arabic",
+    he: "Hebrew",
+    hi: "Devanagari",
+    zh: "Han",
+    ja: "Japanese",
+    ko: "Hangul",
+    ka: "Georgian",
+    hy: "Armenian",
+    th: "Thai"
+  };
+  function scriptFor(name) {
+    const language = findLanguage(name);
+    if (!language) return void 0;
+    return SCRIPT_BY_CODE[language.code] ?? "Latin";
+  }
 
   // src/settings.ts
   var RATES = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
@@ -348,6 +371,13 @@
     "circle-check": '<circle cx="12" cy="12" r="10" /> <path d="m16 9-5.5 5.5L8 12" />',
     "check": '<path d="M20 6 9 17l-5-5" />',
     "link": '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /> <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />',
+    "memory-stick": '<path d="M12 12v-2" /> <path d="M12 18v-2" /> <path d="M16 12v-2" /> <path d="M16 18v-2" /> <path d="M2 11h1.5" /> <path d="M20 18v-2" /> <path d="M20.5 11H22" /> <path d="M4 18v-2" /> <path d="M8 12v-2" /> <path d="M8 18v-2" /> <rect x="2" y="6" width="20" height="10" rx="2" />',
+    "hard-drive": '<path d="M10 16h.01" /> <path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /> <path d="M21.946 12.013H2.054" /> <path d="M6 16h.01" />',
+    "laptop": '<path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z" /> <path d="M20.054 15.987H3.946" />',
+    "sparkles": '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /> <path d="M20 2v4" /> <path d="M22 4h-4" /> <circle cx="4" cy="20" r="2" />',
+    "wand-sparkles": '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" /> <path d="m14 7 3 3" /> <path d="M5 6v4" /> <path d="M19 14v4" /> <path d="M10 2v2" /> <path d="M7 8H3" /> <path d="M21 16h-4" /> <path d="M11 3H9" />',
+    "thumbs-up": '<path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /> <path d="M7 10v12" />',
+    "loader": '<path d="M12 2v4" /> <path d="m16.2 7.8 2.9-2.9" /> <path d="M18 12h4" /> <path d="m16.2 16.2 2.9 2.9" /> <path d="M12 18v4" /> <path d="m4.9 19.1 2.9-2.9" /> <path d="M2 12h4" /> <path d="m4.9 4.9 2.9 2.9" />',
     "plus": '<path d="M5 12h14" /> <path d="M12 5v14" />',
     "x": '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
     "minus": '<path d="M5 12h14" />',
@@ -771,6 +801,93 @@
   }
   var BASIS_TEXT = { measured: "measured here", scaled: "from this computer\u2019s test", guess: "first guess" };
 
+  // src/setup.ts
+  var VOICE_CORES = 4;
+  var DICTIONARY_MB = 5;
+  function recommend(v) {
+    const s = v.speech;
+    const d = s.device;
+    const plan = s.plan;
+    const cyrillic = scriptFor(v.settings.native) === "Cyrillic";
+    const weak = d.cpu.cores < VOICE_CORES;
+    const chosen = plan.transcripts.chosen;
+    const hourCpu = minutes(chosen.estimate);
+    const rough = chosen.model === "tiny" || chosen.model === "base";
+    return {
+      voice: weak ? { on: false, why: "a Windows voice is instant; the natural one would pause between sentences on this processor" } : { on: true, why: "reads like a person; this computer makes its speech faster than it plays" },
+      autoFix: cyrillic ? { on: true, why: `${v.settings.native} and English share the keyboard: a word typed in the wrong layout is typed again right` } : { on: false, why: "your language shares the Latin layout; turn it on if you also type in another" },
+      gpu: plan.offers.gpu ? { on: true, why: `speech on the graphics card: a phrase in \u2248${seconds(s.firstModel.cuda.phrase)}, not \u2248${seconds(s.firstModel.cpu.phrase)}` } : { on: false, why: d.at ? "no NVIDIA card that can take it; speech runs on the processor" : "looking at the graphics card\u2026" },
+      dictate: { on: true, why: `${s.firstModel.cpu.model} writes a phrase in \u2248${seconds(s.firstModel.cpu.phrase)} on this processor` },
+      transcribe: chosen.fits && !rough ? { on: true, why: `${chosen.label}: an hour of a meeting in \u2248${hourCpu} on this computer${plan.offers.gpu ? ", quicker on the graphics card" : ""}` } : { on: false, why: `possible, but ${rough ? "rough" : "slow"} here: ${chosen.label} writes an hour in \u2248${hourCpu}` },
+      speakers: plan.offers.speakersGpu ? { on: true, why: "who spoke when, told apart on the graphics card \xB7 a free Hugging Face key, once" } : { on: false, why: "on the processor it takes \u22480.8 s per second of sound \xB7 a free Hugging Face key, once" },
+      startWithWindows: { on: true, why: "the keys work from the first minute" }
+    };
+  }
+  function recommendedChoice(v) {
+    const r = recommend(v);
+    return {
+      voice: r.voice.on ? "natural" : "windows",
+      autoFix: r.autoFix.on,
+      layoutBadge: false,
+      gpu: r.gpu.on,
+      dictate: r.dictate.on,
+      transcribe: r.transcribe.on,
+      speakers: r.speakers.on && r.transcribe.on,
+      startWithWindows: true,
+      test: true
+    };
+  }
+  var speechNeeded = (c) => c.dictate || c.transcribe;
+  function cost(c, v) {
+    const s = v.speech;
+    const items = [];
+    let disk = 0;
+    const t = v.translatorState;
+    if (t.status !== "unsupported") {
+      const mb = t.status === "ready" ? 0 : t.size;
+      items.push({ key: "translator", label: `The translator for ${v.settings.native} \u21C4 English`, note: mb ? "Firefox Translations, once \xB7 then offline" : "here already", mb });
+      disk += mb;
+    }
+    const dict = v.dictionary.status;
+    if (dict !== "none") {
+      const mb = dict === "ready" ? 0 : DICTIONARY_MB;
+      items.push({ key: "dictionary", label: "The word dictionary", note: mb ? "meanings of English words, once" : "here already", mb });
+      disk += mb;
+    }
+    if (c.voice === "natural") {
+      const here = v.natural.status === "ready";
+      items.push({ key: "voice", label: "The natural voice", note: here ? "here already" : "Kokoro \xB7 reads on this computer", mb: here ? 0 : v.natural.size });
+      if (!here) disk += v.natural.size;
+    }
+    const parts = [];
+    const models = [];
+    if (speechNeeded(c)) {
+      const have = new Set(s.pack.parts);
+      const wanted = ["core", ...c.gpu && s.pack.nvidia ? ["gpu"] : [], ...c.transcribe && c.speakers ? ["speakers"] : []];
+      for (const part of wanted) if (!have.has(part)) parts.push(part);
+      const mb = parts.reduce((n, p) => n + s.download[p], 0);
+      const onDisk = parts.reduce((n, p) => n + s.installed[p], 0);
+      const names = { core: "speech to text", gpu: "the graphics card\u2019s part", speakers: "the speakers\u2019 part" };
+      items.push({ key: "engine", label: "The speech engine", note: parts.length ? `${parts.map((p) => names[p]).join(", ")} \xB7 ${Math.round(onDisk)} MB on the disk` : "here already", mb });
+      disk += onDisk;
+      const downloaded = new Set(s.health?.downloaded ?? s.plan.dictation.choices.filter((x) => x.downloaded).map((x) => x.model));
+      const want = [...c.dictate ? [s.plan.dictation.chosen] : [], ...c.transcribe ? [s.plan.transcripts.chosen] : []];
+      for (const m of want) {
+        if (models.includes(m.model)) continue;
+        models.push(m.model);
+        const here = downloaded.has(m.model) || m.downloaded;
+        items.push({ key: `model:${m.model}`, label: m.label, note: here ? "here already" : m.about, mb: here ? 0 : m.mb });
+        if (!here) disk += m.mb;
+      }
+    }
+    const download = items.reduce((n, i) => n + i.mb, 0);
+    const free = s.disk.freeMb;
+    return { items, download, disk, parts, models: models.filter((m) => !(s.health?.downloaded ?? []).includes(m)), fits: free <= 0 || free >= disk * 1.1 };
+  }
+  function sizeText(mb) {
+    return mb >= 1e3 ? `${(Math.round(mb / 100) / 10).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
+  }
+
   // src/webview/speech.ts
   var SpeechError = class extends Error {
     constructor(message, status) {
@@ -1102,6 +1219,278 @@
     if (hasPart(v, "speakers") && state !== "needs-token" && state !== "bad-token" && state !== "no-access" && state !== "failed") return null;
     const why = !hasPart(v, "speakers") ? "Speakers are not told apart yet: their part is not downloaded." : "Speakers are not told apart yet: a Hugging Face key is needed.";
     return aside("users", why, " ", linkBtn("Set up", go));
+  }
+
+  // src/webview/setup.ts
+  var STEPS = ["Your language", "This computer", "What you need", "Download"];
+  var CAPS = ["English is what Altype teaches", "what speech can run on here", "advised for this computer", "one button, then it goes on by itself"];
+  var step = 1;
+  var choice;
+  var started = false;
+  var firstNative = "";
+  function resetSetup() {
+    step = 1;
+    choice = void 0;
+    started = false;
+    firstNative = "";
+  }
+  function advised(node, a) {
+    if (!a.on) return node;
+    const l = node.querySelector(".l");
+    const first = l?.querySelector("small");
+    const mark2 = el("span", { class: "chip good" }, lucide("check", "s"), "Recommended");
+    if (l) l.insertBefore(mark2, first ?? null);
+    return node;
+  }
+  function setupNodes(v, h) {
+    if (!firstNative) firstNative = v.settings.native;
+    const c = choice ??= recommendedChoice(v);
+    const r = recommend(v);
+    const body = step === 1 ? languageStep(v, h) : step === 2 ? computerStep(v, h, c, r) : step === 3 ? needStep(v, h, c, r) : downloadStep(v, h, c);
+    const go = (to) => {
+      step = Math.max(1, Math.min(4, to));
+      h.redraw();
+    };
+    const finish = () => h.save({ setupDone: true, speechTestAgreed: c.test });
+    const skip = () => h.save({ setupDone: true });
+    const download = () => {
+      start(v, h, c);
+      started = true;
+      go(4);
+    };
+    const room = step === 3 ? cost(c, v).fits : true;
+    const next = step === 3 ? btn([lucide("download", "s"), "Download"], download, "primary") : step === 4 ? btn("Finish", finish, "primary") : btn(["Next", lucide("chevron-right", "s")], () => go(step + 1), "primary");
+    if (!room) next.disabled = true;
+    return [
+      el(
+        "div",
+        { class: "shead" },
+        el("div", { class: "sprog" }, ...STEPS.map((_, i) => el("i", { class: i + 1 === step ? "on" : i + 1 < step ? "done" : "" })), el("span", {}, `Step ${step} of ${STEPS.length}`)),
+        el("div", { class: "stitle-line" }, el("span", { class: "stitle" }, STEPS[step - 1]), el("span", { class: "scap" }, CAPS[step - 1])),
+        el("div", { class: "sline" })
+      ),
+      el("div", { class: "sbody" }, ...body),
+      el(
+        "div",
+        { class: "sfoot" },
+        step > 1 && !(step === 4 && started) ? linkBtn("Back", () => go(step - 1)) : null,
+        el("span", { class: "gap" }),
+        step < 4 ? linkBtn("Skip for now", skip) : null,
+        next
+      )
+    ];
+  }
+  function languageStep(v, h) {
+    const s = v.settings;
+    const nameOf = (code) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
+    const used = [s.native, "English", ...s.languages.map(nameOf)];
+    const rest = LANGUAGES.filter((l) => !used.includes(l.name));
+    const own = card(
+      "languages",
+      "Your language",
+      ["what Altype translates into and listens for; English is the language it teaches"],
+      select(
+        s.native,
+        v.languages.map((l) => [l.name, `${l.native} \xB7 ${l.name}`]),
+        (native) => {
+          choice = void 0;
+          h.save({ native });
+        }
+      )
+    );
+    if (s.native === firstNative) advised(own, { on: true, why: "" });
+    return [
+      grp("Your language"),
+      own,
+      s.native === firstNative ? aside("info", `Windows is in ${s.native}: the same language is advised.`) : null,
+      grp("Other languages you use"),
+      card(
+        "plus",
+        "Add a language",
+        ["dictation never picks another; translation and the screen\u2019s text guess among them"],
+        select("", [["", "Pick a language"], ...rest.map((l) => [l.code, `${l.name} \xB7 ${l.native}`])], (code) => code && h.save({ languages: [...s.languages, code] }))
+      ),
+      card("globe", "English", ["always"], null),
+      ...s.languages.map((code) => card("globe", nameOf(code), [], ib("x", `Remove ${nameOf(code)}`, () => h.save({ languages: s.languages.filter((x) => x !== code) }))))
+    ].filter((n) => n !== null);
+  }
+  function computerStep(v, h, c, r) {
+    const s = v.speech;
+    const d = s.device;
+    const looking = d.at === 0;
+    const gpu = mainCard(d);
+    const spin = () => el("i", { class: "spin" });
+    const cardNote2 = looking ? el("small", { class: "kstate busy" }, spin(), "looking at the graphics card\u2026") : gpu ? cardText(gpu) : "none of its own";
+    const onCard = s.plan.offers.gpu && c.gpu;
+    const verdict = onCard ? card("sparkles", "Speech can run on the graphics card", [`a dictated phrase in \u2248${seconds(s.firstModel.cuda.phrase)} with ${s.firstModel.cuda.model} \xB7 an hour of a meeting in minutes`], null) : card("sparkles", "Speech runs on the processor", [`a dictated phrase in \u2248${seconds(s.firstModel.cpu.phrase)} with ${s.firstModel.cpu.model} \xB7 an hour of a meeting in \u2248${minutes(s.plan.transcripts.chosen.estimate)}`], null);
+    verdict.classList.add("total");
+    return [
+      grp("Hardware"),
+      card("cpu", "Processor", [looking ? el("small", { class: "kstate busy" }, spin(), `${shortCpu(d.cpu.name)} \xB7 looking\u2026`) : `${shortCpu(d.cpu.name)} \xB7 ${d.cpu.cores} cores${d.laptop ? " \xB7 a laptop" : ""}`], null),
+      card("memory-stick", "Memory", [`${d.ramGb} GB`], null),
+      card("monitor", "Graphics card", [cardNote2], null),
+      grp("What it means"),
+      verdict,
+      s.plan.offers.gpu ? advised(
+        toggleCard(
+          "monitor",
+          "Use the graphics card",
+          c.gpu,
+          (on) => {
+            c.gpu = on;
+            h.redraw();
+          },
+          r.gpu.why
+        ),
+        r.gpu
+      ) : null,
+      looking ? aside("info", "Still looking at this computer; Next does not wait, the advice follows once it is known.") : null
+    ].filter((n) => n !== null);
+  }
+  function needStep(v, h, c, r) {
+    const s = v.speech;
+    const t = v.translatorState;
+    const flip = (key) => (on) => {
+      ;
+      c[key] = on;
+      if (key === "transcribe" && !on) c.speakers = false;
+      h.redraw();
+    };
+    const translatorNote = t.status === "unsupported" ? "no offline translator for this language yet" : t.status === "ready" ? `the translator for ${v.settings.native} \u21C4 English is here` : `the translator for ${v.settings.native} \u21C4 English \xB7 ${sizeText(t.size)}, once`;
+    const dictNote = { ready: "the word dictionary is here", absent: "the word dictionary \xB7 a few MB, once", downloading: "the word dictionary is coming", failed: "the word dictionary \xB7 a few MB, once", none: "no word dictionary for this language yet" }[v.dictionary.status];
+    const engineMb = s.download.core + (c.gpu && s.pack.nvidia ? s.download.gpu : 0);
+    const dictateModel = s.plan.dictation.chosen;
+    const transcribeModel = s.plan.transcripts.chosen;
+    const all = cost(c, v);
+    const total = card(
+      "hard-drive",
+      `\u2248${sizeText(all.download)} to download`,
+      [`${sizeText(all.disk)} on the disk once installed \xB7 ${s.disk.freeMb > 0 ? `${sizeText(s.disk.freeMb)} free on ${s.disk.drive}` : "free space unknown"}`, all.fits ? null : bad("Not enough room: turn something off, or free some space.")],
+      null
+    );
+    total.classList.add("total");
+    if (!all.fits) total.classList.add("bad");
+    return [
+      grp("Always"),
+      card("languages", "Listen & Translate", [translatorNote, dictNote], el("span", { class: "chip" }, "always on")),
+      advised(
+        card(
+          "volume-2",
+          "Voice",
+          [r.voice.why],
+          seg(
+            c.voice,
+            [
+              ["natural", v.natural.status === "ready" ? "Natural \xB7 here" : `Natural \xB7 ${sizeText(v.natural.size)}`],
+              ["windows", "Windows voice"]
+            ],
+            (voice) => {
+              c.voice = voice;
+              h.redraw();
+            }
+          )
+        ),
+        { on: r.voice.on, why: "" }
+      ),
+      grp("Keyboard"),
+      advised(toggleCard("keyboard", "Fix the layout as I type", c.autoFix, flip("autoFix"), r.autoFix.why), r.autoFix),
+      toggleCard("type", "Show the layout by the cursor", c.layoutBadge, flip("layoutBadge"), "a small badge whenever the layout changes"),
+      grp("Speech"),
+      advised(toggleCard("mic", "Dictate", c.dictate, flip("dictate"), `${r.dictate.why} \xB7 the speech engine ${sizeText(engineMb)} + ${dictateModel.label} ${dictateModel.downloaded ? "here" : sizeText(dictateModel.mb)}`), r.dictate),
+      advised(toggleCard("audio-lines", "Transcribe meetings and files", c.transcribe, flip("transcribe"), `${r.transcribe.why} \xB7 ${transcribeModel.label} ${transcribeModel.downloaded ? "here" : sizeText(transcribeModel.mb)}${c.dictate ? "" : ` + the speech engine ${sizeText(engineMb)}`}`), r.transcribe),
+      c.transcribe ? advised(toggleCard("users", "Who spoke when", c.speakers, flip("speakers"), `${r.speakers.why} \xB7 ${sizeText(s.download.speakers)}`), r.speakers) : null,
+      grp("Altype"),
+      advised(toggleCard("power", "Start with Windows", c.startWithWindows, flip("startWithWindows"), r.startWithWindows.why), r.startWithWindows),
+      grp("All of it"),
+      total,
+      aside("info", "Keys are set on each action\u2019s page; everything here can be changed later in Settings.")
+    ].filter((n) => n !== null);
+  }
+  function start(v, h, c) {
+    const all = cost(c, v);
+    h.save({
+      voice: "",
+      naturalDismissed: c.voice === "windows",
+      autoFix: c.autoFix,
+      layoutBadge: c.layoutBadge,
+      startWithWindows: c.startWithWindows,
+      speechTestAgreed: c.test
+    });
+    const t = v.translatorState.status;
+    if (t === "absent" || t === "failed") h.post({ type: "prepareTranslator" });
+    const d = v.dictionary.status;
+    if (d === "absent" || d === "failed") h.post({ type: "prepareDictionary" });
+    if (c.voice === "natural" && (v.natural.status === "absent" || v.natural.status === "failed")) h.post({ type: "downloadNatural" });
+    if (c.dictate || c.transcribe) {
+      if (all.parts.length === 0 && running(v)) for (const model of all.models) h.post({ type: "downloadSpeechModel", model });
+      else if (all.parts.length || all.models.length) h.post({ type: "installSpeech", parts: all.parts.length ? all.parts : ["core"], models: all.models });
+    }
+  }
+  function downloadStep(v, h, c) {
+    const all = cost(c, v);
+    const rows = all.items.map((item) => itemRow(item, v, h));
+    return [
+      grp(started ? "Downloading" : "To download", all.items.length),
+      ...rows,
+      grp("Then"),
+      advised(
+        toggleCard(
+          "play",
+          "Test the speech models when they are here",
+          c.test,
+          (on) => {
+            c.test = on;
+            h.save({ speechTestAgreed: on });
+          },
+          "each downloaded model runs once on a short clip, a minute or two in the background; then the times here are this computer\u2019s own"
+        ),
+        { on: true, why: "" }
+      ),
+      aside("info", started ? "You can close this window: the downloads go on, and Home shows how far they are." : "Nothing has started yet: go back to Download, or Finish to set everything up later from the pages.")
+    ].filter((n) => n !== null);
+  }
+  var done = (what) => el("small", { class: "kstate ok" }, lucide("check", "s"), what);
+  var waiting = (what) => el("small", {}, what);
+  function itemRow(item, v, h) {
+    const s = v.speech;
+    const icons = { translator: "languages", dictionary: "book-open", voice: "volume-2", engine: "cpu" };
+    const icon2 = icons[item.key] ?? "audio-lines";
+    const pct = (p) => el("span", { class: "pct" }, `${Math.round(p * 100)}%`);
+    let note = item.note;
+    let control = null;
+    if (item.key === "translator") {
+      const t = v.translatorState;
+      if (t.status === "ready") note = done("here");
+      else if (t.status === "downloading") note = bar(t.progress), control = pct(t.progress);
+      else if (t.status === "failed") note = bad("the download failed"), control = linkBtn("Try again", () => h.post({ type: "prepareTranslator" }));
+      else note = started ? waiting("starting\u2026") : item.note;
+    } else if (item.key === "dictionary") {
+      const d = v.dictionary.status;
+      if (d === "ready") note = done("here");
+      else if (d === "downloading") note = waiting("coming\u2026");
+      else if (d === "failed") note = bad("the download failed"), control = linkBtn("Try again", () => h.post({ type: "prepareDictionary" }));
+      else note = started ? waiting("starting\u2026") : item.note;
+    } else if (item.key === "voice") {
+      const n = v.natural;
+      if (n.status === "ready") note = done("here");
+      else if (n.status === "downloading") note = bar(n.progress), control = pct(n.progress);
+      else if (n.status === "failed") note = bad("the download failed"), control = linkBtn("Try again", () => h.post({ type: "downloadNatural" }));
+      else note = started ? waiting("starting\u2026") : item.note;
+    } else if (item.key === "engine") {
+      const p = s.pack;
+      if (p.status === "installing") note = el("span", {}, bar(p.progress ?? 0), el("small", {}, p.step === "tool" ? "the Python manager" : "the packages \xB7 the window can be closed, it goes on")), control = pct(p.progress ?? 0);
+      else if (installed(v) && !item.mb) note = done("here");
+      else if (p.status === "failed") note = bad(p.message ?? "the install failed"), control = linkBtn("Try again", () => h.post({ type: "installSpeech", parts: cost(choice ?? recommendedChoice(v), v).parts }));
+      else note = started ? waiting("starting\u2026") : item.note;
+    } else {
+      const model = item.key.slice("model:".length);
+      const live = Object.values(s.health?.models ?? {}).find((m) => m.name === model);
+      if (item.mb === 0 || s.health?.downloaded?.includes(model)) note = done("here");
+      else if (live?.state === "downloading") note = bar(live.progress ?? 0), control = pct(live.progress ?? 0);
+      else note = started ? waiting(running(v) ? "next" : "after the speech engine") : item.note;
+    }
+    const row2 = card(icon2, item.label, [note, item.mb ? `${sizeText(item.mb)}` : null], control);
+    return row2;
   }
 
   // src/webview/recorder.ts
@@ -1675,9 +2064,9 @@
       const first = this.seen[0];
       if (this.id !== r.id || !first) return "";
       const spent = (Date.now() - first[0]) / 1e3;
-      const done = r.progress - first[1];
-      if (spent < 8 || done < 0.01) return "";
-      const left = (1 - r.progress) * spent / done;
+      const done2 = r.progress - first[1];
+      if (spent < 8 || done2 < 0.01) return "";
+      const left = (1 - r.progress) * spent / done2;
       return left < 60 ? "under a minute left" : `about ${Math.round(left / 60)} min left`;
     }
   };
@@ -1831,10 +2220,10 @@
       const chipNode = el("button", { class: `chip sp ${speakerClass(t, key)}`, title: "Rename" }, el("i", { class: "sw" }), name);
       chipNode.addEventListener("click", () => {
         const input = el("input", { type: "text", class: "field", value: name, "aria-label": "Speaker\u2019s name" });
-        let done = false;
+        let done2 = false;
         const finish = (keep) => {
-          if (done) return;
-          done = true;
+          if (done2) return;
+          done2 = true;
           const next = input.value.trim();
           const s = t.speakers[key];
           if (keep && next && s && next !== s.name) {
@@ -2309,12 +2698,12 @@
     const t2 = el("div", { class: "trail t2" }, sample.fixed);
     const eyebrow = el("div", { class: "eyebrow" }, "One line, three keys");
     const listenKey = keyLines("listen", s)[0]?.hotkey ?? "";
-    const step = (n, hotkey, what) => {
+    const step2 = (n, hotkey, what) => {
       const keys = caps(hotkey);
       const small = el("small", {}, el("em", {}, String(n)), what);
       return { keys, small, node: el("div", { class: "step" }, keys, small) };
     };
-    const sf = step(1, s.fixKey, "fix"), st = step(2, s.translateKey, "translate"), sl = step(3, listenKey, "listen");
+    const sf = step2(1, s.fixKey, "fix"), st = step2(2, s.translateKey, "translate"), sl = step2(3, listenKey, "listen");
     const rail = el("div", { class: "rail" }, sf.node, st.node, sl.node);
     const stage = el("div", { class: "stage" }, eyebrow, t1, t2, line, line2, play, rail);
     stage.style.top = `${Math.round(Math.max(-40, Math.min(80, (root.clientHeight - 620) / 2)))}px`;
@@ -2532,25 +2921,25 @@
     const B = top.offsetHeight;
     const gs = src.ground;
     const gx = lerp(gs.x, 0, p), gy = lerp(gs.y, B, p), gw = lerp(gs.w, W, p), gh = lerp(gs.h, H - B, p), r = lerp(gs.r, 0, q);
-    const done = p >= 1;
-    pGround.style.left = done ? "" : `${gx}px`;
-    pGround.style.top = done ? "" : `${gy}px`;
-    pGround.style.width = done ? "" : `${gw}px`;
-    pGround.style.height = done ? "" : `${gh}px`;
-    pGround.style.borderRadius = done ? "" : `${r}px`;
-    pg.style.clipPath = done ? "" : `inset(${gy}px ${W - gx - gw}px ${H - gy - gh}px ${gx}px round ${r}px)`;
+    const done2 = p >= 1;
+    pGround.style.left = done2 ? "" : `${gx}px`;
+    pGround.style.top = done2 ? "" : `${gy}px`;
+    pGround.style.width = done2 ? "" : `${gw}px`;
+    pGround.style.height = done2 ? "" : `${gh}px`;
+    pGround.style.borderRadius = done2 ? "" : `${r}px`;
+    pg.style.clipPath = done2 ? "" : `inset(${gy}px ${W - gx - gw}px ${H - gy - gh}px ${gx}px round ${r}px)`;
     pg.style.visibility = p <= 0 ? "hidden" : "";
     const s0 = src.tfont / dst.tfont;
     const s = lerp(s0, 1, p);
     const ty = src.title.y + src.title.h / 2 - (dst.title.y + dst.title.h * s0 / 2);
-    pTitle.style.transform = done ? "" : `translate(${(src.title.x - dst.title.x) * (1 - p)}px, ${ty * (1 - p)}px) scale(${s})`;
-    if (src.cap) setStyle(pCap, 1, done ? "" : `translate(${(src.cap.x - dst.cap.x) * (1 - p)}px, ${(src.cap.y - dst.cap.y) * (1 - p)}px)`);
-    else setStyle(pCap, clamp((p - 0.45) * 2), done ? "" : `translateX(${(1 - q) * -8}px)`);
-    pKeys.style.transform = src.keys && !done ? `translate(${(src.keys.x - dst.keys.x) * (1 - p)}px, ${(src.keys.y - dst.keys.y) * (1 - p)}px)` : "";
+    pTitle.style.transform = done2 ? "" : `translate(${(src.title.x - dst.title.x) * (1 - p)}px, ${ty * (1 - p)}px) scale(${s})`;
+    if (src.cap) setStyle(pCap, 1, done2 ? "" : `translate(${(src.cap.x - dst.cap.x) * (1 - p)}px, ${(src.cap.y - dst.cap.y) * (1 - p)}px)`);
+    else setStyle(pCap, clamp((p - 0.45) * 2), done2 ? "" : `translateX(${(1 - q) * -8}px)`);
+    pKeys.style.transform = src.keys && !done2 ? `translate(${(src.keys.x - dst.keys.x) * (1 - p)}px, ${(src.keys.y - dst.keys.y) * (1 - p)}px)` : "";
     const late = clamp((p - 0.82) / 0.18);
-    setStyle(pBack, late, done ? "" : `translateX(${(1 - late) * -10}px)`);
-    setStyle(pLine, late, done ? "" : `scaleX(${0.6 + 0.4 * late})`);
-    setStyle(pBody, late, done ? "" : `translateY(${(1 - late) * 14}px)`);
+    setStyle(pBack, late, done2 ? "" : `translateX(${(1 - late) * -10}px)`);
+    setStyle(pLine, late, done2 ? "" : `scaleX(${0.6 + 0.4 * late})`);
+    setStyle(pBody, late, done2 ? "" : `translateY(${(1 - late) * 14}px)`);
     for (const row2 of home.querySelectorAll(".act")) {
       if (row2 === source) continue;
       setStyle(row2, 1 - clamp(q * 1.5), `translateY(${q * 36}px)`);
@@ -2566,7 +2955,7 @@
       node.classList.remove("pressed");
     }
   }
-  function grow(gr, opening, done) {
+  function grow(gr, opening, done2) {
     cancelAnimationFrame(praf);
     if (FROZEN_PT !== void 0 && opening) return renderGrowth(gr, FROZEN_PT >= PD ? 1 : pspring(FROZEN_PT / PD));
     animating = true;
@@ -2578,7 +2967,7 @@
       if (t < PD) praf = requestAnimationFrame(tick);
       else {
         animating = false;
-        done?.();
+        done2?.();
         if (homePending) renderHome();
       }
     };
@@ -2622,7 +3011,7 @@
       fillHeader();
     }
     if (name === "transcripts") leaveTranscripts();
-    const done = () => {
+    const done2 = () => {
       root.classList.remove("page-open");
       pg.style.visibility = "";
       pg.style.clipPath = "";
@@ -2634,10 +3023,10 @@
     cancelAnimationFrame(praf);
     animating = false;
     const source = sourceOf(name);
-    if (!source || !animate) return done();
+    if (!source || !animate) return done2();
     const back2 = pg.contains(document.activeElement);
     grow(measureGrowth(source), false, () => {
-      done();
+      done2();
       if (back2) source.focus({ preventScroll: true });
     });
   }
@@ -2816,7 +3205,7 @@
   function keyRow(name, label, note, taken = false, iconName) {
     const current = view?.settings[name] ?? "";
     const recorder = new HotkeyRecorder();
-    let waiting;
+    let waiting2;
     const field = el("button", {
       class: "krec",
       title: "Click, then press the keys: Ctrl+Alt+T, Left Ctrl twice, Pause, a mouse side button\u2026",
@@ -2824,17 +3213,17 @@
     });
     field.append(caps(current));
     const showing = (...nodes) => field.replaceChildren(...nodes);
-    const done = (key) => {
-      window.clearTimeout(waiting);
+    const done2 = (key) => {
+      window.clearTimeout(waiting2);
       field.blur();
       saveKey(name, key);
     };
     const recorded = (r) => {
-      window.clearTimeout(waiting);
+      window.clearTimeout(waiting2);
       if (!r) return;
-      if (!r.more) return done(r.hotkey);
+      if (!r.more) return done2(r.hotkey);
       showing(caps(r.hotkey), el("span", { class: "x2" }, "\u2026"));
-      waiting = window.setTimeout(() => done(r.hotkey), DOUBLE_MS);
+      waiting2 = window.setTimeout(() => done2(r.hotkey), DOUBLE_MS);
     };
     const listen = () => {
       if (field.classList.contains("recording")) return;
@@ -2845,7 +3234,7 @@
     field.addEventListener("focus", listen);
     field.addEventListener("click", () => (field.focus(), listen()));
     field.addEventListener("blur", () => {
-      window.clearTimeout(waiting);
+      window.clearTimeout(waiting2);
       field.classList.remove("recording");
       showing(caps(current));
     });
@@ -2854,7 +3243,7 @@
       event.preventDefault();
       if (event.key === "Escape") return field.blur();
       if (event.repeat) return;
-      window.clearTimeout(waiting);
+      window.clearTimeout(waiting2);
       recorded(recorder.keydown(event.code, event.timeStamp));
     });
     field.addEventListener("keyup", (event) => {
@@ -3610,7 +3999,8 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     else if (open?.name === tab && open.sub) popSub(false);
     else openPage(tab);
   }
-  function start(v) {
+  function start2(v) {
+    if (!v.settings.setupDone) return;
     const asked = askedTab && askedTab !== "home" && askedTab !== "howto" ? askedTab : void 0;
     if (askedTranscript) return openTranscript(askedTranscript);
     if (asked) return openPage(asked, false);
@@ -3638,13 +4028,36 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     view = m.view;
     if (m.view.speech.service !== "ready") forgetEngine();
     updateNav();
+    if (!m.view.settings.setupDone) {
+      if (open) closePage(false);
+      if (moment) finishMoment();
+      root.classList.add("setup");
+      home.classList.add("setup");
+      renderSetup();
+      return;
+    }
+    if (root.classList.contains("setup")) {
+      root.classList.remove("setup");
+      home.classList.remove("setup");
+      resetSetup();
+      renderHome(true);
+      if (!m.view.settings.introSeen) {
+        if (reduced.matches) save({ introSeen: true });
+        else playMoment(true);
+      }
+      return;
+    }
     renderHome();
     if (open) {
       fillHeader();
       renderBody();
     }
-    if (first) start(m.view);
+    if (first) start2(m.view);
   });
+  function renderSetup() {
+    if (!view) return;
+    home.replaceChildren(...setupNodes(view, { save, post, redraw: renderSetup }));
+  }
   window.addEventListener("pointerdown", () => moment && moment.raf && finishMoment(), true);
   window.addEventListener("keydown", (event) => {
     if (moment?.raf) return finishMoment();

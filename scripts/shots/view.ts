@@ -16,20 +16,35 @@ const i9: DeviceProfile = {
 
 const downloaded = ['large-v3-turbo', 'small', 'base', 'parakeet-tdt-0.6b-v3']
 
-export function appView(over: Partial<AppView['settings']> = {}): AppView {
+export function appView(over: Partial<AppView['settings']> = {}, fresh = false): AppView {
   const plan = planSpeech({
     profile: i9,
     fingerprint: 'fp',
     bench: undefined,
-    cuda: true,
+    cuda: !fresh,
     speakersCuda: false,
     speakers: false,
-    downloaded,
+    downloaded: fresh ? [] : downloaded,
     native: 'ru',
     prefer: 'accuracy',
     pins: { dictation: '', transcripts: '' },
   })
   const now = Date.now()
+  const v = full(over, plan, now)
+  if (!fresh) return v
+  // A fresh install: nothing downloaded, the engine absent, the setup not done.
+  return {
+    ...v,
+    settings: { ...v.settings, setupDone: false, introSeen: false, languages: [], vocabulary: [], fixApps: [], keepWords: [], autoFix: false, layoutBadge: false, ...over },
+    natural: { status: 'absent', progress: 0, size: 170, dismissed: false },
+    translator: 'absent',
+    translatorState: { status: 'absent', progress: 0, size: 84 },
+    dictionary: { status: 'ready' },
+    speech: { ...v.speech, pack: { status: 'absent', parts: [], nvidia: true }, service: 'off', health: undefined, test: { offer: false, agreed: false, runs: 0 } },
+  }
+}
+
+function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'], now: number): AppView {
   return {
     settings: {
       ...DEFAULTS,
@@ -108,6 +123,8 @@ export function appView(over: Partial<AppView['settings']> = {}): AppView {
         { at: new Date(now - 86400e3).toISOString(), mode: 'english', text: 'I will send the updated layouts before the call.', heard: 'Пришлю обновлённые макеты до созвона.' },
       ],
     },
+    translatorState: { status: 'ready', progress: 1, size: 84 },
+    dictionary: { status: 'ready' },
   }
 }
 

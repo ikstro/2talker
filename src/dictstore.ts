@@ -38,6 +38,8 @@ export type DictStoreOptions = {
   fetchGz: (url: string) => Promise<Uint8Array>
   /** A download finished: words looked up while it ran can be asked again. */
   onReady: (code: string) => void
+  /** A download started, finished or failed: whatever shows the dictionary's state can show it again. */
+  onChange?: (code: string) => void
   now?: () => number
 }
 
@@ -71,7 +73,17 @@ export class DictionaryStore {
 
     this.states.set(code, { status: 'downloading' })
     void this.download(code)
+    this.options.onChange?.(code)
     return { status: 'downloading' }
+  }
+
+  /** How the dictionary for a language stands, from its file's being there: nothing read, nothing downloaded. */
+  status(code: string): DictState['status'] {
+    const known = this.states.get(code)
+    if (known && (known.status !== 'failed' || (this.options.now?.() ?? Date.now()) - known.at < RETRY_MS)) return known.status
+    if (BUNDLED.has(code)) return fs.existsSync(path.join(this.options.bundledDir, `en-${code}.json`)) ? 'ready' : 'none'
+    if (!DOWNLOADABLE.has(code)) return 'none'
+    return fs.existsSync(this.cacheFile(code)) ? 'ready' : 'off'
   }
 
   private async download(code: string): Promise<void> {
@@ -89,6 +101,7 @@ export class DictionaryStore {
     } catch {
       this.states.set(code, { status: 'failed', at: this.options.now?.() ?? Date.now() })
     }
+    this.options.onChange?.(code)
   }
 
   private cacheFile(code: string): string {

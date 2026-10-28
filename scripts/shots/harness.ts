@@ -118,6 +118,37 @@ async function appShots(theme: 'dark' | 'light', wide = false): Promise<void> {
   w.destroy()
 }
 
+/** The first-run setup: its four steps, Next pressed between them; Download starts nothing here (the host-call answers are stubs). */
+async function setupShots(theme: 'dark' | 'light'): Promise<void> {
+  nativeTheme.themeSource = theme
+  const w = win('app.html', 640, 620, colors().bg)
+  await new Promise<void>(r => w.webContents.once('did-finish-load', () => r()))
+  await sleep(400)
+  send(w, { type: 'app', view: appView({}, true) })
+  await sleep(600)
+  for (let step = 1; step <= 4; step++) {
+    await shot(w, `setup-${theme}-${step}`)
+    if (step === 3) {
+      await js(w, `document.querySelector('.sbody').scrollTop = 1e5, 'ok'`)
+      await sleep(200)
+      await shot(w, `setup-${theme}-3-bottom`)
+    }
+    if (step < 4) {
+      log.push(`setup next ${step}: ${await click(w, '.sfoot .btn.primary')}`)
+      await sleep(500)
+    }
+  }
+  // A snapshot while the downloads go: the engine installing, the voice half way.
+  const v = appView({}, true)
+  v.natural = { status: 'downloading', progress: 0.42, size: 170, dismissed: false }
+  v.translatorState = { status: 'ready', progress: 1, size: 84 }
+  v.speech = { ...v.speech, pack: { status: 'installing', parts: [], installing: ['core', 'gpu'], step: 'packages', progress: 0.3, nvidia: true } }
+  send(w, { type: 'app', view: v })
+  await sleep(500)
+  await shot(w, `setup-${theme}-4-going`)
+  w.destroy()
+}
+
 async function trayShots(theme: 'dark' | 'light'): Promise<void> {
   nativeTheme.themeSource = theme
   const w = win('tray.html', 340, 560, colors().bg)
@@ -171,6 +202,8 @@ app.whenReady().then(async () => {
     await appShots('dark')
     await appShots('light')
     await appShots('dark', true)
+    await setupShots('dark')
+    await setupShots('light')
     await trayShots('dark')
     await trayShots('light')
     await badgeShots('dark')

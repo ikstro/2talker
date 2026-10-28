@@ -9,7 +9,11 @@ import type { Settings } from './settings'
 import type { SpeechPackState, SpeechPart } from './speechpack'
 import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
+import type { TranslatorState } from './translator'
 import type { SavedWord } from './words'
+
+/** The word dictionary for the person's language: here, none for the language, coming, failed, or not downloaded yet. */
+export type DictionaryStatus = 'ready' | 'none' | 'downloading' | 'failed' | 'absent'
 
 export type { Choice, DeviceProfile, DictationEntry, Feature, FeaturePlan, Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechPlan, SpeechResult, WordTime }
 
@@ -158,6 +162,10 @@ export type AppView = {
   speech: SpeechView
   /** The phrases dictated lately, newest first (the last 10). */
   dictation: { recent: DictationEntry[] }
+  /** The translator for the person's language with its download's progress and size (MB), for the setup's list. */
+  translatorState: TranslatorState
+  /** The word dictionary for the person's language. */
+  dictionary: { status: DictionaryStatus }
 }
 
 /** What the tray's panel shows, sent whole whenever any of it changes. */
@@ -281,8 +289,11 @@ export type ToHost =
   | { type: 'tray'; command: TrayCommand }
   /** Esc, or a click outside it. */
   | { type: 'trayClose' }
-  // The speech engine.
-  | { type: 'installSpeech'; parts: SpeechPart[] }
+  // The speech engine; `models` are downloaded once the service runs (the setup's picks).
+  | { type: 'installSpeech'; parts: SpeechPart[]; models?: string[] }
+  /** The first-run setup: the translator for the person's language and its word dictionary, downloaded ahead of use. */
+  | { type: 'prepareTranslator' }
+  | { type: 'prepareDictionary' }
   /** Run the speed test (the person agreed), or not now. */
   | { type: 'testSpeech' }
   | { type: 'declineSpeechTest' }

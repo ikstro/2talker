@@ -103,6 +103,12 @@ export type Settings = {
   introSeen: boolean
   /** Altype paused: all its keys and reactions off (Ctrl+C twice, the keyboard helper, dictation) until turned back on. */
   paused: boolean
+  /**
+   * The first-run setup (the window's wizard: language, this computer, what to
+   * download) was finished or skipped. A settings file from before the wizard
+   * counts as done; only a fresh install starts with it false (main.ts).
+   */
+  setupDone: boolean
 }
 
 export const DEFAULTS: Settings = {
@@ -145,6 +151,7 @@ export const DEFAULTS: Settings = {
   naturalDismissed: false,
   introSeen: false,
   paused: false,
+  setupDone: true,
 }
 
 export const VOCABULARY = { lines: 200, chars: 120 }
@@ -225,6 +232,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),
     transcriptsModel: key(r.transcriptsModel, DEFAULTS.transcriptsModel),
     speechTestAgreed: flag(r.speechTestAgreed, DEFAULTS.speechTestAgreed),
+    setupDone: flag(r.setupDone, DEFAULTS.setupDone),
     speechTestDeclinedKey: key(r.speechTestDeclinedKey, DEFAULTS.speechTestDeclinedKey),
     speechTestDeclinedAt: typeof r.speechTestDeclinedAt === 'number' && Number.isFinite(r.speechTestDeclinedAt) ? r.speechTestDeclinedAt : 0,
     startWithWindows: flag(r.startWithWindows, DEFAULTS.startWithWindows),

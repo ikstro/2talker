@@ -769,6 +769,131 @@ svg.glyph {
   color: var(--muted);
 }
 
+/* ---------------------------------------------------------------- the setup
+   A fresh install: four steps in Home's place, the pills of the bar put away
+   until it is over. The head and the foot stay; the steps' cards scroll. */
+
+.win.setup .nav {
+  visibility: hidden;
+}
+
+.home.setup {
+  overflow: hidden;
+}
+
+.shead {
+  flex: none;
+  padding: 18px var(--side) 0;
+}
+
+.sprog {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font: 500 var(--t-caption) / 1 var(--font);
+  color: var(--muted);
+}
+
+.sprog i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.sprog i.done {
+  background: var(--muted);
+}
+
+.sprog i.on {
+  background: var(--accent);
+}
+
+.sprog span {
+  margin-left: 6px;
+}
+
+.stitle-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.stitle {
+  font: 600 28px / 34px var(--font);
+  letter-spacing: -0.02em;
+  color: var(--strong);
+}
+
+.scap {
+  overflow: hidden;
+  font: 400 var(--t-small) / 1 var(--font);
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
+.sline {
+  height: 1px;
+  margin: 12px 0 0;
+  background: var(--border-soft);
+}
+
+.sbody {
+  flex: 1;
+  min-height: 0;
+  padding: 6px calc(var(--side) - 12px) 16px var(--side);
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
+}
+
+.sfoot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px var(--side) 14px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+
+.sfoot .gap {
+  flex: 1;
+}
+
+/* The advice: a green chip after a card's title. */
+.chip.good {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 8px 0 6px;
+  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+  background: color-mix(in srgb, var(--green) 12%, var(--surface));
+  color: var(--green);
+  font: 600 11px / 1 var(--font);
+  vertical-align: 2px;
+}
+
+.chip.good .lu {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.5;
+}
+
+/* The sum of it all, and the verdict on this computer: a card on the accent's tint. */
+.row.total {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.row.total.bad {
+  border-color: color-mix(in srgb, var(--red) 40%, var(--border));
+  background: color-mix(in srgb, var(--red) 7%, var(--surface));
+}
+
 /* Home's notice (Altype is paused): a card in the actions' column, above them. */
 .home > .row.notice {
   width: auto;
