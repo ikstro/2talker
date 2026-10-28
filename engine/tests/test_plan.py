@@ -18,6 +18,12 @@ def test_catalog_models_are_the_whisper_ones():
     assert asr.SIZES["small"] > asr.SIZES["base"] > asr.SIZES["tiny"]
 
 
+def test_parakeet_dictates_on_the_processor_only():
+    plan = clean_plan({"cpu": {"dictation": {"model": "parakeet-tdt-0.6b-v3"}, "transcripts": {"model": "parakeet-tdt-0.6b-v3"}}, "cuda": {"dictation": {"model": "parakeet-tdt-0.6b-v3"}}})
+    assert plan == {"cpu": {"dictation": {"model": "parakeet-tdt-0.6b-v3"}}}
+    assert asr.backend("parakeet-tdt-0.6b-v3") == "parakeet" and asr.backend("small") == "whisper"
+
+
 def test_clean_plan_keeps_what_the_engine_knows():
     plan = clean_plan({
         "fingerprint": "abc",
@@ -131,7 +137,7 @@ def test_calibrator_measures_and_records(s, monkeypatch, tmp_path):
             time.sleep(0.02)
             return [], "en"
 
-    monkeypatch.setattr(bench, "Transcriber", Timed)
+    monkeypatch.setattr(bench, "recognizer", lambda name: Timed())
     monkeypatch.setattr(bench.audio, "decode", lambda path: np.zeros(16000 * 40, dtype=np.float32))
     b = bench.Bench(s)
     c = bench.Calibrator(b, lambda: True, lambda: None, lambda: 0, lambda: 4)

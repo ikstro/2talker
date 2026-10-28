@@ -200,8 +200,12 @@ export type ToView =
   | { type: 'tray'; view: TrayView }
   /** Show this transcript in the app window (a finished note's balloon, the extension). */
   | { type: 'openTranscript'; id: string }
-  /** The dictation badge: record, then stop (and type it, or keep it as a note), or throw it away. */
-  | { type: 'dictation'; command: 'start' | 'stop' | 'cancel'; mode: DictationMode; key: string }
+  /**
+   * The dictation badge: record, then stop (and type it, or keep it as a note), or throw away.
+   * `session`: the engine's dictation heard while spoken (engine/stream.py), when the engine has them;
+   * `expected`: the languages likely spoken (the person's own, English).
+   */
+  | { type: 'dictation'; command: 'start' | 'stop' | 'cancel'; mode: DictationMode; key: string; session?: string; expected?: string[] }
   | { type: 'dictationDone'; text: string }
   | { type: 'dictationError'; message: string }
   /** The tray's panel was just shown: focus its first command. */
@@ -276,8 +280,10 @@ export type ToHost =
   | { type: 'openPath'; path: string }
   // The dictation badge.
   | { type: 'dictationReady' }
-  /** A phrase to type: the whole recording, as webm. */
+  /** A phrase to type: the whole recording, as webm (an engine without sessions). */
   | { type: 'dictationAudio'; mode: DictationMode; audio: Uint8Array }
+  /** A phrase to type, recognized while it was spoken: its text, the language the engine heard ("" when it does not say) and how sure it is. */
+  | { type: 'dictationText'; mode: DictationMode; text: string; language: string; sure: number }
   /** A note was recorded into the engine as this transcript. */
   | { type: 'dictationNote'; id: string }
   | { type: 'dictationCancelled' }

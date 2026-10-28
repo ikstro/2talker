@@ -36,9 +36,26 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
 }
 
 describe('planSpeech', () => {
-  it('a weak laptop dictates with a quick model and transcribes with turbo, whose decoder is light', () => {
+  it('a weak laptop dictates Russian with Parakeet, Kazakh with a quick Whisper', () => {
     const plan = planSpeech(input({ profile: weakLaptop }))
     expect(plan.device).toBe('cpu')
+    expect(plan.dictation.chosen.model).toBe('parakeet-tdt-0.6b-v3')
+    expect(plan.engine.cpu.dictation.model).toBe('parakeet-tdt-0.6b-v3')
+    // Parakeet dictates only.
+    expect(plan.transcripts.choices.some(c => c.model === 'parakeet-tdt-0.6b-v3')).toBe(false)
+    const kazakh = planSpeech(input({ profile: weakLaptop, native: 'kk' }))
+    expect(kazakh.dictation.chosen.model).toBe('base')
+    expect(kazakh.dictation.choices.find(c => c.model === 'parakeet-tdt-0.6b-v3')?.why).toMatch(/language/)
+  })
+
+  it('the card runs Whisper: Parakeet is shown, but for the processor', () => {
+    const plan = planSpeech(input({ cuda: true }))
+    expect(plan.dictation.choices.find(c => c.model === 'parakeet-tdt-0.6b-v3')?.why).toMatch(/processor/)
+    expect(plan.engine.cpu.dictation.model).toBe('parakeet-tdt-0.6b-v3')
+  })
+
+  it('a weak laptop transcribes with turbo, whose decoder is light, and keeps the large model out of its memory', () => {
+    const plan = planSpeech(input({ profile: weakLaptop, native: 'kk' }))
     expect(plan.dictation.chosen.model).toBe('base')
     expect(plan.dictation.chosen.estimate).toBeLessThanOrEqual(BUDGET.dictation.accuracy)
     expect(plan.transcripts.chosen.model).toBe('large-v3-turbo')
@@ -49,21 +66,24 @@ describe('planSpeech', () => {
   })
 
   it('speed over accuracy takes quicker models and a beam of one', () => {
-    const plan = planSpeech(input({ profile: weakLaptop, prefer: 'speed' }))
+    const plan = planSpeech(input({ profile: weakLaptop, prefer: 'speed', native: 'kk' }))
     expect(plan.dictation.chosen.model).toBe('tiny')
     expect(plan.engine.cpu.dictation).toEqual({ model: 'tiny', beam: 1 })
   })
 
   it('a downloaded model within the budget is used, and a better one offered', () => {
-    const plan = planSpeech(input({ downloaded: ['base', 'small'] }))
+    const plan = planSpeech(input({ downloaded: ['base', 'small'], native: 'kk' }))
     expect(plan.dictation.chosen.model).toBe('small')
-    const slow = planSpeech(input({ profile: weakLaptop, downloaded: ['tiny'] }))
+    const russian = planSpeech(input({ downloaded: ['base', 'small'] }))
+    expect(russian.dictation.chosen.model).toBe('small')
+    expect(russian.dictation.better?.model).toBe('parakeet-tdt-0.6b-v3')
+    const slow = planSpeech(input({ profile: weakLaptop, downloaded: ['tiny'], native: 'kk' }))
     expect(slow.dictation.chosen.model).toBe('tiny')
     expect(slow.dictation.better?.model).toBe('base')
   })
 
   it('a model too slow here is left for a quicker one that will download (going down needs no asking)', () => {
-    const plan = planSpeech(input({ profile: weakLaptop, downloaded: ['small'] }))
+    const plan = planSpeech(input({ profile: weakLaptop, downloaded: ['small'], native: 'kk' }))
     expect(plan.dictation.chosen.model).toBe('base')
     expect(plan.dictation.chosen.downloaded).toBe(false)
   })
@@ -102,7 +122,7 @@ describe('planSpeech', () => {
 
   it('measured numbers replace the guesses, and scale to the models not measured', () => {
     const bench = { fingerprint: 'fp', runs: { [runKey('small', 'cpu', 'int8')]: { phrase: 3.0, rtf: 0.4 } } }
-    const plan = planSpeech(input({ bench, downloaded: ['small'] }))
+    const plan = planSpeech(input({ bench, downloaded: ['small'], native: 'kk' }))
     const small = plan.dictation.choices.find(c => c.model === 'small')!
     expect(small).toMatchObject({ estimate: 3.0, basis: 'measured', fits: false })
     const base = plan.dictation.choices.find(c => c.model === 'base')!
@@ -120,9 +140,10 @@ describe('planSpeech', () => {
 
   it('a model near the budget is kept while the numbers move a little', () => {
     const runs = (phrase: number) => ({ fingerprint: 'fp', runs: { [runKey('small', 'cpu', 'int8')]: { phrase, rtf: 0.2 } } })
-    expect(planSpeech(input({ bench: runs(1.6), downloaded: ['small', 'base'] })).dictation.chosen.model).toBe('base')
-    expect(planSpeech(input({ bench: runs(1.6), downloaded: ['small', 'base'], previous: { dictation: 'small' } })).dictation.chosen.model).toBe('small')
-    expect(planSpeech(input({ bench: runs(2.0), downloaded: ['small', 'base'], previous: { dictation: 'small' } })).dictation.chosen.model).toBe('base')
+    const kk = { native: 'kk' }
+    expect(planSpeech(input({ ...kk, bench: runs(1.6), downloaded: ['small', 'base'] })).dictation.chosen.model).toBe('base')
+    expect(planSpeech(input({ ...kk, bench: runs(1.6), downloaded: ['small', 'base'], previous: { dictation: 'small' } })).dictation.chosen.model).toBe('small')
+    expect(planSpeech(input({ ...kk, bench: runs(2.0), downloaded: ['small', 'base'], previous: { dictation: 'small' } })).dictation.chosen.model).toBe('base')
   })
 
   it('the hour counts speakers when their part is here', () => {
@@ -133,13 +154,14 @@ describe('planSpeech', () => {
 
   it('tests the downloaded models not yet measured, the smallest first, and remembers a decline by them', () => {
     const bench = { fingerprint: 'fp', runs: { [runKey('small', 'cpu', 'int8')]: { phrase: 1.4, rtf: 0.2 } } }
-    const i = input({ bench, downloaded: ['large-v3-turbo', 'small', 'base'] })
+    const i = input({ bench, downloaded: ['large-v3-turbo', 'small', 'base', 'parakeet-tdt-0.6b-v3'] })
     const plan = planSpeech(i)
     expect(testRuns(i, plan)).toEqual([
       { model: 'base', device: 'cpu', beam: 2 },
+      { model: 'parakeet-tdt-0.6b-v3', device: 'cpu', beam: 2 },
       { model: 'large-v3-turbo', device: 'cpu', beam: 2 },
     ])
-    expect(testKey(i, plan)).toBe('fp|cpu|base,small,large-v3-turbo')
+    expect(testKey(i, plan)).toBe('fp|cpu|base,small,parakeet-tdt-0.6b-v3,large-v3-turbo')
   })
 })
 

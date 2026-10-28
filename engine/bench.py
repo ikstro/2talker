@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import audio
-from asr import CudaFailed, Transcriber
+from asr import CudaFailed, backend, recognizer
 from audio import RATE
 
 log = logging.getLogger("altype.bench")
@@ -33,7 +33,7 @@ WINDOW_SECONDS = 29
 # A test's number replaces the old one; real use moves it this far towards what it saw.
 USE_WEIGHT = 0.25
 # Real use shorter than this says little: loading and the first window weigh too much.
-SHORTEST = {"words": 60.0, "speakers": 120.0, "phrase": (3.0, 15.0)}
+SHORTEST = {"words": 60.0, "speakers": 120.0, "phrase": (3.0, 15.0), "proportional": (1.5, 30.0)}
 
 
 def key(model: str, device: str, compute: str) -> str:
@@ -90,7 +90,13 @@ class Bench:
             self.settings.update({"bench": bench})
 
     def phrase(self, model: str, device: str, compute: str, seconds: float, took: float) -> None:
-        """A dictated phrase as it went: Whisper's cost is mostly one 30 s window, so a phrase of a few seconds stands for a 7 s one."""
+        """A dictated phrase (or a piece of one) as it went: Whisper's cost is mostly one 30 s window, so a phrase
+        of a few seconds stands for a 7 s one; Parakeet's follows the length, so it is scaled to 7 s."""
+        if backend(model) == "parakeet":
+            low, high = SHORTEST["proportional"]
+            if low <= seconds <= high:
+                self.record(key(model, device, compute), phrase=took * PHRASE_SECONDS / seconds)
+            return
         low, high = SHORTEST["phrase"]
         if low <= seconds <= high:
             self.record(key(model, device, compute), phrase=took)
@@ -171,7 +177,7 @@ class Calibrator:
             for run in runs:
                 model, device = run["model"], run.get("device", "cpu")
                 self.current = model
-                t = Transcriber()
+                t = recognizer(model)
                 try:
                     self._wait_idle()
                     t.load(model, device, run.get("compute"), self._threads())
@@ -198,10 +204,11 @@ class Calibrator:
 
                 took = self._step(dictation)
                 self.done += 1
-                rtf = self._step(transcription)
+                # Parakeet dictates only: its long-recording time is not asked.
+                rtf = self._step(transcription) if hasattr(t, "transcribe") else None
                 self.done += 1
                 self.bench.record(name, source="test", phrase=took, rtf=rtf)
-                log.info("test: %s phrase %.2f s, rtf %.3f", name, took, rtf)
+                log.info("test: %s phrase %.2f s, rtf %s", name, took, rtf)
                 t.unload()
             self.state = "done"
             self.at = _now()

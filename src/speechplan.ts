@@ -26,6 +26,9 @@ export type CatalogModel = {
   bytes: number
   rank: number
   languages: 'all' | string[]
+  /** Where it runs (Parakeet: the processor only) and what for (Parakeet: dictation). */
+  devices: Device[]
+  features: Feature[]
   cpu: Prior
   cuda: Prior
   ramMb: number
@@ -167,14 +170,15 @@ function speed(m: CatalogModel, device: Device, compute: string, field: 'phrase'
   const exact = measuredValue(input.bench, runKey(m.name, device, compute), field)
   if (exact !== undefined) return { value: exact, basis: 'measured' }
   // Another model measured on this device: this one by the catalog's ratio between the two,
-  // from the measured model nearest in size (small says more about turbo than tiny does).
+  // from the measured model nearest in size and kind (small says more about turbo than tiny
+  // does; a Whisper measured says something of Parakeet's processor, though less).
   let near: { value: number; distance: number } | undefined
   for (const other of MODELS) {
-    if (other.name === m.name || other.backend !== m.backend) continue
+    if (other.name === m.name) continue
     for (const c of device === 'cpu' ? ['int8'] : ['float16', 'int8_float16']) {
       const v = measuredValue(input.bench, runKey(other.name, device, c), field)
       if (v === undefined) continue
-      const distance = Math.abs(Math.log(other.bytes / m.bytes))
+      const distance = Math.abs(Math.log(other.bytes / m.bytes)) + (other.backend === m.backend ? 0 : 1)
       const value = ((v * m[device][field]) / other[device][field]) * (compute === 'int8_float16' && c !== compute ? 1.1 : 1)
       if (!near || distance < near.distance) near = { value, distance }
     }
@@ -192,11 +196,12 @@ function speakersRtf(input: PlanInput): number {
 
 function choice(m: CatalogModel, feature: Feature, device: Device, input: PlanInput): Choice {
   let why = ''
-  let compute = device === 'cpu' ? 'int8' : cudaCompute(m, input.profile)
+  let compute = device === 'cpu' || !m.devices.includes('cuda') ? 'int8' : cudaCompute(m, input.profile)
   if (device === 'cuda' && !compute) {
     why = 'too big for this graphics card'
     compute = 'int8_float16'
   }
+  if (!m.devices.includes(device)) why = 'runs on the processor; the graphics card runs Whisper here'
   const ramMb = (input.profile?.ramGb ?? 8) * 1024
   if (device === 'cpu' && m.ramMb > ramMb * 0.3) why = 'needs more memory than this computer has'
   if (m.languages !== 'all' && !m.languages.includes(input.native)) why = 'not for your language'
@@ -224,7 +229,7 @@ const rankOf = (model: string) => MODELS.find(m => m.name === model)?.rank ?? 0
 
 function decide(feature: Feature, device: Device, input: PlanInput): FeaturePlan {
   const budget = BUDGET[feature][input.prefer]
-  const choices = MODELS.filter(m => m.backend === 'whisper')
+  const choices = MODELS.filter(m => m.features.includes(feature))
     .map(m => choice(m, feature, device, input))
     .sort((a, b) => Number(!!a.why) - Number(!!b.why) || rankOf(b.model) - rankOf(a.model) || a.estimate - b.estimate)
   const usable = choices.filter(c => !c.why)

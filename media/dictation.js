@@ -194,6 +194,104 @@
       this.meter = void 0;
     }
   };
+  var STREAM_CHUNK = 4e3;
+  var StreamRecorder = class {
+    constructor(call, session, expected, onStatus2) {
+      this.call = call;
+      this.session = session;
+      this.expected = expected;
+      this.onStatus = onStatus2;
+    }
+    startedAt = 0;
+    stream;
+    context;
+    kept = [];
+    waiting = new Int16Array(STREAM_CHUNK);
+    filled = 0;
+    seq = 0;
+    uploads = Promise.resolve();
+    broken = false;
+    loudness = 0;
+    speech(method, route, body) {
+      return this.call({ call: "speech", method, route, body });
+    }
+    async start() {
+      this.stream = await microphone(true);
+      this.startedAt = Date.now();
+      this.context = new AudioContext({ sampleRate: 16e3 });
+      await this.context.audioWorklet.addModule("pcm-worklet.js");
+      const source = this.context.createMediaStreamSource(this.stream);
+      const tap = new AudioWorkletNode(this.context, "pcm-tap");
+      tap.port.onmessage = (event) => this.take(event.data);
+      const mute = this.context.createGain();
+      mute.gain.value = 0;
+      source.connect(tap).connect(mute).connect(this.context.destination);
+    }
+    take(samples) {
+      let sum = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const v = samples[i];
+        sum += v * v;
+        this.waiting[this.filled++] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+        if (this.filled === STREAM_CHUNK) {
+          this.send(this.waiting);
+          this.waiting = new Int16Array(STREAM_CHUNK);
+          this.filled = 0;
+        }
+      }
+      this.loudness = Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 4);
+    }
+    send(chunk) {
+      this.kept.push(chunk);
+      const seq = this.seq++;
+      this.uploads = this.uploads.then(async () => {
+        if (this.broken) return;
+        const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        for (let attempt = 0; attempt < RETRIES; attempt++) {
+          const r = await this.speech("PUT", `/dictate/sessions/${this.session}/${seq}`, bytes);
+          if (r.ok) return this.onStatus(r.data);
+          if (r.status === 404) break;
+          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        }
+        this.broken = true;
+      });
+    }
+    level() {
+      return this.loudness;
+    }
+    get seconds() {
+      return this.startedAt ? (Date.now() - this.startedAt) / 1e3 : 0;
+    }
+    /** Stops, sends the tail, and waits for the whole text. */
+    async finish() {
+      this.release();
+      const tail = this.waiting.slice(0, this.filled);
+      this.kept.push(tail);
+      await this.uploads;
+      if (!this.broken) {
+        const r2 = await this.speech("POST", `/dictate/sessions/${this.session}/finish`, new Uint8Array(tail.buffer));
+        if (r2.ok) return r2.data;
+      }
+      const all = new Int16Array(this.kept.reduce((n, c) => n + c.length, 0));
+      let at = 0;
+      for (const c of this.kept) all.set(c, at), at += c.length;
+      const expected = this.expected.map(encodeURIComponent).join(",");
+      const r = await this.speech("POST", `/dictate?language=auto&expected=${expected}&format=pcm16`, new Uint8Array(all.buffer));
+      if (!r.ok) throw new Error(r.error);
+      return r.data;
+    }
+    async cancel() {
+      this.release();
+      this.broken = true;
+      await this.speech("DELETE", `/dictate/sessions/${this.session}`);
+    }
+    release() {
+      for (const track of this.stream?.getTracks() ?? []) track.stop();
+      void this.context?.close();
+      this.stream = void 0;
+      this.context = void 0;
+    }
+  };
   function micTrouble(error) {
     const name = error instanceof DOMException ? error.name : "";
     if (name === "NotAllowedError") return "No access to the microphone: allow it in Windows Settings \u2192 Privacy \u2192 Microphone";
@@ -210,6 +308,10 @@
   var mode = "type";
   var starting = Promise.resolve();
   var timer;
+  var dropped = false;
+  var BEHIND = 4;
+  var heard;
+  var dot;
   function clock(seconds) {
     const s = Math.floor(seconds);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -218,14 +320,23 @@
     root.className = `badge ${kind}`;
     root.replaceChildren(...children);
   }
+  function onStatus(status) {
+    if (!heard || !dot) return;
+    const model = status.model;
+    const fetching = model?.state === "downloading";
+    const words = status.heard.length > 44 ? `\u2026${status.heard.slice(-44)}` : status.heard;
+    if (fetching) heard.replaceChildren(`Getting the speech model ${Math.round((model.progress ?? 0) * 100)}%`);
+    else if (words) heard.replaceChildren(words);
+    heard.classList.toggle("words", fetching || !!words);
+    dot.classList.toggle("behind", status.pending > BEHIND);
+    dot.title = status.pending > BEHIND ? "catching up" : "";
+  }
   function recording(key) {
     const time = el("span", { class: "time" }, "0:00");
     const bars = Array.from({ length: 5 }, () => el("i"));
-    show(
-      "rec",
-      el("div", { class: "line" }, el("span", { class: "dot" }), el("span", { class: "what" }, TITLES[mode]), time, el("span", { class: "meter" }, ...bars)),
-      el("div", { class: "hint" }, key ? caps(key) : "", el("span", {}, mode === "note" ? "save" : "type it"), caps("Escape"), el("span", {}, "cancel"))
-    );
+    dot = el("span", { class: "dot" });
+    heard = el("div", { class: "hint" }, key ? caps(key) : "", el("span", {}, mode === "note" ? "save" : "type it"), caps("Escape"), el("span", {}, "cancel"));
+    show("rec", el("div", { class: "line" }, dot, el("span", { class: "what" }, TITLES[mode]), time, el("span", { class: "meter" }, ...bars)), heard);
     clearInterval(timer);
     timer = window.setInterval(() => {
       if (!recorder) return;
@@ -234,9 +345,10 @@
       bars.forEach((bar, i) => bar.classList.toggle("on", level > (i + 0.5) / bars.length));
     }, 80);
   }
-  async function start(next, key) {
+  async function start(next, key, session, expected = []) {
     mode = next;
-    recorder = mode === "note" ? new ChunkRecorder(host.call, { source: "note", slice: 2e3 }) : new PhraseRecorder();
+    dropped = false;
+    recorder = mode === "note" ? new ChunkRecorder(host.call, { source: "note", slice: 2e3 }) : session ? new StreamRecorder(host.call, session, expected, onStatus) : new PhraseRecorder();
     recording(key);
     try {
       starting = recorder.start();
@@ -253,19 +365,33 @@
     const r = recorder;
     recorder = void 0;
     if (!r) return;
-    show("busy", el("div", { class: "line" }, el("span", { class: "spin" }), el("span", { class: "what" }, mode === "note" ? "Saving the note\u2026" : "Typing\u2026")));
+    const behind = dot?.classList.contains("behind");
+    show(
+      "busy",
+      el("div", { class: "line" }, el("span", { class: "spin" }), el("span", { class: "what" }, mode === "note" ? "Saving the note\u2026" : behind ? "Catching up\u2026" : "Typing\u2026")),
+      ...mode === "note" ? [] : [el("div", { class: "hint" }, caps("Escape"), el("span", {}, "cancel"))]
+    );
+    busy = r;
     try {
       if (r instanceof ChunkRecorder) host.post({ type: "dictationNote", id: await r.finish() });
-      else host.post({ type: "dictationAudio", mode, audio: await r.finish() });
+      else if (r instanceof StreamRecorder) {
+        const result = await r.finish();
+        if (!dropped) host.post({ type: "dictationText", mode, text: result.text, language: result.language, sure: result.sure });
+      } else host.post({ type: "dictationAudio", mode, audio: await r.finish() });
     } catch (error) {
-      host.post({ type: "dictationFailed", message: error instanceof Error ? error.message : String(error) });
+      if (!dropped) host.post({ type: "dictationFailed", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      if (busy === r) busy = void 0;
     }
   }
+  var busy;
   async function cancel() {
     await starting.catch(() => void 0);
     clearInterval(timer);
-    const r = recorder;
+    const r = recorder ?? busy;
     recorder = void 0;
+    busy = void 0;
+    dropped = true;
     await r?.cancel();
     host.post({ type: "dictationCancelled" });
   }
@@ -273,7 +399,7 @@
     const message = event.data;
     if (event.source !== window || !message || typeof message.type !== "string") return;
     if (message.type === "dictation") {
-      if (message.command === "start") void start(message.mode, message.key);
+      if (message.command === "start") void start(message.mode, message.key, message.session, message.expected);
       else if (message.command === "stop") void stop();
       else void cancel();
     } else if (message.type === "dictationDone") {

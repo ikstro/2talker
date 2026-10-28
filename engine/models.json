@@ -1,5 +1,5 @@
 {
-  "about": "The speech models Altype can use, read by the engine (asr.py) and by Altype (src/speechplan.ts). rank: how accurate, higher is better. phrase: seconds to recognize a 7 s phrase as Dictate does; rtf: seconds per second of a long recording as Transcribe does (words with their times). Both are first guesses, measured on an i9-9900K (cpu, int8) and an RTX 2080 SUPER (cuda, float16) on 2026-10-28, until this computer is tested. Whisper pads every phrase to a 30 s window, so a phrase costs one window whatever its length; turbo's decoder is light, so on long recordings it is nearly as quick as small. ramMb: memory on the processor; vramMb: on the card, per compute type.",
+  "about": "The speech models Altype can use, read by the engine (asr.py) and by Altype (src/speechplan.ts). rank: how accurate, higher is better. phrase: seconds to recognize a 7 s phrase as Dictate does; rtf: seconds per second of a long recording as Transcribe does (words with their times). Both are first guesses, measured on an i9-9900K (cpu, int8) and an RTX 2080 SUPER (cuda, float16) on 2026-10-28, until this computer is tested. Whisper pads every phrase to a 30 s window, so a phrase costs one window whatever its length; turbo's decoder is light, so on long recordings it is nearly as quick as small. ramMb: memory on the processor; vramMb: on the card, per compute type. Parakeet (NVIDIA's TDT 0.6B v3 through onnx-asr, int8, on the processor) costs what the sound lasts, not a window: a 7 s phrase in 0.3 s on the i9, Russian as good as turbo on the card in a test on a LibriVox reading; it dictates in its 25 languages. devices and features: where and for what a model is used.",
   "speakers": {
     "cpu": {
       "rtf": 0.8
@@ -30,7 +30,15 @@
       "vramMb": {
         "float16": 400,
         "int8_float16": 300
-      }
+      },
+      "devices": [
+        "cpu",
+        "cuda"
+      ],
+      "features": [
+        "dictation",
+        "transcripts"
+      ]
     },
     {
       "name": "base",
@@ -53,7 +61,15 @@
       "vramMb": {
         "float16": 500,
         "int8_float16": 400
-      }
+      },
+      "devices": [
+        "cpu",
+        "cuda"
+      ],
+      "features": [
+        "dictation",
+        "transcripts"
+      ]
     },
     {
       "name": "small",
@@ -76,7 +92,15 @@
       "vramMb": {
         "float16": 1000,
         "int8_float16": 700
-      }
+      },
+      "devices": [
+        "cpu",
+        "cuda"
+      ],
+      "features": [
+        "dictation",
+        "transcripts"
+      ]
     },
     {
       "name": "large-v3-turbo",
@@ -99,7 +123,15 @@
       "vramMb": {
         "float16": 2600,
         "int8_float16": 1600
-      }
+      },
+      "devices": [
+        "cpu",
+        "cuda"
+      ],
+      "features": [
+        "dictation",
+        "transcripts"
+      ]
     },
     {
       "name": "large-v3",
@@ -122,6 +154,70 @@
       "vramMb": {
         "float16": 4600,
         "int8_float16": 2700
+      },
+      "devices": [
+        "cpu",
+        "cuda"
+      ],
+      "features": [
+        "dictation",
+        "transcripts"
+      ]
+    },
+    {
+      "name": "parakeet-tdt-0.6b-v3",
+      "label": "Parakeet",
+      "about": "very good and quick · 25 European languages",
+      "backend": "parakeet",
+      "repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+      "onnx": "nemo-parakeet-tdt-0.6b-v3",
+      "bytes": 670500000,
+      "rank": 5,
+      "languages": [
+        "bg",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "en",
+        "et",
+        "fi",
+        "fr",
+        "de",
+        "el",
+        "hu",
+        "it",
+        "lv",
+        "lt",
+        "mt",
+        "pl",
+        "pt",
+        "ro",
+        "sk",
+        "sl",
+        "es",
+        "sv",
+        "ru",
+        "uk"
+      ],
+      "devices": [
+        "cpu"
+      ],
+      "features": [
+        "dictation"
+      ],
+      "cpu": {
+        "phrase": 0.3,
+        "rtf": 0.035
+      },
+      "cuda": {
+        "phrase": 0.3,
+        "rtf": 0.035
+      },
+      "ramMb": 1200,
+      "vramMb": {
+        "float16": 0,
+        "int8_float16": 0
       }
     }
   ]

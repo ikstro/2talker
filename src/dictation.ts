@@ -48,40 +48,56 @@ export class Dictation {
   private badge: BrowserWindow | undefined
   private badgeReady = false
   private waiting: ToView[] = []
+  /** The engine is being asked for a session: a second press now would come before the badge starts. */
+  private opening = false
 
   constructor(private readonly o: DictationOptions) {}
 
   /** A Dictate key: the first press starts, the next one (any of the three) stops. */
   press(mode: DictationMode, key: string): void {
-    if (this.state === 'idle') this.start(mode, key)
+    if (this.opening) return
+    if (this.state === 'idle') void this.start(mode, key)
     else if (this.state === 'recording') this.stop()
   }
 
-  private start(mode: DictationMode, key: string): void {
+  private async start(mode: DictationMode, key: string): Promise<void> {
     if (!this.o.speech.installed) return this.o.needsEngine()
     if (!this.o.speech.ready) {
       this.o.balloon('Altype', 'The speech engine is starting. Try again in a few seconds.')
       return
     }
-    // The model loads while the person speaks, so the phrase comes back at once.
-    if (mode !== 'note') void this.o.speech.call('POST', '/dictate/prepare')
     this.mode = mode
     this.set('recording')
+    const expected = this.o.expected()
+    let session: string | undefined
+    if (mode !== 'note') {
+      // Heard while it is spoken (the engine loads its model meanwhile); an engine without sessions gets the phrase whole.
+      this.opening = true
+      try {
+        const r = await this.o.speech.call<{ id: string }>('POST', '/dictate/sessions', { expected })
+        if (r.ok) session = r.data.id
+        else void this.o.speech.call('POST', '/dictate/prepare')
+      } finally {
+        this.opening = false
+      }
+    }
+    if (this.state !== 'recording') return
     const badge = this.window()
     this.place(badge)
     badge.showInactive()
-    this.send({ type: 'dictation', command: 'start', mode, key })
+    this.send({ type: 'dictation', command: 'start', mode, key, ...(session ? { session } : {}), expected })
     globalShortcut.register('Escape', () => this.cancel())
   }
 
   private stop(): void {
     this.set('working')
-    globalShortcut.unregister('Escape')
+    // Esc stays: while the text is finished, it throws the phrase away (a note is saved regardless).
+    if (this.mode === 'note') globalShortcut.unregister('Escape')
     this.send({ type: 'dictation', command: 'stop', mode: this.mode, key: '' })
   }
 
   cancel(): void {
-    if (this.state !== 'recording') return
+    if (this.state !== 'recording' && !(this.state === 'working' && this.mode !== 'note')) return
     globalShortcut.unregister('Escape')
     this.send({ type: 'dictation', command: 'cancel', mode: this.mode, key: '' })
   }
@@ -95,6 +111,9 @@ export class Dictation {
         return true
       case 'dictationAudio':
         void this.typePhrase(message.mode, message.audio)
+        return true
+      case 'dictationText':
+        void this.typeHeard(message.mode, message.text, message.language, message.sure)
         return true
       case 'dictationNote':
         void this.awaitNote(message.id)
@@ -115,12 +134,19 @@ export class Dictation {
     const expected = this.o.expected().map(encodeURIComponent).join(',')
     const r = await this.o.speech.call<{ text: string; language: string; sure?: number }>('POST', `/dictate?language=auto&expected=${expected}`, audio)
     if (!r.ok) return this.fail(r.error)
-    let text = r.data.text.trim()
+    // An engine before 0.2 says nothing of how sure it is: its language is taken as it is.
+    await this.typeHeard(mode, r.data.text, r.data.language, r.data.sure ?? 1)
+  }
+
+  /** A recognized phrase typed where the cursor is; in English first for the English key. */
+  private async typeHeard(mode: DictationMode, heard: string, language: string, sure: number): Promise<void> {
+    if (this.state !== 'working') return
+    let text = heard.trim()
     if (!text) return this.fail('Nothing was heard')
     try {
-      // An engine before 0.2 says nothing of how sure it is: its language is taken as it is.
-      const language = (r.data.sure ?? 1) >= 0.5 ? r.data.language : this.o.languageOf(text)
-      if (mode === 'english' && language !== 'en') text = await this.o.toEnglish(text, language)
+      // Whisper unsure, or a model that does not say (Parakeet): the language by the text's letters and words.
+      const spoken = language && sure >= 0.5 ? language : this.o.languageOf(text)
+      if (mode === 'english' && spoken !== 'en') text = await this.o.toEnglish(text, spoken)
     } catch (error) {
       return this.fail(`Could not translate: ${error instanceof Error ? error.message : String(error)}`)
     }

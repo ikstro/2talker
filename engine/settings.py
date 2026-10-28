@@ -31,6 +31,8 @@ OLD_MODELS = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Altscribe" / "
 # The speech models Altype can use: engine/models.json, shared with src/speechplan.ts.
 CATALOG = json.loads((Path(__file__).resolve().parent / "models.json").read_text("utf-8"))
 MODELS = tuple(m["name"] for m in CATALOG["models"] if m["backend"] == "whisper")
+# Every model, Whisper or not (Parakeet dictates on the processor), with where and for what it may run.
+ALL_MODELS = {m["name"]: m for m in CATALOG["models"]}
 # Dictation on the CPU while Altype has sent no plan (an older Altype, or the plan
 # not made yet): large-v3-turbo takes ~6 s for a 7 s phrase there, small ~2 s.
 CPU_DICTATION = "small"
@@ -105,7 +107,8 @@ def clean_plan(plan: dict) -> dict:
             continue
         for feature in FEATURES:
             entry = entries.get(feature)
-            if not isinstance(entry, dict) or entry.get("model") not in MODELS:
+            known = ALL_MODELS.get(entry.get("model")) if isinstance(entry, dict) else None
+            if not known or device not in known.get("devices", DEVICES) or feature not in known.get("features", FEATURES):
                 continue
             clean = {"model": entry["model"]}
             if entry.get("compute") in COMPUTE[device]:

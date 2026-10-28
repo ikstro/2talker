@@ -79,18 +79,31 @@ def gpu() -> bool:
 
 
 WHISPER_DIR = MODELS_DIR / "whisper"
-_WHISPER = {m["name"]: m for m in CATALOG["models"] if m["backend"] == "whisper"}
+_MODELS = {m["name"]: m for m in CATALOG["models"]}
+_WHISPER = {name: m for name, m in _MODELS.items() if m["backend"] == "whisper"}
 # What a model weighs, to tell how far its first download is.
-SIZES = {name: m["bytes"] for name, m in _WHISPER.items()}
+SIZES = {name: m["bytes"] for name, m in _MODELS.items()}
+# Parakeet's files as onnx-asr reads them, int8, its features computed by numpy (no preprocessor model).
+PARAKEET_FILES = ("config.json", "vocab.txt", "encoder-model.int8.onnx", "decoder_joint-model.int8.onnx")
+
+
+def backend(name: str) -> str:
+    return _MODELS.get(name, {}).get("backend", "")
 
 
 def _cache_dir(name: str) -> Path:
-    """Hugging Face's folder for a model: models--<owner>--<repo>."""
-    return WHISPER_DIR / ("models--" + _WHISPER[name]["repo"].replace("/", "--"))
+    """Where a model's files are: Hugging Face's models--<owner>--<repo> for Whisper, a folder of its own for Parakeet."""
+    if backend(name) == "whisper":
+        return WHISPER_DIR / ("models--" + _WHISPER[name]["repo"].replace("/", "--"))
+    return MODELS_DIR / name
 
 
 def downloaded(name: str) -> bool:
-    return name in _WHISPER and any(_cache_dir(name).glob("snapshots/*/model.bin"))
+    if backend(name) == "whisper":
+        return any(_cache_dir(name).glob("snapshots/*/model.bin"))
+    if backend(name) == "parakeet":
+        return all((_cache_dir(name) / f).is_file() for f in PARAKEET_FILES)
+    return False
 
 
 fetching: set[str] = set()
@@ -101,19 +114,25 @@ def model_state(name: str) -> dict:
     if downloaded(name):
         return {"name": name, "state": "ready"}
     if name in fetching:
-        got = sum(f.stat().st_size for f in _cache_dir(name).glob("**/*") if f.is_file()) if name in _WHISPER else 0
+        got = sum(f.stat().st_size for f in _cache_dir(name).glob("**/*") if f.is_file()) if name in _MODELS else 0
         return {"name": name, "state": "downloading", "progress": round(min(got / SIZES.get(name, max(got, 1)), 0.99), 3)}
     return {"name": name, "state": "missing"}
 
 
 def fetch(name: str) -> str:
     """The model's folder, downloaded first when it is not here (once; `fetching` shows it meanwhile)."""
-    from faster_whisper.utils import download_model
-
     here = downloaded(name)
     if not here:
         fetching.add(name)
     try:
+        if backend(name) == "parakeet":
+            if not here:
+                from huggingface_hub import snapshot_download
+
+                snapshot_download(_MODELS[name]["repo"], local_dir=str(_cache_dir(name)), allow_patterns=list(PARAKEET_FILES))
+            return str(_cache_dir(name))
+        from faster_whisper.utils import download_model
+
         return download_model(name, cache_dir=str(WHISPER_DIR), local_files_only=here)
     finally:
         fetching.discard(name)
@@ -148,6 +167,7 @@ class Transcriber:
     def __init__(self, workers: int = 1):
         self._model = None
         self._key: tuple | None = None
+        self._warm: tuple | None = None
         self._lock = threading.Lock()
         self.workers = workers
         self.name: str | None = None
@@ -167,6 +187,7 @@ class Transcriber:
                 return
             self._model = None
             self._key = None
+            self._warm = None
             path = fetch(name)
             from faster_whisper import WhisperModel
 
@@ -196,6 +217,7 @@ class Transcriber:
         with self._lock:
             self._model = None
             self._key = None
+            self._warm = None
             self.name = None
 
     def transcribe(
@@ -250,23 +272,25 @@ class Transcriber:
         expected: tuple[str, ...] | list[str] = (),
         hotwords: str = "",
         beam: int = 5,
+        before: str = "",
     ) -> tuple[str, str, float]:
-        """A short phrase's text, its language and how sure Whisper is of it (0…1): no word times, no carrying over.
+        """A short phrase's text, its language and how sure Whisper is of it (0…1): no word times.
 
         The sound is encoded once: the language is read from the same pass the words
         come from (faster-whisper's own way encodes it twice), among the `expected`
-        ones unless Whisper is sure of another.
+        ones unless Whisper is sure of another. `before`: the text said just before
+        (a dictation's earlier pieces), so this one goes on in its style.
         """
         speech = _speech_only(samples)
         if speech is None:
             return "", language or "", 0.0
         try:
-            return self._one_pass(speech, language, expected, hotwords, beam)
+            return self._one_pass(speech, language, expected, hotwords, beam, before)
         except (AttributeError, TypeError, KeyError) as error:  # faster-whisper changed underneath
             log.warning("one-pass dictation failed (%s); using faster-whisper's own way", error)
             return self._two_passes(speech, language, hotwords, beam)
 
-    def _one_pass(self, speech: np.ndarray, language: str | None, expected, hotwords: str, beam: int) -> tuple[str, str, float]:
+    def _one_pass(self, speech: np.ndarray, language: str | None, expected, hotwords: str, beam: int, before: str = "") -> tuple[str, str, float]:
         from faster_whisper.audio import pad_or_trim
         from faster_whisper.tokenizer import Tokenizer
 
@@ -284,11 +308,12 @@ class Transcriber:
                 language = "en"
         # The options as faster-whisper fills them (thresholds, suppressed tokens…), from a call
         # that only prepares: its segments are a generator that is never run.
+        prompt = " ".join(p for p in (STYLE.get(language), before[-150:].strip()) if p) or None
         _, info = model.transcribe(
             speech[:RATE],
             language=language,
             beam_size=beam,
-            initial_prompt=STYLE.get(language),
+            initial_prompt=prompt,
             without_timestamps=True,
             condition_on_previous_text=False,
             vad_filter=False,
@@ -317,6 +342,75 @@ class Transcriber:
         return " ".join(s.text.strip() for s in segments).strip(), info.language, float(sure)
 
     def warm(self) -> None:
-        """Runs the loaded model once: a card's first run sets itself up for seconds."""
+        """Runs the loaded model once (once per load: a card's first run sets itself up for seconds;
+        again, on the processor, it would only take a second from the phrase being spoken)."""
+        if self._warm == self._key:
+            return
         noise = (np.random.default_rng(0).standard_normal(RATE) * 0.01).astype(np.float32)
         list(self._model.transcribe(noise, language="en", vad_filter=False, without_timestamps=True)[0])
+        self._warm = self._key
+
+
+class Parakeet:
+    """NVIDIA's Parakeet TDT 0.6B v3 through onnx-asr, int8 on the processor: 25 European languages, with
+    their punctuation and capitals. It costs what the sound lasts (Whisper pads every phrase to a 30 s
+    window), so a phrase takes a third of a second on a desktop processor. It does not say which
+    language it heard: the caller finds out from the text."""
+
+    def __init__(self):
+        self._model = None
+        self._key: tuple | None = None
+        self._warm: tuple | None = None
+        self._lock = threading.Lock()
+        self.name: str | None = None
+        self.device = "cpu"
+        self.compute = "int8"
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    def load(self, name: str, device: str = "cpu", compute: str | None = None, threads: int = 0) -> None:
+        with self._lock:
+            key = (name, threads)
+            if self._model is not None and self._key == key:
+                return
+            self._model = None
+            self._key = None
+            self._warm = None
+            path = fetch(name)
+            import onnx_asr
+            import onnxruntime as rt
+
+            options = rt.SessionOptions()
+            if threads:
+                options.intra_op_num_threads = threads
+            self._model = onnx_asr.load_model(_MODELS[name]["onnx"], path, quantization="int8", sess_options=options, providers=["CPUExecutionProvider"])
+            self.name = name
+            self._key = key
+
+    def unload(self) -> None:
+        with self._lock:
+            self._model = None
+            self._key = None
+            self._warm = None
+            self.name = None
+
+    def dictate(self, samples: np.ndarray, language: str | None = None, expected=(), hotwords: str = "", beam: int = 0, before: str = "") -> tuple[str, str, float]:
+        """The phrase's text; its language is unknown here ("", sure 0)."""
+        speech = _speech_only(samples)
+        if speech is None:
+            return "", language or "", 0.0
+        return str(self._model.recognize(speech)).strip(), language or "", 0.0
+
+    def warm(self) -> None:
+        if self._warm == self._key:
+            return
+        noise = (np.random.default_rng(0).standard_normal(RATE) * 0.01).astype(np.float32)
+        self._model.recognize(noise)
+        self._warm = self._key
+
+
+def recognizer(name: str):
+    """A fresh, unloaded recognizer for this model: Whisper's or Parakeet's."""
+    return Parakeet() if backend(name) == "parakeet" else Transcriber()

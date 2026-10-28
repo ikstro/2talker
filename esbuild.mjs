@@ -66,8 +66,10 @@ const appWindow = { ...card, entryPoints: ['src/webview/app.ts'], outfile: 'medi
 const trayPanel = { ...card, entryPoints: ['src/webview/tray.ts'], outfile: 'media/tray.js' }
 /** Dictate's badge by the pointer. */
 const dictation = { ...card, entryPoints: ['src/webview/dictation.ts'], outfile: 'media/dictation.js' }
+/** The badge's audio thread: the microphone as 16 kHz samples for the engine (an AudioWorklet, loaded by URL). */
+const pcmWorklet = { ...card, entryPoints: ['src/webview/pcm-worklet.ts'], outfile: 'media/pcm-worklet.js' }
 
-const all = [main, preload, voice, translator, keyboard, card, appWindow, trayPanel, dictation]
+const all = [main, preload, voice, translator, keyboard, card, appWindow, trayPanel, dictation, pcmWorklet]
 if (watch) {
   const contexts = await Promise.all(all.map(o => context(o)))
   await Promise.all(contexts.map(c => c.watch()))

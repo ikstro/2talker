@@ -4,9 +4,16 @@ Run: python app.py [--port 8765]. Only this computer can reach it; a web page
 cannot call it either (see `guard`), only the app (no Origin) and the extension.
 
 What other apps may use, and keep using:
-  POST /dictate?language=auto|<code>&expected=ru,en
-                                      a short recording (any format) -> {text, language, sure}
-                                      (`expected`: the languages likely spoken, when Whisper is unsure)
+  POST /dictate?language=auto|<code>&expected=ru,en[&format=pcm16]
+                                      a short recording (any format; raw 16-bit 16 kHz mono with
+                                      format=pcm16) -> {text, language, sure}
+                                      (`expected`: the languages likely spoken, when Whisper is unsure;
+                                      `language` is "" when the model does not say, as Parakeet)
+  POST /dictate/sessions {expected?, language?} -> {id, model}
+                                      a dictation recognized while it is spoken:
+  PUT  /dictate/sessions/<id>/<seq>   a chunk of raw 16-bit 16 kHz mono -> {pending, heard, model}
+  POST /dictate/sessions/<id>/finish  the last chunk -> {text, language, sure, seconds, took}
+  DELETE /dictate/sessions/<id>       thrown away
   POST /dictate/prepare               loads the dictation model, so the next phrase is quick
   POST /transcripts {path}            a file on this computer -> a transcript in the library
   POST /recordings ...                a recording that arrives in chunks (the extension)
@@ -42,10 +49,13 @@ import audio
 import diarize
 import export
 import notes
+import numpy as np
+
 from bench import Calibrator
 from jobs import Worker, finish_recording
-from settings import APP_DIR, MODELS, Settings, adopt_altscribe
+from settings import ALL_MODELS, APP_DIR, Settings, adopt_altscribe
 from store import Store, now_iso
+from stream import Session, Sessions
 
 VERSION = "0.2.0"
 PORT = 8765
@@ -72,8 +82,10 @@ class State:
 state = State()
 worker = Worker(settings, state.get_store)
 setup = diarize.Setup()
+sessions = Sessions()
+worker.dictating = sessions.active
 # The speed test runs only while nothing else does: no transcription, no phrase being recognized.
-calibrator = Calibrator(worker.bench, lambda: worker.idle() and not _dictating.locked(), worker.unload_all, lambda: worker.activity, worker.threads)
+calibrator = Calibrator(worker.bench, lambda: worker.idle() and not _dictating.locked() and not sessions.active(), worker.unload_all, lambda: worker.activity, worker.threads)
 app = FastAPI(title="Altype speech", version=VERSION)
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"chrome-extension://[a-p]{32}", allow_methods=["*"], allow_headers=["*"])
 
@@ -114,7 +126,7 @@ def health():
         "parts": {"core": True, "gpu": asr.gpu(), "speakers": diarize.installed()},
         "whisper": whisper_status(s["model"]),
         "models": {"transcripts": planned("transcripts"), "dictation": planned("dictation")},
-        "downloaded": [m for m in MODELS if asr.downloaded(m)],
+        "downloaded": [m for m in ALL_MODELS if asr.downloaded(m)],
         "fallback": worker.fallback,
         "calibration": calibrator.status(),
         "bench": {"fingerprint": bench.get("fingerprint", ""), "runs": bench.get("runs", {})},
@@ -149,23 +161,31 @@ def prepare_dictation():
     return planned("dictation")
 
 
+def pcm16(data: bytes) -> np.ndarray:
+    """Raw 16-bit little-endian mono at 16 kHz, as the badge records it, to samples."""
+    return np.frombuffer(data[: len(data) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
+
+
 @app.post("/dictate")
-async def dictate(request: Request, language: str = "auto", expected: str = ""):
+async def dictate(request: Request, language: str = "auto", expected: str = "", format: str = ""):
     """A short recording to its text. Nothing is kept: the sound is read and thrown away."""
     data = await request.body()
     if not data:
         raise HTTPException(400, "No sound")
     if len(data) > 60_000_000:
         raise HTTPException(413, "Too long for dictation: transcribe it instead")
-    tmp = APP_DIR / "tmp" / f"dictate-{secrets.token_hex(4)}"
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_bytes(data)
-    try:
-        samples = await run_in_threadpool(audio.decode, tmp)
-    except Exception as error:
-        raise HTTPException(415, f"Not a recording: {error}")
-    finally:
-        tmp.unlink(missing_ok=True)
+    if format == "pcm16":
+        samples = pcm16(data)
+    else:
+        tmp = APP_DIR / "tmp" / f"dictate-{secrets.token_hex(4)}"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(data)
+        try:
+            samples = await run_in_threadpool(audio.decode, tmp)
+        except Exception as error:
+            raise HTTPException(415, f"Not a recording: {error}")
+        finally:
+            tmp.unlink(missing_ok=True)
     seconds = audio.duration(samples)
     if seconds > DICTATION_LONGEST:
         raise HTTPException(413, "Too long for dictation: transcribe it instead")
@@ -189,6 +209,65 @@ async def dictate(request: Request, language: str = "auto", expected: str = ""):
     return {"text": text, "language": spoken, "sure": round(sure, 3), "seconds": round(seconds, 2), "took": round(time.perf_counter() - started, 2)}
 
 
+def _piece(sound: np.ndarray, language: str | None, expected: list, before: str) -> tuple[str, str, float]:
+    """One piece of a dictation heard while it is spoken (stream.py), by dictation's model."""
+    with _dictating:
+        worker.activity += 1
+        transcriber, entry = worker.dictation_model()
+        beam = entry.get("beam") or (5 if transcriber.device == "cuda" else 2)
+        started = time.perf_counter()
+        out = transcriber.dictate(sound, language, expected, settings["hotwords"], beam, before)
+        worker.bench.phrase(transcriber.name, transcriber.device, transcriber.compute, audio.duration(sound), time.perf_counter() - started)
+        return out
+
+
+def session_or_404(id: str) -> Session:
+    s = sessions.get(id)
+    if s is None:
+        raise HTTPException(404, "No such dictation")
+    return s
+
+
+@app.post("/dictate/sessions")
+def open_session(body: dict = Body(default={})):
+    """A dictation to be heard while it is spoken; the model loads meanwhile (the first time it downloads)."""
+    expected = [c for c in body.get("expected") or [] if isinstance(c, str)][:4]
+    language = body.get("language") if isinstance(body.get("language"), str) and body.get("language") not in ("", "auto") else None
+    device, entry = worker.entry("dictation")
+    kind = (asr.backend(entry["model"]) or "whisper", device)
+    session = sessions.open(Session(_piece, kind, expected, language))
+    threading.Thread(target=_prepare, name="altype-prepare", daemon=True).start()
+    return {"id": session.id, "model": planned("dictation")}
+
+
+@app.put("/dictate/sessions/{id}/{seq}")
+async def session_chunk(id: str, seq: int, request: Request):
+    s = session_or_404(id)
+    s.add(seq, await request.body())
+    return {**s.status(), "model": planned("dictation")}
+
+
+@app.post("/dictate/sessions/{id}/finish")
+async def session_finish(id: str, request: Request):
+    s = session_or_404(id)
+    data = await request.body()
+    try:
+        result = await run_in_threadpool(s.finish, data)
+    except TimeoutError as error:
+        raise HTTPException(504, str(error))
+    except RuntimeError as error:
+        raise HTTPException(500, f"Could not recognize: {error}")
+    finally:
+        worker.last_work = time.monotonic()
+    return result
+
+
+@app.delete("/dictate/sessions/{id}", status_code=204)
+def session_cancel(id: str):
+    sessions.drop(id)
+    return Response(status_code=204)
+
+
 # How fast this computer is ------------------------------------------------
 
 @app.post("/calibrate", status_code=202)
@@ -196,7 +275,7 @@ def calibrate(body: dict = Body(...)):
     """The speed test, in the background: {runs: [{model, device, compute?, beam?}], expected: [codes]}.
 
     Only models already downloaded are tested; /health's `calibration` says how far it is."""
-    runs = [r for r in body.get("runs") or [] if isinstance(r, dict) and r.get("model") in MODELS and asr.downloaded(r["model"])]
+    runs = [r for r in body.get("runs") or [] if isinstance(r, dict) and r.get("model") in ALL_MODELS and asr.downloaded(r["model"])]
     if not runs:
         raise HTTPException(409, "No downloaded model to test")
     expected = [c for c in body.get("expected") or [] if isinstance(c, str)][:4]
@@ -208,7 +287,7 @@ def calibrate(body: dict = Body(...)):
 @app.post("/models/{name}/download")
 def download_model(name: str):
     """A model downloaded now (it would be at its first use otherwise); /health's `downloaded` shows when it is here."""
-    if name not in MODELS:
+    if name not in ALL_MODELS:
         raise HTTPException(404, "No such model")
     if not asr.downloaded(name) and name not in asr.fetching:
         def fetch():

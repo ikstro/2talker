@@ -26,7 +26,7 @@ import asr
 import audio
 import merge
 import notes
-from asr import CudaFailed, Transcriber
+from asr import CudaFailed, Parakeet, Transcriber
 from bench import Bench
 from diarize import Diarizer, NeedsPart, NeedsToken
 from settings import CPU_DICTATION, Settings
@@ -35,12 +35,34 @@ from store import Store
 log = logging.getLogger("altype.jobs")
 
 IDLE_UNLOAD = 600     # seconds without work before the models leave the GPU
+# Seconds without a phrase before dictation's model is let go: longer when there is memory to spare.
+DICTATION_IDLE = {"roomy": 1800, "tight": 600}
+YIELD_LONGEST = 60    # seconds a transcription on the processor waits at most for a dictation to finish
 STALE = 180           # seconds without a chunk before a recording counts as cut off
 # Each stage's share of the bar, by the time it takes on an hour of audio
 # (src/webview/app.ts keeps the same numbers to say how far a stage is).
 WEIGHTS = {"decode": (0.0, 0.1), "words": (0.1, 0.6), "speakers": (0.6, 0.95), "save": (0.95, 1.0)}
 # A finished transcript worked on again: when that fails, the old one stays.
 AGAIN = ("speakers", "redo")
+
+
+def ram_gb() -> float:
+    """This computer's memory, in GB (Windows' GlobalMemoryStatusEx); 8 when it cannot be read."""
+    try:
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong),
+                        ("pageTotal", ctypes.c_ulonglong), ("pageFree", ctypes.c_ulonglong), ("virtualTotal", ctypes.c_ulonglong),
+                        ("virtualFree", ctypes.c_ulonglong), ("extended", ctypes.c_ulonglong)]
+
+        status = Status()
+        status.length = ctypes.sizeof(Status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return status.total / 2**30
+    except (AttributeError, OSError):
+        pass
+    return 8.0
 
 
 def finish_recording(store: Store, id: str, options: dict | None = None, interrupted: bool = False) -> bool:
@@ -81,6 +103,11 @@ class Worker:
         self.transcriber = Transcriber(workers=2)
         # Dictation's own model, when the plan gives it another one than transcripts (on the CPU, a quicker one).
         self.dictator = Transcriber()
+        # Parakeet, when the plan has it dictate (the processor, a European language).
+        self.parakeet = Parakeet()
+        self.last_dictation = time.monotonic()
+        # A dictation is being recognized now (app.py's sessions): a transcription on the processor waits for it.
+        self.dictating: Callable[[], bool] = lambda: False
         self.diarizer = Diarizer()
         self.bench = Bench(settings)
         self.queue: queue.Queue[str] = queue.Queue()
@@ -140,9 +167,13 @@ class Worker:
         self._load(self.transcriber, "transcripts")
         return self.transcriber
 
-    def dictation_model(self) -> tuple[Transcriber, dict]:
+    def dictation_model(self) -> tuple[Transcriber | Parakeet, dict]:
         """Dictation's model, loaded: the transcripts' own when the plan gives both the same (one copy in memory)."""
+        self.last_dictation = time.monotonic()
         device, entry = self.entry("dictation")
+        if asr.backend(entry["model"]) == "parakeet":
+            self.parakeet.load(entry["model"], "cpu", None, self.threads())
+            return self.parakeet, entry
         _, words = self.entry("transcripts", device)
         same = words["model"] == entry["model"] and words.get("compute") == entry.get("compute")
         t = self.transcriber if same else self.dictator
@@ -152,6 +183,7 @@ class Worker:
     def unload_all(self) -> None:
         self.transcriber.unload()
         self.dictator.unload()
+        self.parakeet.unload()
         self.diarizer.unload()
         gc.collect()
         try:
@@ -163,6 +195,12 @@ class Worker:
 
     def idle(self) -> bool:
         return self.current is None and self.queue.empty()
+
+    def yield_to_dictation(self) -> None:
+        """A transcription on the processor stops between its windows while someone dictates: the phrase comes first."""
+        until = time.monotonic() + YIELD_LONGEST
+        while self.dictating() and time.monotonic() < until:
+            time.sleep(0.05)
 
     def _run(self) -> None:
         while True:
@@ -199,9 +237,21 @@ class Worker:
             touched = datetime.fromisoformat(row["touched"] or row["created"])
             if (now - touched).total_seconds() > STALE and finish_recording(store, row["id"], interrupted=True):
                 self.submit(row["id"])
-        if time.monotonic() - self.last_work > IDLE_UNLOAD and (self.transcriber.loaded or self.dictator.loaded or self.diarizer.loaded):
-            self.unload_all()
-            log.info("models unloaded after %d s idle", IDLE_UNLOAD)
+        now = time.monotonic()
+        keep = DICTATION_IDLE["roomy" if ram_gb() >= 12 else "tight"]
+        dictating = now - self.last_dictation < keep
+        if now - self.last_work > IDLE_UNLOAD:
+            # The transcripts' model goes, unless dictation shares it and is still in use.
+            shared = self.transcriber.loaded and self.transcriber.name == self.entry("dictation")[1]["model"]
+            if self.diarizer.loaded:
+                self.diarizer.unload()
+            if self.transcriber.loaded and not (shared and dictating):
+                self.transcriber.unload()
+            if not dictating and (self.dictator.loaded or self.parakeet.loaded):
+                self.dictator.unload()
+                self.parakeet.unload()
+                log.info("dictation's model unloaded after %d s without a phrase", keep)
+            gc.collect()
 
     def _process(self, id: str) -> None:
         row = self.get_store().row(id)
@@ -267,8 +317,14 @@ class Worker:
         def words(samples, share=(0.0, 1.0)):
             a, b = share
             t = self.words_model()
+
+            def step(p):
+                progress("words", a + (b - a) * p)
+                if t.device == "cpu":
+                    self.yield_to_dictation()
+
             started = time.perf_counter()
-            out = t.transcribe(samples, language, hotwords, lambda p: progress("words", a + (b - a) * p))
+            out = t.transcribe(samples, language, hotwords, step)
             self.bench.words(t.name, t.device, t.compute, audio.duration(samples), time.perf_counter() - started)
             return out
 

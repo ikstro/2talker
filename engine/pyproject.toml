@@ -1,7 +1,8 @@
 # Altype's speech engine. Installed by the app in parts (src/speechpack.ts runs
 # `uv sync` with the extras of the parts chosen), into
 # %LOCALAPPDATA%\Altype\speech\env, outside the app's own folder:
-#   core          speech to text (faster-whisper on the CPU)         ~330 MB
+#   core          speech to text (faster-whisper on the CPU, and
+#                 Parakeet through onnx-asr on the same onnxruntime)  ~330 MB
 #   gpu           the same on an NVIDIA card (cuBLAS, cuDNN)          ~1.7 GB
 #   speakers      who spoke when (pyannote, torch for the CPU)        ~0.9 GB
 #   speakers-gpu  the same on an NVIDIA card; its torch also carries
@@ -14,6 +15,9 @@ description = "Altype's local speech engine: Whisper for the words, pyannote for
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "faster-whisper>=1.2",
+  # Parakeet TDT for dictation on the processor (25 European languages); runs on
+  # the onnxruntime faster-whisper already brings, so it adds a few hundred KB.
+  "onnx-asr[hub]>=0.12",
   "av>=14",
   "numpy",
   "fastapi>=0.115",
