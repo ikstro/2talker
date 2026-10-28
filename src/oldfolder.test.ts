@@ -2,12 +2,16 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 
-import { expect, test } from 'vitest'
+import { afterEach, expect, test } from 'vitest'
 
 import { adoptOldFolders } from './oldfolder'
 
+const made: string[] = []
+afterEach(() => made.splice(0).forEach(dir => fs.rmSync(dir, { recursive: true, force: true })))
+
 test('2Talker\'s folder moves over to Altype\'s, item by item, never over what is there; tu-talk fills the gaps', () => {
   const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'altype-appdata-'))
+  made.push(appData)
   const put = (file: string, text: string) => {
     fs.mkdirSync(path.dirname(path.join(appData, file)), { recursive: true })
     fs.writeFileSync(path.join(appData, file), text)
