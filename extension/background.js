@@ -9,14 +9,35 @@ async function port() {
   return port || 8765
 }
 
+// Every call to /health says which version of the extension this is, so Altype can show "Installed in Chrome".
+const SELF = () => ({ 'X-Altype-Extension': chrome.runtime.getManifest().version })
+
 async function engineReady() {
   try {
-    const r = await fetch(`http://127.0.0.1:${await port()}/health`, { signal: AbortSignal.timeout(1500) })
+    const r = await fetch(`http://127.0.0.1:${await port()}/health`, { headers: SELF(), signal: AbortSignal.timeout(1500) })
     return r.ok
   } catch {
     return false
   }
 }
+
+/** Lets the engine know the extension is there; the engine may be off, which is fine. */
+async function ping() {
+  try {
+    await fetch(`http://127.0.0.1:${await port()}/health`, { headers: SELF(), signal: AbortSignal.timeout(1500) })
+  } catch {}
+}
+
+function startPinging() {
+  chrome.alarms.create('ping', { periodInMinutes: 15 })
+  ping()
+}
+
+chrome.runtime.onInstalled.addListener(startPinging)
+chrome.runtime.onStartup.addListener(startPinging)
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === 'ping') ping()
+})
 
 async function current() {
   const { recording } = await chrome.storage.session.get('recording')

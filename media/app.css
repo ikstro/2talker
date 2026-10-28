@@ -121,13 +121,25 @@ button:disabled {
   flex: none;
   width: 28px;
   height: 28px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   color: var(--muted);
 }
 
 .icon-btn:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+.icon-btn .lu {
+  width: 16px;
+  height: 16px;
+}
+
+/* Maximize is drawn a little smaller, as Windows draws it beside its neighbours. */
+.icon-btn.max .lu {
+  width: 13px;
+  height: 13px;
+  stroke-width: 1.8;
 }
 
 svg.glyph {
@@ -144,14 +156,7 @@ svg.glyph {
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-}
-
-.brand .key {
-  height: 24px;
-  min-width: 32px;
-  font-weight: 700;
-  font-size: 12px;
+  gap: 7px;
 }
 
 .wm {
@@ -165,6 +170,7 @@ svg.glyph {
   align-items: center;
   gap: 2px;
   margin-left: auto;
+  padding-left: 20px;
 }
 
 .pill {
@@ -173,7 +179,7 @@ svg.glyph {
   gap: 6px;
   height: 30px;
   padding: 0 12px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
@@ -186,15 +192,8 @@ svg.glyph {
 }
 
 .pill.on {
-  background: var(--raised);
+  background: var(--selected);
   color: var(--strong);
-}
-
-/* In the light theme the raised tone is the window's own: the pill takes the next one. */
-@media (prefers-color-scheme: light) {
-  .pill.on {
-    background: var(--overlay);
-  }
 }
 
 .pill.pressed {
@@ -204,6 +203,11 @@ svg.glyph {
 
 .pill .codicon {
   font-size: 15px;
+}
+
+.pill .lu {
+  width: 16px;
+  height: 16px;
 }
 
 .pill .n {
@@ -230,10 +234,12 @@ svg.glyph {
   display: flex;
   flex-direction: column;
   overflow: hidden auto;
+  /* The content keeps to one column on a wide window: the side margin grows past 800 px. */
+  --side: max(32px, calc((100% - 800px) / 2));
 }
 
 .head {
-  margin: 0 32px;
+  margin: 0 var(--side);
   padding: 18px 0;
   border-bottom: 1px solid var(--border-soft);
 }
@@ -299,7 +305,7 @@ svg.glyph {
 
 .hcap {
   margin: 6px 0 0;
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-small) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -310,44 +316,35 @@ svg.glyph {
 
 .acts {
   list-style: none;
-  margin: 8px 16px 0;
+  margin: 12px var(--side) 0;
   padding: 0;
 }
 
+/* An action is a card: its icon, its name and what it does, its keys, a chevron. */
 .act {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr auto 16px;
+  grid-template-columns: auto 1fr auto 16px;
   align-items: center;
-  gap: 0 18px;
+  gap: 0 16px;
   /* Six rows fill a window of the usual height without a scroll bar. */
-  min-height: min(80px, calc((100vh - 220px) / 6));
-  padding: 6px 12px 6px 16px;
-  border-radius: var(--r-lg);
+  min-height: min(76px, calc((100vh - 236px) / 6));
+  margin-bottom: 4px;
+  padding: 8px 14px 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   cursor: pointer;
   transition: background-color 0.12s;
 }
 
 .act:hover,
 .act.pressed {
-  background: var(--hover);
+  background: var(--raised);
 }
 
-.act + .act::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 16px;
-  right: 16px;
-  height: 1px;
-  background: var(--border-soft);
-}
-
-.act:hover::before,
-.act:hover + .act::before,
-.act.pressed::before,
-.act.pressed + .act::before {
-  opacity: 0;
+.act > .lu {
+  color: var(--muted);
 }
 
 .an {
@@ -358,20 +355,20 @@ svg.glyph {
 }
 
 .an b {
-  font: 650 18px / 1.3 var(--font);
-  letter-spacing: -0.015em;
+  font: 600 15px / 1.3 var(--font);
+  letter-spacing: -0.01em;
   color: var(--strong);
 }
 
 .an i {
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   font-style: normal;
   color: var(--muted);
 }
 
 .ad {
-  margin-top: 3px;
-  font-size: 13px;
+  margin-top: 2px;
+  font-size: var(--t-small);
   color: var(--muted);
 }
 
@@ -390,7 +387,7 @@ svg.glyph {
 }
 
 .kl {
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
   text-align: right;
   justify-self: end;
@@ -422,9 +419,9 @@ svg.glyph {
 }
 
 .foot {
-  margin: auto 32px 0;
+  margin: auto var(--side) 0;
   padding: 12px 0 10px;
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
 }
 
@@ -457,21 +454,22 @@ svg.glyph {
   inset: 0;
   z-index: 4;
   pointer-events: none;
+  --side: max(32px, calc((100% - 800px) / 2));
 }
 
 .eyebrow {
   position: absolute;
-  left: 32px;
+  left: var(--side);
   top: 196px;
-  font: 500 var(--t-caption) / 1 var(--mono);
-  letter-spacing: 0.12em;
+  font: 500 var(--t-caption) / 1 var(--font);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
 .trail {
   position: absolute;
-  left: 32px;
+  left: var(--side);
   font: 650 18px / 24px var(--font);
   letter-spacing: -0.022em;
   white-space: nowrap;
@@ -490,7 +488,7 @@ svg.glyph {
 
 .big {
   position: absolute;
-  left: 32px;
+  left: var(--side);
   top: 298px;
   display: flex;
   align-items: center;
@@ -571,7 +569,7 @@ svg.glyph {
 
 .rail {
   position: absolute;
-  left: 32px;
+  left: var(--side);
   top: 392px;
   display: flex;
   gap: 36px;
@@ -585,7 +583,7 @@ svg.glyph {
 }
 
 .step small {
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
 }
 
@@ -607,6 +605,7 @@ svg.glyph {
   visibility: hidden;
   pointer-events: none;
   overflow: hidden;
+  --side: max(32px, calc((100% - 800px) / 2));
 }
 
 .win.page-open .pg {
@@ -623,14 +622,14 @@ svg.glyph {
 
 .pback {
   position: absolute;
-  left: 18px;
+  left: calc(var(--side) - 14px);
   top: calc(var(--bar) + 8px);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 30px;
   padding: 0 5px 0 8px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
@@ -647,7 +646,7 @@ svg.glyph {
 
 .pth {
   position: absolute;
-  left: 32px;
+  left: var(--side);
   top: calc(var(--bar) + 48px);
   display: flex;
   align-items: baseline;
@@ -656,28 +655,46 @@ svg.glyph {
 }
 
 .ptitle {
-  font: 650 28px / 34px var(--font);
-  letter-spacing: -0.024em;
+  font: 600 28px / 34px var(--font);
+  letter-spacing: -0.02em;
   color: var(--strong);
   transform-origin: 0 0;
 }
 
+/* On a second-level page the title is a crumb: the parent, quiet and a way back, then the page. */
+.pcrumb {
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  letter-spacing: inherit;
+}
+
+.pcrumb:hover {
+  color: var(--text);
+}
+
+.psep {
+  margin: 0 8px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .pcap {
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-small) / 1 var(--font);
   color: var(--muted);
 }
 
 .pkeys {
   position: absolute;
-  right: 62px;
+  right: calc(var(--side) + 30px);
   top: calc(var(--bar) + 65px);
   translate: 0 -50%;
 }
 
 .pline {
   position: absolute;
-  left: 32px;
-  right: 32px;
+  left: var(--side);
+  right: var(--side);
   top: calc(var(--bar) + 98px);
   height: 1px;
   background: var(--border-soft);
@@ -687,39 +704,57 @@ svg.glyph {
 .pbody {
   position: absolute;
   inset: calc(var(--bar) + 104px) 0 0;
-  /* The scroll bar sits in the right margin: rows end where the header's rule does. */
-  padding: 0 20px 24px 32px;
+  /* The scroll bar sits in the right margin: cards end where the header's rule does. */
+  padding: 6px calc(var(--side) - 12px) 24px var(--side);
   overflow: hidden auto;
   scrollbar-gutter: stable;
 }
 
+/* The ghost of the body that slides away when a second-level page opens or closes. */
+.pghost {
+  pointer-events: none;
+}
+
+/* A group's name over its cards. */
 .grp {
-  margin: 14px 0 4px;
-  font: 500 var(--t-caption) / 1 var(--mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
+  margin: 22px 0 8px;
+  font: 600 13.5px / 1.3 var(--font);
+  color: var(--strong);
 }
 
 .grp:first-child {
   margin-top: 2px;
 }
 
+.grp .n {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.grp .link {
+  float: right;
+}
+
+/* A line of a page is a card: an icon, what it is with a note under it, its control. */
 .row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
-  min-height: 40px;
-  padding: 5px 0;
-  border-bottom: 1px solid var(--border-soft);
-  font-size: 13.5px;
-  color: var(--text);
+  min-height: 56px;
+  margin-bottom: 4px;
+  padding: 10px 14px 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: 14px;
+  color: var(--strong);
   text-align: left;
 }
 
-.row:last-child {
-  border-bottom: 0;
+.row > .lu {
+  color: var(--muted);
 }
 
 .row .l {
@@ -729,9 +764,94 @@ svg.glyph {
 
 .row .l small {
   display: block;
-  margin-top: 1px;
-  font: 400 var(--t-caption) / 1.4 var(--mono);
+  margin-top: 2px;
+  font: 400 var(--t-caption) / 1.4 var(--font);
   color: var(--muted);
+}
+
+/* Home's notice (Altype is paused): a card in the actions' column, above them. */
+.home > .row.notice {
+  width: auto;
+  flex: none;
+  margin: 12px var(--side) -4px;
+}
+
+/* A card's text that is itself a button (a word to change): laid out as the text is. */
+.row > button.l {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row > button.l:hover {
+  color: var(--accent);
+}
+
+/* A card that opens a page of its own: its value on the right, then the chevron. */
+.row.navc {
+  cursor: pointer;
+}
+
+.row.navc:hover {
+  background: var(--raised);
+}
+
+.row .v {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.row .v.ok {
+  color: var(--green);
+}
+
+.row .chev {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+/* A card with its control under the text: an add field and its note. */
+.row.add {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.row.add .fields {
+  display: flex;
+  gap: 8px;
+}
+
+.row.add .fields .field {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.row.add small {
+  font: 400 var(--t-caption) / 1.4 var(--font);
+  color: var(--muted);
+}
+
+.row.add small.bad {
+  color: var(--red);
 }
 
 .row .l small.bad,
@@ -752,19 +872,23 @@ svg.glyph {
   cursor: pointer;
 }
 
+.trow:hover {
+  background: var(--raised);
+}
+
 .seg {
   display: inline-flex;
   flex: none;
   padding: 2px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-pill);
-  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
 }
 
 .seg button {
   height: 26px;
-  padding: 0 11px;
-  border-radius: var(--r-pill);
+  padding: 0 10px;
+  border-radius: 4px;
   color: var(--muted);
   font-size: 12.5px;
   font-weight: 500;
@@ -778,7 +902,7 @@ svg.glyph {
 .seg button.on {
   background: var(--surface);
   color: var(--strong);
-  box-shadow: 0 0 0 1px var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--border);
 }
 
 .seg.mono button {
@@ -797,11 +921,11 @@ svg.glyph {
 .sel select {
   appearance: none;
   max-width: 100%;
-  height: 30px;
-  padding: 0 30px 0 13px;
+  height: 32px;
+  padding: 0 30px 0 12px;
   border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: var(--raised);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   color: var(--strong);
   font-size: 13px;
   text-overflow: ellipsis;
@@ -809,7 +933,7 @@ svg.glyph {
 }
 
 .sel select:hover {
-  background: var(--overlay);
+  background: var(--raised);
 }
 
 .sel option {
@@ -828,12 +952,12 @@ svg.glyph {
 .tg {
   position: relative;
   flex: none;
-  width: 34px;
+  width: 40px;
   height: 20px;
+  border: 1px solid var(--muted);
   border-radius: var(--r-pill);
-  background: var(--overlay);
-  box-shadow: inset 0 0 0 1px var(--border);
-  transition: background-color 0.15s;
+  background: transparent;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
 .tg::after {
@@ -841,20 +965,23 @@ svg.glyph {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--muted);
-  transition: transform 0.3s cubic-bezier(0.3, 1.4, 0.5, 1), background-color 0.15s;
+  transition: transform 0.25s cubic-bezier(0.3, 1.3, 0.5, 1), background-color 0.15s, width 0.15s, height 0.15s, top 0.15s;
 }
 
 .tg.on {
+  border-color: var(--accent);
   background: var(--accent);
-  box-shadow: none;
 }
 
 .tg.on::after {
-  transform: translateX(14px);
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  transform: translateX(19px);
   background: var(--on-accent);
 }
 
@@ -898,7 +1025,7 @@ svg.glyph {
   align-items: center;
   min-height: 28px;
   padding: 2px;
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
 }
 
 .krec:hover {
@@ -925,9 +1052,9 @@ svg.glyph {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r-pill);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
   color: var(--muted);
 }
 
@@ -938,6 +1065,11 @@ svg.glyph {
 .kx .codicon,
 .ib .codicon {
   font-size: 14px;
+}
+
+.ib .lu {
+  width: 16px;
+  height: 16px;
 }
 
 .kx:hover,
@@ -960,8 +1092,11 @@ svg.glyph {
 }
 
 .chiprow {
-  padding: 8px 0 10px;
-  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
 }
 
 .chip {
@@ -974,7 +1109,7 @@ svg.glyph {
   border-radius: var(--r-pill);
   background: var(--raised);
   color: var(--strong);
-  font: 500 12px / 1 var(--mono);
+  font: 500 12.5px / 1 var(--font);
   white-space: nowrap;
 }
 
@@ -1037,15 +1172,24 @@ button.chip:hover {
 }
 
 .field {
-  width: 150px;
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-pill);
-  background: var(--raised);
+  width: 170px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   color: var(--strong);
-  font: 400 12.5px / 1 var(--mono);
+  font: 400 13px / 1 var(--font);
   user-select: text;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.field::placeholder {
+  color: var(--muted);
+}
+
+.field:focus {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .bar {
@@ -1078,8 +1222,17 @@ button.chip:hover {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin: 12px 0 0;
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  margin: 12px 2px 0;
+  font: 400 var(--t-small) / 1.5 var(--font);
+}
+
+.warn .lu,
+.aside .lu,
+.privacy .lu {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
 }
 
 /* A calm line: who else is at the keyboard, not a fault. */
@@ -1095,8 +1248,8 @@ button.chip:hover {
   gap: 10px;
   margin: 12px 0 2px;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border-soft));
-  border-radius: var(--r-lg);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
 
@@ -1121,7 +1274,7 @@ button.chip:hover {
 }
 
 .offer small {
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-caption) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -1146,10 +1299,11 @@ button.chip:hover {
 }
 
 .try {
-  margin-top: 16px;
+  margin-top: 8px;
   padding: 14px 16px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-lg);
+  border: 1px dashed var(--muted);
+  border-radius: var(--r-sm);
+  background: var(--surface);
 }
 
 .try p {
@@ -1168,7 +1322,7 @@ button.chip:hover {
 .try small {
   display: block;
   margin-top: 8px;
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-caption) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -1187,17 +1341,18 @@ button.chip:hover {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  height: 34px;
+  height: 32px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--muted);
   cursor: text;
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 
 .search:focus-within {
-  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .search input {
@@ -1224,12 +1379,12 @@ button.chip:hover {
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   flex: none;
-  height: 34px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--strong);
   font-size: 13px;
@@ -1239,6 +1394,11 @@ button.chip:hover {
 
 .btn .codicon {
   font-size: 14px;
+}
+
+.btn .lu {
+  width: 16px;
+  height: 16px;
 }
 
 .btn:hover {
@@ -1253,7 +1413,7 @@ button.chip:hover {
 
 .wl {
   list-style: none;
-  margin: 0 -12px;
+  margin: 8px 0 0;
   padding: 0;
 }
 
@@ -1262,27 +1422,11 @@ button.chip:hover {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 2px 16px;
-  padding: 12px 12px 13px;
-  border-radius: var(--r-lg);
-}
-
-.wi + .wi::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 12px;
-  right: 12px;
-  height: 1px;
-  background: var(--border-soft);
-}
-
-.wi:hover {
-  background: var(--hover);
-}
-
-.wi:hover::before,
-.wi:hover + .wi::before {
-  opacity: 0;
+  margin-bottom: 4px;
+  padding: 12px 16px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
 }
 
 .wh {
@@ -1301,7 +1445,7 @@ button.chip:hover {
 
 .wh .form {
   flex: none;
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
 }
 
@@ -1339,7 +1483,7 @@ button.chip:hover {
 }
 
 .wr .d {
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
   white-space: nowrap;
 }
@@ -1351,7 +1495,7 @@ button.chip:hover {
   width: 28px;
   height: 28px;
   margin: -4px -6px 0 0;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   color: var(--accent);
 }
 
@@ -1381,8 +1525,12 @@ button.chip:hover {
   height: 56px;
   min-width: 76px;
   padding: 0 14px;
+  border-color: var(--strong);
   border-bottom-width: 4px;
+  border-bottom-color: var(--muted);
   border-radius: 12px;
+  background: var(--strong);
+  color: var(--bg);
   font: 700 26px / 1 var(--mono);
 }
 
@@ -1405,7 +1553,7 @@ button.chip:hover {
 
 .about .ver {
   margin: 12px 0 0;
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-small) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -1420,7 +1568,7 @@ button.chip:hover {
 }
 
 .facts dt {
-  font: 400 var(--t-caption) / 20px var(--mono);
+  font: 400 var(--t-small) / 20px var(--font);
   color: var(--muted);
 }
 
@@ -1453,7 +1601,7 @@ button.chip:hover {
 }
 
 .btn.primary:hover {
-  background: var(--blue-deep);
+  background: var(--accent-hover);
 }
 
 .btn.danger {
@@ -1463,8 +1611,8 @@ button.chip:hover {
 }
 
 .row .btn {
-  height: 30px;
-  padding: 0 13px;
+  height: 32px;
+  padding: 0 12px;
 }
 
 .btn.rec .dot {
@@ -1508,14 +1656,6 @@ button.chip:hover {
 .field.term {
   width: 320px;
   max-width: 45vw;
-}
-
-.row .field {
-  border-color: var(--border);
-}
-
-.row .field:focus {
-  border-color: var(--accent);
 }
 
 .aside > span,
@@ -1577,9 +1717,11 @@ button.chip:hover {
 
 /* Steps to follow, numbered, under the line they serve. */
 .steps {
-  margin: 0;
-  padding: 10px 0 12px 22px;
-  border-bottom: 1px solid var(--border-soft);
+  margin: 0 0 4px;
+  padding: 12px 16px 14px 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   font-size: 13px;
   line-height: 1.6;
   color: var(--text);
@@ -1590,7 +1732,7 @@ button.chip:hover {
 }
 
 .steps li::marker {
-  font: 500 var(--t-caption) / 1 var(--mono);
+  font: 500 var(--t-caption) / 1 var(--font);
   color: var(--muted);
 }
 
@@ -1621,8 +1763,9 @@ button.chip:hover {
   gap: 14px;
   margin: 4px 0 6px;
   padding: 16px 16px 16px 18px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-lg);
+  border: 1px dashed var(--muted);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   cursor: pointer;
   transition: border-color 0.12s, background-color 0.12s;
 }
@@ -1652,7 +1795,7 @@ button.chip:hover {
 .zt small {
   display: block;
   margin-top: 2px;
-  font: 400 var(--t-caption) / 1.4 var(--mono);
+  font: 400 var(--t-caption) / 1.4 var(--font);
   color: var(--muted);
 }
 
@@ -1721,7 +1864,7 @@ button.chip:hover {
   gap: 10px;
   padding: 36px 54px;
   border: 1.5px dashed var(--accent);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   background: var(--surface);
   color: var(--strong);
   font-size: 16px;
@@ -1789,27 +1932,13 @@ button.chip:hover {
 
 .tl {
   list-style: none;
-  margin: 0 -12px;
+  margin: 8px 0 0;
   padding: 0;
 }
 
 .tl li {
   position: relative;
-}
-
-.tl li + li::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 12px;
-  right: 12px;
-  height: 1px;
-  background: var(--border-soft);
-}
-
-.tl li:hover::before,
-.tl li:hover + li::before {
-  opacity: 0;
+  margin-bottom: 4px;
 }
 
 .tl .empty {
@@ -1823,13 +1952,15 @@ button.chip:hover {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 10px 12px;
-  border-radius: var(--r-lg);
+  padding: 10px 14px 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   text-align: left;
 }
 
 .ti:hover {
-  background: var(--hover);
+  background: var(--raised);
 }
 
 .ti .src {
@@ -1839,8 +1970,8 @@ button.chip:hover {
   flex: none;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
   background: var(--raised);
   color: var(--muted);
 }
@@ -1865,7 +1996,7 @@ button.chip:hover {
 }
 
 .tm small {
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-caption) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -1955,7 +2086,7 @@ button.chip:hover {
 .tmeta {
   display: block;
   margin-top: 2px;
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-small) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -1965,7 +2096,7 @@ button.chip:hover {
 }
 
 .tacts .btn {
-  height: 30px;
+  height: 32px;
   padding: 0 12px;
 }
 
@@ -1980,7 +2111,7 @@ button.chip:hover {
 }
 
 .confirm small {
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
 }
 
@@ -2003,7 +2134,7 @@ button.chip:hover {
   min-width: 180px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow);
 }
@@ -2014,7 +2145,7 @@ button.chip:hover {
   gap: 8px;
   height: 30px;
   padding: 0 10px;
-  border-radius: var(--r-md);
+  border-radius: var(--r-xs);
   font-size: 13px;
   text-align: left;
   white-space: nowrap;
@@ -2028,10 +2159,11 @@ button.chip:hover {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 10px 0;
-  padding: 16px 18px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-lg);
+  margin: 0 0 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
 }
 
 .card > b {
@@ -2044,7 +2176,7 @@ button.chip:hover {
 }
 
 .card small {
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-caption) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -2112,7 +2244,7 @@ button.chip:hover {
   margin: 6px 0 4px;
   padding: 0;
   list-style: none;
-  font: 400 var(--t-caption) / 1.5 var(--mono);
+  font: 400 var(--t-caption) / 1.5 var(--font);
   color: var(--muted);
 }
 
@@ -2176,7 +2308,7 @@ button.chip:hover {
 
 .spk > small {
   margin-left: 6px;
-  font: 400 var(--t-caption) / 1 var(--mono);
+  font: 400 var(--t-caption) / 1 var(--font);
   color: var(--muted);
 }
 
@@ -2286,8 +2418,8 @@ button.chip:hover {
   margin: 18px 0 0;
   padding: 6px 10px 6px 6px;
   border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: var(--raised);
+  border-radius: var(--r-md);
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -2304,7 +2436,7 @@ button.chip:hover {
 }
 
 .pp:hover {
-  background: var(--blue-deep);
+  background: var(--accent-hover);
 }
 
 .ptime {
@@ -2326,8 +2458,8 @@ button.chip:hover {
   min-width: 42px;
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
   font: 500 12px / 1 var(--mono);
   color: var(--text);
 }

@@ -1,5 +1,20 @@
 "use strict";
 (() => {
+  // src/hardware.ts
+  function nvidiaCard(p) {
+    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function mainCard(p) {
+    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function shortCpu(name) {
+    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
+  }
+  function cardText(g) {
+    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
+    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
+  }
+
   // src/natural.ts
   var NATURAL_PREFIX = "natural:";
   var NATURAL_VOICES = [
@@ -292,13 +307,91 @@
     return el("span", attrs, ...parts.map((part) => el("span", { class: "key" }, hotkeyLabel(part))), twice ? el("span", { class: "x2" }, "\xD72") : null);
   }
 
+  // src/webview/lucide.ts
+  var LUCIDE = {
+    "volume-2": '<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" /> <path d="M16 9a5 5 0 0 1 0 6" /> <path d="M19.364 18.364a9 9 0 0 0 0-12.728" />',
+    "languages": '<path d="m5 8 6 6" /> <path d="m4 14 6-6 2-3" /> <path d="M2 5h12" /> <path d="M7 2h1" /> <path d="m22 22-5-10-5 10" /> <path d="M14 18h6" />',
+    "scan": '<path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" />',
+    "mic": '<path d="M12 19v3" /> <path d="M19 10v2a7 7 0 0 1-14 0v-2" /> <rect x="9" y="2" width="6" height="13" rx="3" />',
+    "audio-lines": '<path d="M2 10v3" /> <path d="M6 6v11" /> <path d="M10 3v18" /> <path d="M14 8v7" /> <path d="M18 5v13" /> <path d="M22 10v3" />',
+    "keyboard": '<path d="M10 8h.01" /> <path d="M12 12h.01" /> <path d="M14 8h.01" /> <path d="M16 12h.01" /> <path d="M18 8h.01" /> <path d="M6 8h.01" /> <path d="M7 16h10" /> <path d="M8 12h.01" /> <rect width="20" height="16" x="2" y="4" rx="2" />',
+    "file-text": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" />',
+    "notebook-pen": '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /> <path d="M2 6h4" /> <path d="M2 10h4" /> <path d="M2 14h4" /> <path d="M2 18h4" /> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" />',
+    "book-open": '<path d="M12 5v16" /> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" />',
+    "house": '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />',
+    "info": '<circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" />',
+    "settings": '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" />',
+    "file-audio": '<path d="M4 6.835V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-.343" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M2 19a2 2 0 0 1 4 0v1a2 2 0 0 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 0 1-4 0v-1a2 2 0 0 1 4 0" />',
+    "users": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" />',
+    "spell-check": '<path d="m20 15-5.5 5.5L12 18" /> <path d="m4 16 6-12 5.115 10.23" /> <path d="M6 12h8" />',
+    "video": '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" /> <rect x="2" y="6" width="14" height="12" rx="2" />',
+    "cpu": '<path d="M12 20v2" /> <path d="M12 2v2" /> <path d="M17 20v2" /> <path d="M17 2v2" /> <path d="M2 12h2" /> <path d="M2 17h2" /> <path d="M2 7h2" /> <path d="M20 12h2" /> <path d="M20 17h2" /> <path d="M20 7h2" /> <path d="M7 20v2" /> <path d="M7 2v2" /> <rect x="4" y="4" width="16" height="16" rx="2" /> <rect x="8" y="8" width="8" height="8" rx="1" />',
+    "folder": '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />',
+    "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />',
+    "external-link": '<path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
+    "rotate-cw": '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" />',
+    "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />',
+    "pause": '<rect x="14" y="3" width="5" height="18" rx="1" /> <rect x="5" y="3" width="5" height="18" rx="1" />',
+    "power": '<path d="M12 2v10" /> <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />',
+    "list": '<path d="M3 5h.01" /> <path d="M3 12h.01" /> <path d="M3 19h.01" /> <path d="M8 5h13" /> <path d="M8 12h13" /> <path d="M8 19h13" />',
+    "monitor": '<rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" />',
+    "clock": '<circle cx="12" cy="12" r="10" /> <path d="M12 6v6l4 2" />',
+    "lock": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" />',
+    "download": '<path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" />',
+    "globe": '<circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" />',
+    "type": '<path d="M12 4v16" /> <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" /> <path d="M9 20h6" />',
+    "message-square": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" />',
+    "star": '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" />',
+    "search": '<path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" />',
+    "trash-2": '<path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />',
+    "circle-alert": '<circle cx="12" cy="12" r="10" /> <line x1="12" x2="12" y1="8" y2="12" /> <line x1="12" x2="12.01" y1="16" y2="16" />',
+    "circle-check": '<circle cx="12" cy="12" r="10" /> <path d="m16 9-5.5 5.5L8 12" />',
+    "check": '<path d="M20 6 9 17l-5-5" />',
+    "link": '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /> <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />',
+    "plus": '<path d="M5 12h14" /> <path d="M12 5v14" />',
+    "x": '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
+    "minus": '<path d="M5 12h14" />',
+    "square": '<rect width="18" height="18" x="3" y="3" rx="2" />',
+    "chevron-right": '<path d="m9 18 6-6-6-6" />',
+    "chevron-left": '<path d="m15 18-6-6 6-6" />',
+    "chevron-down": '<path d="m6 9 6 6 6-6" />',
+    "arrow-up": '<path d="m5 12 7-7 7 7" /> <path d="M12 19V5" />',
+    "arrow-down": '<path d="M12 5v14" /> <path d="m19 12-7 7-7-7" />'
+  };
+  function lucide(name, cls = "") {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", cls ? `lu ${cls}` : "lu");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = LUCIDE[name];
+    return svg;
+  }
+
   // src/webview/ui.ts
   var post = (message) => window.tutorHost.post(message);
-  var grp = (text) => el("div", { class: "grp" }, text);
+  var grp = (text, n, right) => el("div", { class: "grp" }, text, n !== void 0 && n !== "" ? el("span", { class: "n" }, String(n)) : null, right ?? null);
   var bad = (text) => el("small", { class: "bad" }, text);
   var notesOf = (notes) => notes.filter((n) => !!n).map((n) => typeof n === "string" ? el("small", {}, n) : n);
   function row(label, notes, ...controls) {
     return el("div", { class: "row" }, el("div", { class: "l" }, label, ...notesOf(notes)), ...controls);
+  }
+  function card(name, label, notes, ...controls) {
+    const node = row(label, notes, ...controls);
+    node.prepend(lucide(name));
+    return node;
+  }
+  function navCard(name, title, note, value, onOpen, id = "", ok = false) {
+    return el(
+      "button",
+      { class: "row navc", "data-sub": id || void 0, onclick: onOpen },
+      name ? lucide(name) : null,
+      el("div", { class: "l" }, title, ...notesOf([note])),
+      value ? el("span", { class: ok ? "v ok" : "v" }, ok ? lucide("check", "s") : null, value) : null,
+      lucide("chevron-right", "chev")
+    );
+  }
+  function ib(name, label, onclick, disabled = false) {
+    return el("button", { class: "ib", title: label, "aria-label": label, disabled, onclick }, lucide(name));
   }
   function toggle(label, on, onchange, ...notes) {
     const knob = el("span", { class: on ? "tg on" : "tg" });
@@ -318,6 +411,11 @@
       el("span", { class: "l" }, label, ...notesOf(notes)),
       knob
     );
+    return node;
+  }
+  function toggleCard(name, label, on, onchange, ...notes) {
+    const node = toggle(label, on, onchange, ...notes);
+    node.prepend(lucide(name));
     return node;
   }
   function toggleKnob(on, onchange, label) {
@@ -367,7 +465,7 @@
       }
     });
     for (const [v, label] of options) node.append(el("option", v === value ? { value: String(v), selected: true } : { value: String(v) }, label));
-    return el("span", { class: "sel" }, node, icon("chevron-down"));
+    return el("span", { class: "sel" }, node, lucide("chevron-down", "s"));
   }
   var linkBtn = (text, onclick, disabled = false) => el("button", { class: "link", disabled, onclick }, text);
   var chip = (text, cls = "") => el("span", { class: `chip${cls ? " " + cls : ""}` }, text);
@@ -382,8 +480,55 @@
     fill.style.width = `${Math.round(progress * 100)}%`;
     return el("span", { class: "bar" }, fill);
   }
-  var aside = (glyphName, ...text) => el("p", { class: "aside" }, icon(glyphName), el("span", {}, ...text));
-  var warn = (...text) => el("p", { class: "warn" }, icon("warning"), el("span", {}, ...text));
+  var aside = (name, ...text) => el("p", { class: "aside" }, lucide(name, "s"), el("span", {}, ...text));
+  var warn = (...text) => el("p", { class: "warn" }, lucide("circle-alert", "s"), el("span", {}, ...text));
+  function liveField(id, placeholder, label, onkey) {
+    const field = el("input", {
+      type: "text",
+      class: "field",
+      placeholder,
+      autocomplete: "off",
+      spellcheck: "false",
+      "aria-label": label,
+      "data-live": id
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault();
+        onkey(event.key, field);
+      }
+    });
+    return field;
+  }
+  function listPage(o) {
+    const norm = o.normalize ?? ((t) => t.trim());
+    const add = (field2) => {
+      const item = norm(field2.value);
+      if (!item) return field2.focus();
+      field2.value = "";
+      field2.focus();
+      if (o.items.some((x) => x.toLowerCase() === item.toLowerCase())) return;
+      o.add(item);
+    };
+    const field = liveField("add", o.placeholder, o.label, (key, f) => key === "Enter" ? add(f) : (f.value = "", f.blur()));
+    const addCard = el(
+      "div",
+      { class: "row add" },
+      el("div", { class: "fields" }, field, btn([lucide("plus", "s"), "Add"], () => add(field), "primary")),
+      o.note ? el("small", {}, o.note) : null
+    );
+    const items = o.items.map((item) => {
+      const note = o.itemNote?.(item);
+      return el("div", { class: "row" }, el("div", { class: "l" }, item, note ? el("small", {}, note) : null), ib("x", `Remove ${item}`, () => o.remove(item)));
+    });
+    return [
+      grp(o.label),
+      addCard,
+      o.extra ?? null,
+      grp(o.count, o.items.length || void 0),
+      ...items.length ? items : [aside("info", o.empty)]
+    ].filter((n) => n !== null);
+  }
 
   // engine/models.json
   var models_default = {
@@ -611,21 +756,6 @@
     ]
   };
 
-  // src/hardware.ts
-  function nvidiaCard(p) {
-    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
-  }
-  function mainCard(p) {
-    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
-  }
-  function shortCpu(name) {
-    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
-  }
-  function cardText(g) {
-    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
-    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
-  }
-
   // src/speechplan.ts
   var MODELS = models_default.models;
   var SPEAKERS = models_default.speakers;
@@ -751,7 +881,7 @@
       const short = s.disk.freeMb > 0 && s.disk.freeMb < needs;
       const go = () => post({ type: "installSpeech", parts: gpu ? ["core", "gpu"] : ["core"] });
       const failed = s.pack.status === "failed";
-      const card = nvidiaCard(s.device);
+      const card2 = nvidiaCard(s.device);
       const download = btn(failed ? "Try again" : "Download", go, "primary");
       download.disabled = short;
       return [
@@ -765,7 +895,7 @@
         ),
         s.pack.nvidia ? row(
           "Use the graphics card",
-          [`${card ? cardText(card) : "NVIDIA"} \xB7 \u2248${size(s.download.gpu)} more \xB7 a phrase in \u2248${seconds(s.firstModel.cuda.phrase)}, not \u2248${seconds(s.firstModel.cpu.phrase)}`],
+          [`${card2 ? cardText(card2) : "NVIDIA"} \xB7 \u2248${size(s.download.gpu)} more \xB7 a phrase in \u2248${seconds(s.firstModel.cuda.phrase)}, not \u2248${seconds(s.firstModel.cpu.phrase)}`],
           toggleKnob(withGpu, (on) => (withGpu = on, redraw()), "Use the graphics card")
         ) : null
       ].filter((n) => n !== null);
@@ -840,9 +970,9 @@
   }
   function computerRows(v) {
     const d = v.speech.device;
-    const card = mainCard(d);
+    const card2 = mainCard(d);
     const cpu = `${shortCpu(d.cpu.name)} \xB7 ${d.cpu.cores} cores \xB7 ${d.ramGb} GB${d.laptop ? " \xB7 a laptop" : ""}`;
-    const cards = card ? cardText(card) : d.at ? "no graphics card of its own" : "looking at the graphics card\u2026";
+    const cards = card2 ? cardText(card2) : d.at ? "no graphics card of its own" : "looking at the graphics card\u2026";
     const plan = v.speech.plan;
     const tested = plan.measured ? "the speech models\u2019 times are measured here" : running(v) ? "the times are first guesses until the test" : "tested once the speech engine is here";
     const t = testWork(v);
@@ -857,11 +987,11 @@
   }
   function cardNote(v) {
     const s = v.speech;
-    const card = mainCard(s.device);
+    const card2 = mainCard(s.device);
     const gpuPart = hasPart(v, "gpu");
-    if (!card) return s.device.at ? "none of its own \xB7 speech runs on the processor" : "looking\u2026";
-    const name = cardText(card);
-    if (card.vendor !== "nvidia") return `${name} \xB7 speech runs on the processor: only NVIDIA cards run it for now`;
+    if (!card2) return s.device.at ? "none of its own \xB7 speech runs on the processor" : "looking\u2026";
+    const name = cardText(card2);
+    if (card2.vendor !== "nvidia") return `${name} \xB7 speech runs on the processor: only NVIDIA cards run it for now`;
     if (!s.pack.nvidia && !gpuPart) return `${name} \xB7 too old or too small for speech \xB7 the processor does it`;
     if (!gpuPart) return `${name} \xB7 add its part to use it`;
     if (s.health?.fallback) return `${name} \xB7 it would not take the model, so the processor does it`;
@@ -971,7 +1101,7 @@
     const state = v.speech.health?.diarization;
     if (hasPart(v, "speakers") && state !== "needs-token" && state !== "bad-token" && state !== "no-access" && state !== "failed") return null;
     const why = !hasPart(v, "speakers") ? "Speakers are not told apart yet: their part is not downloaded." : "Speakers are not told apart yet: a Hugging Face key is needed.";
-    return aside("person", why, " ", linkBtn("Set up", go));
+    return aside("users", why, " ", linkBtn("Set up", go));
   }
 
   // src/webview/recorder.ts
@@ -1221,8 +1351,9 @@
     );
     return [
       zone,
-      row("Language", ["Auto: heard from the first seconds"], seg(tx.language, languages(v), (language) => tx.language = language)),
-      row(
+      card("languages", "Language", ["Auto: heard from the first seconds"], seg(tx.language, languages(v), (language) => tx.language = language)),
+      card(
+        "users",
         "Speakers",
         ["how many talk \xB7 Auto finds out"],
         seg(tx.speakers, [[0, "Auto"], [1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"]], (speakers) => tx.speakers = speakers, true)
@@ -1232,7 +1363,7 @@
   }
   function micRow() {
     const r = tx.recorder;
-    if (!r) return row("Record from the microphone", ["a talk, a lecture, people in the room \xB7 the text comes after Stop"], btn([el("i", { class: "dot" }), "Record"], () => void startMic(), "rec"));
+    if (!r) return card("mic", "Record from the microphone", ["a talk, a lecture, people in the room \xB7 the text comes after Stop"], btn([el("i", { class: "dot" }), "Record"], () => void startMic(), "rec"));
     return el(
       "div",
       { class: "row live" },
@@ -1342,7 +1473,7 @@
         ),
         btn([icon("add"), "New"], () => hooks.setup(), "", "A new transcription")
       ),
-      kb === "" ? aside("book", "Notes need a knowledge base folder.", " ", linkBtn("Choose\u2026", () => void pickKb())) : null,
+      kb === "" ? aside("book-open", "Notes need a knowledge base folder.", " ", linkBtn("Choose\u2026", () => void pickKb())) : null,
       speakersMissing(v, () => hooks.setup()),
       list(v)
     ].filter((n) => n !== null);
@@ -1433,8 +1564,8 @@
       pace.see(r.row);
       if (!hooks.shown()) return;
       if (r.row.status === "done" && before?.status === "done") return;
-      const card = document.querySelector(".progress");
-      if (card && busy(before?.status) && busy(r.row.status)) return updateProgress(card, r.row);
+      const card2 = document.querySelector(".progress");
+      if (card2 && busy(before?.status) && busy(r.row.status)) return updateProgress(card2, r.row);
       redrawPage();
     } catch (error) {
       if (error instanceof SpeechError && error.status === 404) openTranscript("");
@@ -1492,7 +1623,7 @@
       );
     }
     if (r.status === "recording") return el("div", { class: "card" }, el("b", {}, el("i", { class: "dot pulse" }), " Recording"), el("small", {}, "The text comes once the recording stops."));
-    const card = el(
+    const card2 = el(
       "div",
       { class: "card progress" },
       el("b", { class: "plead" }),
@@ -1501,20 +1632,20 @@
       el("ol", { class: "stages" }, ...STAGES.map(([, label]) => el("li", {}, label))),
       el("small", { class: "pnote" }, "The window can be closed: it goes on in the background.")
     );
-    updateProgress(card, r);
-    return card;
+    updateProgress(card2, r);
+    return card2;
   }
-  function updateProgress(card, r) {
+  function updateProgress(card2, r) {
     const at = STAGES.findIndex((s) => s[0] === r.stage);
-    const lead = card.querySelector(".plead");
+    const lead = card2.querySelector(".plead");
     if (lead) lead.textContent = r.status === "queued" ? "Waiting its turn" : `${STAGES[at]?.[1] ?? "Starting"}\u2026`;
-    const track = card.querySelector(".track");
+    const track = card2.querySelector(".track");
     track?.classList.toggle("live", r.status === "working");
     const fill = track?.firstElementChild;
     if (fill) fill.style.width = `${(r.progress * 100).toFixed(1)}%`;
-    const line = card.querySelector(".pstat");
+    const line = card2.querySelector(".pstat");
     if (line) line.textContent = progressLine(r);
-    card.querySelectorAll(".stages li").forEach((li, i) => li.className = i < at ? "done" : i === at ? "now" : "");
+    card2.querySelectorAll(".stages li").forEach((li, i) => li.className = i < at ? "done" : i === at ? "now" : "");
   }
   function progressLine(r) {
     if (r.status === "queued") return "Starts once the one before it is done.";
@@ -1640,11 +1771,11 @@
     const note = t.note;
     if (note) {
       out.push(
-        aside("book", "In the knowledge base: ", el("b", {}, fileName(note)), " ", linkBtn("Open", () => post({ type: "openPath", path: note })), linkBtn("Show in folder", () => post({ type: "showInFolder", path: note })))
+        aside("book-open", "In the knowledge base: ", el("b", {}, fileName(note)), " ", linkBtn("Open", () => post({ type: "openPath", path: note })), linkBtn("Show in folder", () => post({ type: "showInFolder", path: note })))
       );
     }
     if (t.noteError) out.push(aside("info", t.noteError, " ", linkBtn("Choose a folder", () => void pickKb())));
-    if (r.error) out.push(aside("warning", r.error));
+    if (r.error) out.push(aside("circle-alert", r.error));
     const speakers = speakersNotice(v, t);
     if (speakers) out.push(speakers);
     return out;
@@ -1658,22 +1789,22 @@
     if (t.source === "note" || t.speakersStatus === "ok" || t.speakersStatus === "single") return null;
     const why = t.speakersStatus === "failed" ? "Speakers could not be told apart; the text is one stream." : "Speakers are not told apart: it was made without a Hugging Face key.";
     const missing = speakersMissing(v, () => hooks.setup());
-    if (missing) return aside("person", why, " ", linkBtn("Set up speakers", () => hooks.setup()));
+    if (missing) return aside("users", why, " ", linkBtn("Set up speakers", () => hooks.setup()));
     const way = splitWay(t);
-    if (!way) return aside("person", `${why} This meeting can no longer be split: its words were not kept.`);
+    if (!way) return aside("users", `${why} This meeting can no longer be split: its words were not kept.`);
     const run = () => void splitSpeakers(t.id);
-    if (way === "words") return aside("person", `${why} The text is not recognized again; edits stay.`, " ", linkBtn("Split by speaker", run));
+    if (way === "words") return aside("users", `${why} The text is not recognized again; edits stay.`, " ", linkBtn("Split by speaker", run));
     const minutes2 = Math.max(1, Math.round(t.duration / 3600 * minutesPerHour(v)));
     if (tx.redoing) {
       return aside(
-        "person",
+        "users",
         t.edited ? "Edits to the text will be lost. Go on?" : "Go on?",
         " ",
         linkBtn("Transcribe again", run),
         linkBtn("Not now", () => (tx.redoing = false, redrawPage()))
       );
     }
-    return aside("person", `${why} It can be transcribed again, with speakers: about ${minutes2} min.`, " ", linkBtn("Transcribe again", () => (tx.redoing = true, redrawPage())));
+    return aside("users", `${why} It can be transcribed again, with speakers: about ${minutes2} min.`, " ", linkBtn("Transcribe again", () => (tx.redoing = true, redrawPage())));
   }
   async function splitSpeakers(id) {
     tx.redoing = false;
@@ -1891,6 +2022,7 @@
   var save = (patch2) => post({ type: "saveSettings", patch: patch2 });
   var ACTIONS = ["listen", "translate", "screen", "dictate", "transcribe", "keyboard"];
   var isAction = (name) => ACTIONS.includes(name);
+  var ICONS = { listen: "volume-2", translate: "languages", screen: "scan", dictate: "mic", transcribe: "audio-lines", keyboard: "keyboard" };
   var TITLES = {
     listen: "Listen",
     translate: "Translate",
@@ -1908,11 +2040,6 @@
   var askedTranscript = "";
   var search = "";
   var keyTrouble;
-  var pickedLayout = "";
-  var addingApp = false;
-  var addingWord = false;
-  var addingTerm = false;
-  var addingLanguage = false;
   var reduced = matchMedia("(prefers-reduced-motion: reduce)");
   var frozenAt = (name) => {
     const m = new RegExp(`(?:^#|&)${name}=([\\d.]+)`).exec(location.hash);
@@ -2027,13 +2154,22 @@
     el("span", { class: "gap" }),
     pill("settings", icon("settings"), el("span", { class: "lbl" }, "Settings"))
   );
+  var maxButton = el("button", { class: "icon-btn max", title: "Maximize", "aria-label": "Maximize", onclick: () => post({ type: "window", action: "maximize" }) }, glyph("maximize"));
   var winButtons = el(
     "div",
     { class: "wbtns" },
     el("button", { class: "icon-btn", title: "Minimize", "aria-label": "Minimize", onclick: () => post({ type: "window", action: "minimize" }) }, glyph("minimize")),
+    maxButton,
     el("button", { class: "icon-btn", title: "Close", "aria-label": "Close", onclick: () => post({ type: "window", action: "close" }) }, glyph("close"))
   );
-  var top = el("header", { class: "top" }, el("div", { class: "brand" }, el("span", { class: "key" }, "alt"), el("span", { class: "wm" }, "altype")), nav, winButtons);
+  function windowState(maximized) {
+    const label = maximized ? "Restore" : "Maximize";
+    maxButton.replaceChildren(glyph(maximized ? "restore" : "maximize"));
+    maxButton.title = label;
+    maxButton.setAttribute("aria-label", label);
+    root.classList.toggle("maxed", maximized);
+  }
+  var top = el("header", { class: "top" }, el("div", { class: "brand" }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype")), nav, winButtons);
   var home = el("main", { class: "home" });
   var pGround = el("div", { class: "pgg" });
   var pBack = el("button", { class: "pback", onclick: () => back() }, icon("chevron-left"), "Back", el("span", { class: "key" }, "Esc"));
@@ -2082,9 +2218,20 @@
           if (key === "Enter" || key === " ") event.preventDefault(), go();
         }
       },
+      lucide(ICONS[action]),
       el("div", {}, el("div", { class: "an" }, el("b", {}, t.title), el("i", {}, t.cap)), el("div", { class: "ad" }, t.desc)),
       el("div", { class: "keys" }, ...keysOf(action, v.settings, true)),
-      icon("chevron-right", "chev")
+      lucide("chevron-right", "chev")
+    );
+  }
+  function pausedNotice(v) {
+    if (!v.settings.paused) return null;
+    return el(
+      "div",
+      { class: "row notice" },
+      lucide("pause"),
+      el("div", { class: "l" }, "Altype is paused", el("small", {}, "its keys and the layout fixing do nothing until it resumes")),
+      btn("Resume", () => save({ paused: false }), "primary")
     );
   }
   function homeNodes(v) {
@@ -2105,9 +2252,10 @@
         ),
         el("p", { class: "hcap" }, ...readiness(v))
       ),
+      pausedNotice(v),
       el("ul", { class: "acts" }, ...ACTIONS.map((a) => homeRow(a, v))),
       el("p", { class: "foot" }, "Tap an action to change its keys.")
-    ];
+    ].filter((n) => n !== null);
   }
   var homePending = false;
   function renderHome(force = false) {
@@ -2442,11 +2590,6 @@
     if (open) closePage(false);
     open = { name };
     search = "";
-    pickedLayout = "";
-    addingApp = false;
-    addingWord = false;
-    addingTerm = false;
-    addingLanguage = false;
     keyTrouble = void 0;
     if (name === "transcripts") enterTranscripts();
     fillHeader();
@@ -2467,12 +2610,17 @@
     grow(gr, true, settle);
   }
   function back() {
+    if (open?.sub) return popSub();
     if (open?.name === "transcripts" && backToList()) return;
     closePage();
   }
   function closePage(animate = !reduced.matches) {
     if (!open) return;
     const name = open.name;
+    if (open.sub) {
+      open.sub = void 0;
+      fillHeader();
+    }
     if (name === "transcripts") leaveTranscripts();
     const done = () => {
       root.classList.remove("page-open");
@@ -2493,10 +2641,75 @@
       if (back2) source.focus({ preventScroll: true });
     });
   }
+  var SUBS = {
+    vocabulary: { title: "Words to spell", body: vocabularyPage },
+    recent: { title: "Recent phrases", cap: () => "kept 30 days on this computer", body: recentPage },
+    model: { title: "Speech model", body: modelPage, valid: running },
+    meet: { title: "Google Meet", cap: () => "the Altype extension for Chrome", body: meetPage },
+    speakers: { title: "Speakers", cap: () => "who spoke when", body: speakerRows, valid: (v) => hasPart(v, "speakers") && running(v) },
+    layouts: { title: "Layouts", cap: () => "in the order the keys go through them", body: layoutsPage },
+    programs: { title: "Programs left out", body: programsPage },
+    kept: { title: "Kept as typed", body: keptPage },
+    languages: { title: "Languages you use", body: languagesPage },
+    engine: { title: "Speech engine", body: enginePage },
+    computer: { title: "This computer", body: computerPage }
+  };
+  var sliding = [];
+  function slideBody(dir) {
+    if (!view || !open) return;
+    for (const a of sliding) a.finish();
+    sliding = [];
+    const ghost = el("div", { class: "pbody pghost", inert: true, "aria-hidden": "true" });
+    const scroll = pBody.scrollTop;
+    ghost.append(...pBody.childNodes);
+    pg.append(ghost);
+    ghost.scrollTop = scroll;
+    bodyPending = false;
+    pBody.replaceChildren(...bodyOf(view));
+    if (reduced.matches) return ghost.remove();
+    const easing = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+    const duration = 220;
+    const out = ghost.animate([{ transform: "none", opacity: 1 }, { transform: `translateX(${-48 * dir}px)`, opacity: 0 }], { duration, easing, fill: "forwards" });
+    const inn = pBody.animate([{ transform: `translateX(${48 * dir}px)`, opacity: 0 }, { transform: "none", opacity: 1 }], { duration, easing });
+    out.onfinish = () => ghost.remove();
+    sliding = [out, inn];
+  }
+  function openSub(id) {
+    if (!view || !open || open.sub === id) return;
+    open.parentScroll = pBody.scrollTop;
+    open.sub = id;
+    keyTrouble = void 0;
+    fillHeader();
+    slideBody(1);
+    pBody.scrollTop = 0;
+    pBack.focus({ preventScroll: true });
+  }
+  function popSub(animate = !reduced.matches) {
+    if (!view || !open?.sub) return;
+    const id = open.sub;
+    open.sub = void 0;
+    keyTrouble = void 0;
+    fillHeader();
+    if (animate) slideBody(-1);
+    else {
+      bodyPending = false;
+      pBody.replaceChildren(...bodyOf(view));
+    }
+    pBody.scrollTop = open.parentScroll ?? 0;
+    const from = pBody.querySelector(`[data-sub="${id}"]`);
+    (from ?? pBack).focus({ preventScroll: true });
+  }
   function fillHeader() {
     if (!view || !open) return;
     const name = open.name;
     const v = view;
+    if (open.sub) {
+      const sub = SUBS[open.sub];
+      pTitle.replaceChildren(el("button", { class: "pcrumb", onclick: () => popSub() }, TITLES[name]), el("span", { class: "psep" }, "\u203A"), sub.title);
+      pCap.textContent = sub.cap?.(v) ?? "";
+      pKeys.replaceChildren();
+      return;
+    }
     pTitle.textContent = TITLES[name];
     pCap.textContent = isAction(name) ? actionText(name, v).cap : name === "words" ? v.words.length ? `${v.words.length} saved \xB7 from your cards` : "none yet \xB7 from your cards" : name === "about" ? `Altype ${v.version}` : name === "transcripts" ? transcriptsCap() : "";
     const keys = isAction(name) ? keysOf(name, v.settings) : [];
@@ -2507,11 +2720,26 @@
   var pointerDown = false;
   function busy2() {
     const a = document.activeElement;
-    return !!a && pBody.contains(a) && (a.matches("input[type=text], input[type=search], input[type=password], input[type=range]") || a.isContentEditable || a.classList.contains("recording"));
+    return !!a && pBody.contains(a) && (a.matches("input[type=text]:not([data-live]), input[type=search], input[type=password], input[type=range]") || a.isContentEditable || a.classList.contains("recording"));
+  }
+  function carryFields(next) {
+    const carried = [];
+    for (const old of pBody.querySelectorAll("input[data-live]")) {
+      if (!old.value && document.activeElement !== old) continue;
+      const fresh = next.querySelector(`input[data-live="${old.dataset.live}"]`);
+      if (!fresh) continue;
+      fresh.replaceWith(old);
+      carried.push(old);
+    }
+    return carried;
   }
   function renderBody() {
     if (!view || !open) return;
-    const next = el("div", {}, ...bodyOf(open.name, view));
+    if (open.sub && SUBS[open.sub].valid?.(view) === false) {
+      open.sub = void 0;
+      fillHeader();
+    }
+    const next = el("div", {}, ...bodyOf(view));
     if (next.innerHTML === pBody.innerHTML) return;
     if (busy2()) {
       bodyPending = true;
@@ -2519,8 +2747,12 @@
     }
     bodyPending = false;
     const scroll = pBody.scrollTop;
+    const focused = document.activeElement;
+    const carried = carryFields(next);
     pBody.replaceChildren(...next.childNodes);
     pBody.scrollTop = scroll;
+    const live = carried.find((f) => f === focused);
+    if (live) live.focus({ preventScroll: true });
   }
   pBody.addEventListener("focusout", () => {
     if (!bodyPending) return;
@@ -2530,8 +2762,10 @@
   });
   window.addEventListener("pointerdown", () => pointerDown = true, true);
   window.addEventListener("pointerup", () => pointerDown = false, true);
-  function bodyOf(name, v) {
-    switch (name) {
+  function bodyOf(v) {
+    if (!open) return [];
+    if (open.sub) return SUBS[open.sub].body(v);
+    switch (open.name) {
       case "listen":
         return listenPage(v);
       case "translate":
@@ -2579,7 +2813,7 @@
     keyTrouble = void 0;
     save({ [name]: key });
   }
-  function keyRow(name, label, note, taken = false) {
+  function keyRow(name, label, note, taken = false, iconName) {
     const current = view?.settings[name] ?? "";
     const recorder = new HotkeyRecorder();
     let waiting;
@@ -2647,14 +2881,16 @@
           save({ [name]: "" });
         }
       },
-      icon("close")
+      lucide("x", "s")
     ) : null;
     const trouble = keyTrouble?.name === name ? keyTrouble.text : "";
-    return row(
+    const node = row(
       label,
       [note, taken && current ? bad("Taken by another program; choose another.") : null, trouble ? bad(trouble) : null],
       el("span", { class: "kchg" }, field, clear, linkBtn(current ? "Change" : "Set", () => field.click()))
     );
+    if (iconName) node.prepend(lucide(iconName));
+    return node;
   }
   var fixedKey = (label, hotkey, note) => row(label, [note], caps(hotkey));
   function listenPage(v) {
@@ -2662,18 +2898,19 @@
     const how = s.doubleCopy ? "Select this text, press Ctrl + C twice." : s.selectKey ? `Select this text, press ${said(s.selectKey)}.` : "Turn on Ctrl + C twice or set a key above, then select this text.";
     return [
       grp("Keys"),
-      row(
+      card(
+        "copy",
         "Copied text",
         ["press Ctrl + C twice, quickly"],
         el("span", { class: "kchg" }, caps(COPY_TWICE), el("span", { class: "tgwrap" }, toggleKnob(s.doubleCopy, (doubleCopy) => save({ doubleCopy }), "Ctrl + C twice")))
       ),
-      keyRow("selectKey", "Selected text", s.selectKey ? "Altype copies the selection itself" : "one key, if you want one", !v.keysOk.select),
-      keyRow("snipKey", "A piece of the screen", "draw a box over the words", !v.keysOk.snip),
+      keyRow("selectKey", "Selected text", s.selectKey ? "Altype copies the selection itself" : "one key, if you want one", !v.keysOk.select, "volume-2"),
+      keyRow("snipKey", "A piece of the screen", "draw a box over the words", !v.keysOk.snip, "scan"),
       grp("In the card"),
-      row("Play or stop \xB7 step through sentences", [], el("span", { class: "kg2" }, caps("Space"), caps("\u2190"), caps("\u2192"))),
-      row("A word: its meanings, its sound, a star to keep it in Words", ["click it"], null),
-      row("A sentence: its translation marked", ["click it \xB7 \u25B6 in the margin reads one paragraph"], null),
-      row("Close, and stop the voice", [], caps("Esc")),
+      card("play", "Play or stop \xB7 step through sentences", [], el("span", { class: "kg2" }, caps("Space"), caps("\u2190"), caps("\u2192"))),
+      card("book-open", "A word: its meanings, its sound, a star to keep it in Words", ["click it"], null),
+      card("languages", "A sentence: its translation marked", ["click it \xB7 \u25B6 in the margin reads one paragraph"], null),
+      card("x", "Close, and stop the voice", [], caps("Esc")),
       tryIt("The morning was quiet. A small boat drifted along the river, and two children watched the ducks from the bridge.", how)
     ];
   }
@@ -2702,29 +2939,30 @@
     const how = s.translateKey ? `Select it, ${usage(s.translateKey)}.` : "Set a key above, then select it and press the key.";
     return [
       grp("Keys"),
-      keyRow("translateKey", "Selected text", s.translateKey ? usage(s.translateKey) : "one key: Left Ctrl twice, for example", !v.keysOk.translate),
-      keyRow("textKey", "A piece of the screen", "draw a box over the words", !v.keysOk.text),
+      keyRow("translateKey", "Selected text", s.translateKey ? usage(s.translateKey) : "one key: Left Ctrl twice, for example", !v.keysOk.translate, "languages"),
+      keyRow("textKey", "A piece of the screen", "draw a box over the words", !v.keysOk.text, "scan"),
       fixedKey("Paste the translation over the selection", "Enter"),
       grp("Languages"),
-      row(pairOf(v), [note], state),
+      card("globe", pairOf(v), [note], state),
+      languagesCard(v),
       tryIt(text, how)
     ];
   }
   function screenPage(v) {
     return [
       grp("Keys"),
-      keyRow("snipKey", "Listen to a piece of the screen", "", !v.keysOk.snip),
-      keyRow("textKey", "Translate a piece of the screen", "", !v.keysOk.text),
+      keyRow("snipKey", "Listen to a piece of the screen", "", !v.keysOk.snip, "volume-2"),
+      keyRow("textKey", "Translate a piece of the screen", "", !v.keysOk.text, "languages"),
       grp("How"),
-      row("Windows dims the screen; draw a box over the words", [], null),
-      row("Windows OCR reads them on this computer", ["in the languages Windows can read; add one there"], linkBtn("Languages\u2026", () => post({ type: "openLanguageSettings" }))),
-      row("Fix what it misread in the card, then translate", [], null)
+      card("scan", "Windows dims the screen; draw a box over the words", [], null),
+      card("type", "Windows OCR reads them on this computer", ["in the languages Windows can read; add one there"], linkBtn("Languages\u2026", () => post({ type: "openLanguageSettings" }))),
+      card("spell-check", "Fix what it misread in the card, then translate", [], null)
     ];
   }
   var pathNote = (path) => el("small", { class: "path", title: path }, el("bdi", {}, path));
   function kbRows(v) {
     const e = engineSettings(v);
-    if (!running(v) || !e) return [row("Folder", [installed(v) ? "shown once the speech engine runs" : "chosen once the speech engine is here"], null)];
+    if (!running(v) || !e) return [card("folder", "Folder", [installed(v) ? "shown once the speech engine runs" : "chosen once the speech engine is here"], null)];
     const inbox = el("input", {
       type: "text",
       class: "field",
@@ -2735,87 +2973,97 @@
       onchange: (event) => void saveEngine({ kbInbox: event.target.value.trim() })
     });
     return [
-      row("Folder", [e.kbDir ? pathNote(e.kbDir) : "not chosen \xB7 notes need one; an Obsidian vault will do"], linkBtn(e.kbDir ? "Change" : "Choose\u2026", () => void pickKb())),
-      row("Notes go into", ["a folder inside it \xB7 empty: the folder itself"], inbox)
+      card("folder", "Folder", [e.kbDir ? pathNote(e.kbDir) : "not chosen \xB7 notes need one; an Obsidian vault will do"], linkBtn(e.kbDir ? "Change" : "Choose\u2026", () => void pickKb())),
+      card("notebook-pen", "Notes go into", ["a folder inside it \xB7 empty: the folder itself"], inbox)
     ];
   }
+  function vocabularyCard(v) {
+    const n = v.settings.vocabulary.length;
+    return navCard("spell-check", "Words to spell", "names and terms, written as you say them", n ? `${n} ${n === 1 ? "word" : "words"}` : "none yet", () => openSub("vocabulary"), "vocabulary");
+  }
+  function modelCard(v, feature) {
+    if (!running(v)) return null;
+    const p = feature === "dictation" ? v.speech.plan.dictation : v.speech.plan.transcripts;
+    const how = feature === "dictation" ? `a phrase in \u2248${seconds(p.chosen.estimate)}` : `an hour in \u2248${minutesText(p.chosen.estimate)}`;
+    return navCard("cpu", "Speech model", `${how} on this computer`, p.pinned ? p.chosen.label : `Automatic \xB7 ${p.chosen.label}`, () => openSub("model"), "model");
+  }
+  var minutesText = (m) => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.max(1, Math.round(m))} min`;
   function dictatePage(v) {
     const s = v.settings;
     const k = v.speech.keysOk;
     const offer = engineRows(v, "Dictate");
+    const recent = v.dictation.recent;
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
       testOffer(v),
       grp("Keys"),
-      keyRow("dictateKey", "Dictate", "types what you say where the cursor is", !k.dictate),
-      keyRow("englishKey", "Dictate in English", `say it in ${s.native}, English is typed`, !k.english),
-      keyRow("noteKey", "A note", "kept in the knowledge base as a .md file", !k.note),
-      keyRow("againKey", "Type the last phrase again", "what was dictated last, where the cursor is", !k.again),
-      row("Tap the key, talk, tap it again", ["the words show as you speak \xB7 Esc throws the phrase away, while it records and while it types"], null),
+      keyRow("dictateKey", "Dictate", "types what you say where the cursor is", !k.dictate, "mic"),
+      keyRow("englishKey", "Dictate in English", `say it in ${s.native}, English is typed`, !k.english, "languages"),
+      keyRow("noteKey", "A note", "kept in the knowledge base as a .md file", !k.note, "notebook-pen"),
+      keyRow("againKey", "Type the last phrase again", "what was dictated last, where the cursor is", !k.again, "rotate-cw"),
+      aside("info", "Tap the key, talk, tap it again. The words show as you speak; Esc throws the phrase away, while it records and while it types."),
       grp("Knowledge base"),
       ...kbRows(v),
-      grp("Words to spell"),
-      ...termRows(v),
-      grp("Recent phrases"),
-      ...recentRows(v),
-      ...running(v) ? [grp("Speech model"), ...modelRows(v, "dictation")] : [],
-      el("p", { class: "privacy" }, icon("lock"), "Speech is recognized on this computer; nothing is sent anywhere.")
+      grp("Words and phrases"),
+      vocabularyCard(v),
+      navCard("clock", "Recent phrases", "what was dictated lately, to copy again", recent.length ? recent[0]?.text ?? "" : "none yet", () => openSub("recent"), "recent"),
+      modelCard(v, "dictation"),
+      el("p", { class: "privacy" }, lucide("lock", "s"), "Speech is recognized on this computer; nothing is sent anywhere.")
     ].filter((n) => n !== null);
   }
-  function termRows(v) {
+  function vocabularyPage(v) {
     const s = v.settings;
     const wordOf = (line) => parseEntry(line).word.toLowerCase();
-    const add = (text) => {
-      const line = text.replace(/\s+/g, " ").trim();
-      addingTerm = false;
-      if (!parseEntry(line).word) return renderBody();
-      const lines = (view?.settings.vocabulary ?? s.vocabulary).filter((l) => wordOf(l) !== wordOf(line));
+    const word = liveField("word", "Word, as it should be written", "Word to spell", (key) => key === "Enter" ? add() : clear());
+    const heard2 = liveField("heard", "Heard as (optional): \u0430\u043B\u044C\u0442\u0430\u0439\u043F, all type", "What it is heard as", (key) => key === "Enter" ? add() : clear());
+    const clear = () => {
+      word.value = "";
+      heard2.value = "";
+      word.focus();
+    };
+    const add = () => {
+      const w = word.value.replace(/\s+/g, " ").trim();
+      const h = heard2.value.replace(/\s+/g, " ").replace(/[()]/g, "").trim();
+      if (!w) return word.focus();
+      const line = h ? `${w} (${h})` : w;
+      if (!parseEntry(line).word) return;
+      const lines = (view?.settings.vocabulary ?? s.vocabulary).filter((l) => wordOf(l) !== w.toLowerCase());
+      clear();
       save({ vocabulary: [...lines, line] });
     };
-    const input = addingTerm ? el("input", {
-      type: "text",
-      class: "field term",
-      placeholder: "Peshynskyi, or Altype (altype, \u0430\u043B\u044C\u0442\u0430\u0439\u043F)",
-      "aria-label": "Word to spell, and what it is heard as",
-      onkeydown: (event) => {
-        const key = event.key;
-        if (key === "Enter") add(event.target.value);
-        if (key === "Escape") event.preventDefault(), addingTerm = false, renderBody();
-      }
-    }) : null;
-    if (input) window.setTimeout(() => input.focus(), 0);
-    const chips = s.vocabulary.map((line) => {
-      const { word, heard: heard2 } = parseEntry(line);
+    const edit = (line) => {
+      const { word: w, heard: hs } = parseEntry(line);
+      word.value = w;
+      heard2.value = hs.join(", ");
+      word.focus();
+    };
+    const items = s.vocabulary.map((line) => {
+      const { word: w, heard: hs } = parseEntry(line);
       return el(
-        "span",
-        { class: "chip term", title: line },
-        el("b", {}, word),
-        heard2.length ? el("span", { class: "heard" }, ` \xB7 ${heard2.join(", ")}`) : null,
-        el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${word}`, onclick: () => save({ vocabulary: s.vocabulary.filter((l) => l !== line) }) }, icon("close"))
+        "div",
+        { class: "row" },
+        el("button", { class: "l", title: "Change it", onclick: () => edit(line) }, w, hs.length ? el("small", {}, `heard as ${hs.join(", ")}`) : null),
+        ib("x", `Remove ${w}`, () => save({ vocabulary: (view?.settings.vocabulary ?? s.vocabulary).filter((l) => l !== line) }))
       );
     });
     return [
-      row(
-        "Names and terms",
-        ["Dictation and transcripts spell these as written; a heard form is replaced wherever it is said"],
-        el(
-          "span",
-          { class: "kchg" },
-          input,
-          input ? null : linkBtn("Add\u2026", () => {
-            addingTerm = true;
-            renderBody();
-          })
-        )
+      grp("Add a word"),
+      el(
+        "div",
+        { class: "row add" },
+        el("div", { class: "fields" }, word, heard2, btn([lucide("plus", "s"), "Add"], add, "primary")),
+        el("small", {}, "A name or a term; dictation and transcripts write it this way, and a heard form is replaced wherever it is said.")
       ),
-      chips.length ? el("div", { class: "chiprow" }, ...chips) : null
-    ].filter((n) => n !== null);
+      grp("Words", items.length || void 0, items.length ? linkBtn("Clear all", () => save({ vocabulary: [] })) : null),
+      ...items.length ? items : [aside("info", "Nothing yet. Add a name or a word above.")],
+      aside("info", "Shared by Dictate and Transcribe.")
+    ];
   }
-  function recentRows(v) {
+  function recentPage(v) {
     const recent = v.dictation.recent;
-    if (recent.length === 0) return [row("None yet", ["kept 30 days on this computer"], null)];
     return [
-      ...recent.map(
+      grp("Phrases", recent.length || void 0, recent.length ? linkBtn("Clear", () => post({ type: "clearDictation" })) : null),
+      ...recent.length ? recent.map(
         (e) => el(
           "div",
           { class: "row phrase" },
@@ -2824,8 +3072,15 @@
 Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()))),
           linkBtn("Copy", () => copyText(e.text))
         )
-      ),
-      row("Kept 30 days on this computer", [], linkBtn("Clear", () => post({ type: "clearDictation" })))
+      ) : [aside("info", "Nothing yet. Dictated phrases (not notes) are kept here 30 days, 200 at most.")]
+    ];
+  }
+  function modelPage(v) {
+    const feature = open?.name === "dictate" ? "dictation" : "transcripts";
+    return [
+      grp(feature === "dictation" ? "For dictation" : "For transcripts"),
+      ...modelRows(v, feature),
+      aside("info", feature === "dictation" ? "Transcripts have a model of their own, on the Transcribe page." : "Dictation has a model of its own, on the Dictate page.")
     ];
   }
   function whenSaid(iso, now) {
@@ -2838,15 +3093,74 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     return `${at.getDate()} ${at.toLocaleDateString("en-GB", { month: "short" })} ${time}`;
   }
   var copyText = (text) => void window.tutorHost.call({ call: "copy", text }).then(() => toast(`Copied: ${text}`), fault);
-  function meetRows(v) {
+  function ago(epochSeconds) {
+    const s = Math.max(0, Date.now() / 1e3 - epochSeconds);
+    if (s < 90) return "just now";
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    if (s < 2 * 86400) return "yesterday";
+    const d = new Date(epochSeconds * 1e3);
+    return `${d.getDate()} ${d.toLocaleDateString("en-GB", { month: "short" })}`;
+  }
+  function openChrome(url) {
+    void window.tutorHost.call({ call: "openChrome", url }).then(
+      (ok) => {
+        if (ok) return;
+        void window.tutorHost.call({ call: "copy", text: url }).then(() => toast(`Chrome was not found. The address is copied: paste it into Chrome\u2019s address bar.`), fault);
+      },
+      fault
+    );
+  }
+  var extensionSeen = (v) => v.speech.health?.extension ?? null;
+  function meetCard(v) {
+    const ext = extensionSeen(v);
+    return navCard("video", "Google Meet", "record a call in Chrome with the Altype extension", ext ? `Installed \xB7 v${ext.version}` : "set up in Chrome", () => openSub("meet"), "meet", !!ext);
+  }
+  function meetPage(v) {
     const dir = v.speech.extensionDir;
+    const ext = extensionSeen(v);
+    const offer = engineRows(v, "Google Meet");
+    const status = ext ? card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY)) : card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null);
     return [
-      row("1 \xB7 In Chrome, open chrome://extensions and turn on Developer mode", [], linkBtn("Copy address", () => copyText("chrome://extensions"))),
-      row("2 \xB7 Load unpacked, then pick the extension\u2019s folder", [pathNote(dir)], linkBtn("Show the folder", () => post({ type: "showInFolder", path: dir }))),
-      row("3 \xB7 In a meeting: the Altype icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone"], caps(MEET_KEY)),
-      row("4 \xB7 If the key does nothing, set it at chrome://extensions/shortcuts", [], linkBtn("Copy address", () => copyText("chrome://extensions/shortcuts"))),
-      row("After Altype updates, press Reload on the extension at chrome://extensions", ["Chrome keeps the old copy until then"], linkBtn("Copy address", () => copyText("chrome://extensions")))
-    ];
+      ...offer.length ? [grp("Speech engine"), ...offer] : [],
+      grp("Chrome extension"),
+      status,
+      grp("Set it up"),
+      card("external-link", "1 \xB7 Open Chrome\u2019s extensions page and turn on Developer mode", ["chrome://extensions \xB7 the switch is at the top right"], btn("Open in Chrome", () => openChrome("chrome://extensions/"))),
+      card(
+        "folder",
+        "2 \xB7 Load unpacked, paste the folder\u2019s path",
+        [pathNote(dir), "Ctrl+V into the folder picker\u2019s address line, then Select folder"],
+        el("span", { class: "kchg" }, linkBtn("Show the folder", () => post({ type: "showInFolder", path: dir })), btn([lucide("copy", "s"), "Copy path"], () => copyText(dir), "primary"))
+      ),
+      card("mic", "3 \xB7 In a meeting: the Altype icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone \xB7 the transcript appears in Transcripts"], caps(MEET_KEY)),
+      grp("If something is off"),
+      card("keyboard", "The key does nothing", ["set it at chrome://extensions/shortcuts"], btn("Open in Chrome", () => openChrome("chrome://extensions/shortcuts"))),
+      card("rotate-cw", "After Altype updates, press Reload on the extension", ["Chrome keeps the old copy until then"], btn("Open in Chrome", () => openChrome("chrome://extensions/")))
+    ].filter((n) => n !== null);
+  }
+  function speakersCard(v) {
+    if (!installed(v)) return null;
+    if (!hasPart(v, "speakers")) {
+      const rows = speakerRows(v);
+      const first = rows[0];
+      if (first) first.prepend(lucide("users"));
+      return first ?? null;
+    }
+    if (!running(v)) return card("users", "Who spoke when", ["set up once the speech engine runs"], null);
+    const state = diarizationOf(v);
+    const STATES = {
+      ready: ["ready", true],
+      missing: ["key saved", true],
+      checking: ["checking\u2026", false],
+      downloading: ["downloading\u2026", false],
+      "needs-token": ["needs a key", false],
+      "bad-token": ["the key failed", false],
+      "no-access": ["no access yet", false],
+      failed: ["could not check", false]
+    };
+    const [value, ok] = STATES[state];
+    return navCard("users", "Who spoke when", "speakers told apart with a free Hugging Face key, once", value, () => openSub("speakers"), "speakers", ok);
   }
   function transcribePage(v) {
     const offer = engineRows(v, "Transcribe");
@@ -2854,167 +3168,112 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
       testOffer(v),
       ...running(v) ? [grp("New transcription"), ...newRows(v)] : [],
-      ...installed(v) ? [grp("Speakers"), ...speakerRows(v)] : [],
-      grp("Words to spell"),
-      row("Names and terms", ["spelled as the Dictate page\u2019s Words to spell say"], linkBtn("Open Dictate", () => openPage("dictate"))),
-      grp("Google Meet"),
-      ...meetRows(v),
-      ...running(v) ? [
-        grp("Speech model"),
-        ...modelRows(v, "transcripts"),
-        row("Every transcript, searched by its words", [], linkBtn("Transcripts", () => openPage("transcripts")))
-      ] : []
+      grp("Setup"),
+      speakersCard(v),
+      vocabularyCard(v),
+      meetCard(v),
+      modelCard(v, "transcripts"),
+      grp("Library"),
+      navCard("file-text", "Transcripts", "every transcript, searched by its words", null, () => openPage("transcripts"))
     ].filter((n) => n !== null);
   }
-  function layoutChips(v) {
+  function layoutsPage(v) {
     const cycle = cycleOf(v);
     const ids = cycle.map((l) => l.id);
     const rest = v.layouts.filter((l) => !ids.includes(l.id));
-    const at = ids.indexOf(pickedLayout);
-    const move2 = (to) => {
-      const next = ids.filter((id) => id !== pickedLayout);
-      next.splice(to, 0, pickedLayout);
+    const own = v.settings.layouts.length > 0;
+    const move2 = (id, to) => {
+      const next = ids.filter((x) => x !== id);
+      next.splice(to, 0, id);
       save({ layouts: next });
     };
-    const pick = (id) => {
-      pickedLayout = pickedLayout === id ? "" : id;
-      renderBody();
-    };
-    const picked = cycle[at];
-    return row(
-      "In this order",
-      [picked ? `${picked.name} \xB7 move it, or leave it out` : "tap one to move it or leave it out"],
-      el(
-        "span",
-        { class: "chips" },
-        ...cycle.map((l) => el("button", { class: l.id === pickedLayout ? "chip lit" : "chip", title: l.name, "aria-pressed": String(l.id === pickedLayout), onclick: () => pick(l.id) }, l.short)),
-        ...rest.map((l) => el("button", { class: "chip off", title: `Add ${l.name}`, onclick: () => save({ layouts: [...ids, l.id] }) }, `+ ${l.short}`)),
-        picked ? el(
-          "span",
-          { class: "chipctl" },
-          el("button", { class: "ib", title: "Earlier", "aria-label": "Earlier", disabled: at === 0, onclick: () => move2(at - 1) }, icon("arrow-left")),
-          el("button", { class: "ib", title: "Later", "aria-label": "Later", disabled: at === ids.length - 1, onclick: () => move2(at + 1) }, icon("arrow-right")),
-          // The last one left cannot go: the keys need a layout to go to.
-          linkBtn(
-            "Leave out",
-            () => {
-              pickedLayout = "";
-              save({ layouts: ids.filter((id) => id !== picked.id) });
-            },
-            ids.length === 1
+    return [
+      grp("In this order", cycle.length),
+      ...cycle.map(
+        (l, i) => card(
+          "keyboard",
+          `${i + 1} \xB7 ${l.name}`,
+          [l.short],
+          el(
+            "span",
+            { class: "kchg" },
+            ib("arrow-up", "Earlier", () => move2(l.id, i - 1), i === 0),
+            ib("arrow-down", "Later", () => move2(l.id, i + 1), i === ids.length - 1),
+            // The last one left cannot go: the keys need a layout to go to.
+            linkBtn("Leave out", () => save({ layouts: ids.filter((id) => id !== l.id) }), ids.length === 1)
           )
-        ) : null
-      )
-    );
+        )
+      ),
+      rest.length ? card(
+        "plus",
+        "Add a layout",
+        ["one Windows has; it goes last"],
+        select("", [["", "Pick a layout"], ...rest.map((l) => [l.id, l.name])], (id) => id && save({ layouts: [...ids, id] }))
+      ) : null,
+      aside("info", own ? "Your own order. Leave every layout out to go back to the languages you use." : "The order comes from the languages you use (Settings); move one or leave one out to set your own.")
+    ].filter((n) => n !== null);
   }
-  function chipList(items, remove2) {
-    return el(
-      "div",
-      { class: "chiprow" },
-      ...items.map((item) => el("span", { class: "chip" }, item, el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${item}`, onclick: () => remove2(item) }, icon("close"))))
-    );
-  }
-  function programsRow(v) {
+  function programsPage(v) {
     const s = v.settings;
-    const add = (exe) => {
-      const name = exe.trim().toLowerCase();
-      addingApp = false;
-      if (!name) return renderBody();
-      const apps = view?.settings.fixApps ?? s.fixApps;
-      save({ fixApps: [...apps, /\.exe$/.test(name) ? name : `${name}.exe`] });
-    };
-    const input = addingApp ? el("input", {
-      type: "text",
-      class: "field",
+    const apps = () => view?.settings.fixApps ?? s.fixApps;
+    const add = (exe) => save({ fixApps: [...apps(), exe] });
+    const suggest = v.lastApp && !s.fixApps.includes(v.lastApp) ? v.lastApp : "";
+    return listPage({
+      label: "Add a program",
       placeholder: "program.exe",
-      "aria-label": "Program to leave out",
-      onkeydown: (event) => {
-        const key = event.key;
-        if (key === "Enter") add(event.target.value);
-        if (key === "Escape") event.preventDefault(), addingApp = false, renderBody();
-      }
-    }) : null;
-    if (input) window.setTimeout(() => input.focus(), 0);
-    const suggest = v.lastApp && !s.fixApps.includes(v.lastApp) ? linkBtn(`Add ${v.lastApp}`, () => add(v.lastApp ?? "")) : null;
-    return [
-      row(
-        "Not in these programs",
-        [s.fixApps.length ? "words typed there are never fixed by themselves" : "none"],
-        el(
-          "span",
-          { class: "kchg" },
-          input,
-          suggest,
-          input ? null : linkBtn("Add\u2026", () => {
-            addingApp = true;
-            renderBody();
-          })
-        )
-      ),
-      s.fixApps.length ? chipList(s.fixApps, (exe) => save({ fixApps: s.fixApps.filter((a) => a !== exe) })) : null
-    ].filter((n) => n !== null);
+      note: "The name of its .exe. Words typed there are never fixed by themselves; the fix key still works.",
+      items: s.fixApps,
+      count: "Programs",
+      empty: "None yet. Add a program above, or the one in front a moment ago.",
+      normalize: (text) => {
+        const name = text.trim().toLowerCase();
+        return name ? /\.exe$/.test(name) ? name : `${name}.exe` : "";
+      },
+      add,
+      remove: (exe) => save({ fixApps: apps().filter((a) => a !== exe) }),
+      extra: suggest ? card("plus", `Add ${suggest}`, ["the program in front a moment ago"], btn("Add", () => add(suggest))) : null
+    });
   }
-  function keptRow(v) {
+  function keptPage(v) {
     const s = v.settings;
-    const add = (text) => {
-      const word = text.trim().toLowerCase();
-      addingWord = false;
-      if (!word) return renderBody();
-      const words = view?.settings.keepWords ?? s.keepWords;
-      save({ keepWords: [...words, word] });
-    };
-    const input = addingWord ? el("input", {
-      type: "text",
-      class: "field",
-      placeholder: "word",
-      "aria-label": "Word to keep as typed",
-      onkeydown: (event) => {
-        const key = event.key;
-        if (key === "Enter") add(event.target.value);
-        if (key === "Escape") event.preventDefault(), addingWord = false, renderBody();
-      }
-    }) : null;
-    if (input) window.setTimeout(() => input.focus(), 0);
-    return [
-      row(
-        "Kept as typed",
-        [s.keepWords.length ? "never fixed by themselves" : "none \xB7 Backspace right after a fix adds the word"],
-        el(
-          "span",
-          { class: "kchg" },
-          input,
-          input ? null : linkBtn("Add\u2026", () => {
-            addingWord = true;
-            renderBody();
-          })
-        )
-      ),
-      s.keepWords.length ? chipList(s.keepWords, (word) => save({ keepWords: s.keepWords.filter((w) => w !== word) })) : null
-    ].filter((n) => n !== null);
+    const words = () => view?.settings.keepWords ?? s.keepWords;
+    return listPage({
+      label: "Add a word",
+      placeholder: "word, as you type it",
+      note: "Backspace right after a fix adds the word too.",
+      items: s.keepWords,
+      count: "Words",
+      empty: "None yet. Add a word above, or press Backspace right after a fix you did not want.",
+      normalize: (text) => text.trim().toLowerCase(),
+      add: (word) => save({ keepWords: [...words(), word] }),
+      remove: (word) => save({ keepWords: words().filter((w) => w !== word) })
+    });
   }
   function othersLine(v) {
     const presses = "presses keys by itself; Altype ignores those.";
     const text = v.keyboardApps.length ? `Also using the keyboard: ${v.keyboardApps.join(", ")}.${v.foreignKeys ? ` One of them ${presses}` : ""}` : v.foreignKeys ? `A program ${presses}` : "";
-    return text ? el("p", { class: "aside" }, icon("info"), text) : null;
+    return text ? aside("info", text) : null;
   }
   function keyboardPage(v) {
     const s = v.settings;
     const sample = sampleOf(s.native);
     const [typed = "", fixed = ""] = [sample.typed.split(" ")[0], sample.fixed.split(" ")[0]];
+    const count = (n, one) => n ? `${n} ${n === 1 ? one : one + "s"}` : "none";
     return [
       grp("Keys"),
-      keyRow("switchKey", "Switch the layout", s.switchKey && usage(s.switchKey).startsWith("tap") ? "tap it alone" : "to the next of the layouts below"),
-      keyRow("fixKey", "Fix what was typed wrong", "the last word; again for the next layout; or the selection"),
-      grp("Layouts"),
-      layoutChips(v),
-      toggle("Fix words as I type", s.autoFix, (autoFix) => save({ autoFix }), `${typed} \u2192 ${fixed} on the space \xB7 Backspace takes it back`),
-      toggle("Show the layout by the cursor", s.layoutBadge, (layoutBadge) => save({ layoutBadge })),
-      ...s.autoFix ? programsRow(v) : [],
-      ...keptRow(v),
+      keyRow("switchKey", "Switch the layout", s.switchKey && usage(s.switchKey).startsWith("tap") ? "tap it alone" : "to the next of the layouts below", false, "keyboard"),
+      keyRow("fixKey", "Fix what was typed wrong", "the last word; again for the next layout; or the selection", false, "rotate-cw"),
+      grp("As you type"),
+      toggleCard("spell-check", "Fix words as I type", s.autoFix, (autoFix) => save({ autoFix }), `${typed} \u2192 ${fixed} on the space \xB7 Backspace takes it back`),
+      toggleCard("type", "Show the layout by the cursor", s.layoutBadge, (layoutBadge) => save({ layoutBadge }), "a small badge whenever the layout changes"),
+      grp("Lists"),
+      navCard("keyboard", "Layouts", "the ones the keys go through, in order", cycleOf(v).map((l) => l.short).join(" \xB7 "), () => openSub("layouts"), "layouts"),
+      navCard("monitor", "Programs left out", "where words are never fixed by themselves", count(s.fixApps.length, "program"), () => openSub("programs"), "programs"),
+      navCard("lock", "Kept as typed", "words never fixed by themselves", count(s.keepWords.length, "word"), () => openSub("kept"), "kept"),
       v.rivals.length ? warn(`${v.rivals.join(" and ")} ${v.rivals.length > 1 ? "are" : "is"} running: turn off its layout switching, or words get fixed twice.`) : null,
       v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
       othersLine(v),
-      el("p", { class: "privacy" }, icon("lock"), "Altype looks only at the keys of what you are typing, keeps nothing and sends nothing anywhere.")
+      el("p", { class: "privacy" }, lucide("lock", "s"), "Altype looks only at the keys of what you are typing, keeps nothing and sends nothing anywhere.")
     ].filter((n) => n !== null);
   }
   var matches = (w, q) => `${w.word} ${w.base} ${w.sentence} ${w.senses.map((s) => s[1]).join(" ")}`.toLowerCase().includes(q);
@@ -3133,21 +3392,25 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   }
   var removingSpeech = false;
   var PART_NAMES = { core: "speech to text", gpu: "graphics card", speakers: "speakers" };
-  function speechSettings(v) {
+  function engineCard(v) {
+    const p = v.speech.pack;
+    const value = !installed(v) ? p.status === "installing" ? "downloading\u2026" : "not downloaded" : p.parts.map((part) => PART_NAMES[part]).join(", ");
+    return navCard("cpu", "Speech engine", "for Dictate and Transcribe \xB7 downloads once, then works offline", value, () => openSub("engine"), "engine");
+  }
+  function enginePage(v) {
     const sp = v.speech;
     const p = sp.pack;
     const h = sp.health;
-    const head = grp("Speech engine");
-    const out = [head];
     if (!installed(v)) {
       const offer = engineRows(v, "Dictate and Transcribe");
-      if (p.status === "installing" || p.status === "removing") return [head, ...offer];
-      return [head, row("Not downloaded", ["for Dictate and Transcribe \xB7 downloads once, then works offline"], linkBtn("Set up\u2026", () => openPage("dictate")))];
+      if (p.status === "installing" || p.status === "removing") return [grp("Download"), ...offer];
+      return [grp("Download"), ...offer];
     }
-    const work = engineRows(v, "");
+    const out = [grp("Parts")];
     const add = (part, mb) => el("button", { class: "chip off", title: `Add \xB7 \u2248${mb} MB`, disabled: p.status !== "ready", onclick: () => post({ type: "installSpeech", parts: [part] }) }, `+ ${PART_NAMES[part]}`);
     out.push(
-      row(
+      card(
+        "download",
         "Parts",
         [p.nvidia && !hasPart(v, "gpu") || !hasPart(v, "speakers") ? "downloaded once \xB7 tap one to add it" : "all downloaded, once"],
         el(
@@ -3157,13 +3420,11 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           p.nvidia && !hasPart(v, "gpu") ? add("gpu", sp.download.gpu) : null,
           !hasPart(v, "speakers") ? add("speakers", sp.download.speakers) : null
         )
-      )
-    );
-    out.push(...work);
-    const service = { off: "off", starting: "starting\u2026", ready: h?.busy ? "running \xB7 transcribing now" : "running", down: "stopped" }[sp.service];
-    out.push(
-      row("Graphics card", [cardNote(v)], null),
-      row(
+      ),
+      ...engineRows(v, ""),
+      card("monitor", "Graphics card", [cardNote(v)], null),
+      card(
+        "cpu",
         "Speech models",
         [v.settings.speechPrefer === "speed" ? "quicker ones, a little less accurate" : "the most accurate ones this computer runs in time"],
         seg(
@@ -3175,16 +3436,20 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           (speechPrefer) => post({ type: "saveSettings", patch: { speechPrefer } })
         )
       ),
-      row("Service", [`${service} \xB7 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn("Restart", () => post({ type: "restartSpeech" }), p.status !== "ready"))
+      grp("Service")
     );
+    const service = { off: "off", starting: "starting\u2026", ready: h?.busy ? "running \xB7 transcribing now" : "running", down: "stopped" }[sp.service];
+    out.push(card("play", "Service", [`${service} \xB7 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn("Restart", () => post({ type: "restartSpeech" }), p.status !== "ready")));
     if (h) {
       out.push(
-        row("Transcripts are kept in", [pathNote(h.dataDir)], linkBtn("Open", () => post({ type: "openPath", path: h.dataDir }))),
-        row("Notes go to", [h.kbDir ? pathNote(h.kbDir) : "no knowledge base folder yet"], linkBtn(h.kbDir ? "Change" : "Choose\u2026", () => void pickKb()))
+        card("folder", "Transcripts are kept in", [pathNote(h.dataDir)], linkBtn("Open", () => post({ type: "openPath", path: h.dataDir }))),
+        card("folder", "Notes go to", [h.kbDir ? pathNote(h.kbDir) : "no knowledge base folder yet"], linkBtn(h.kbDir ? "Change" : "Choose\u2026", () => void pickKb()))
       );
     }
     out.push(
-      row(
+      grp("Remove"),
+      card(
+        "trash-2",
         "Remove the speech engine",
         [removingSpeech ? "its parts and models go; transcripts and notes stay. Remove?" : "gives the space back \xB7 transcripts and notes stay"],
         removingSpeech ? el(
@@ -3197,47 +3462,33 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     );
     return out.filter((n) => n !== null);
   }
-  function languageRows(v) {
+  function computerPage(v) {
+    const rows = computerRows(v);
+    const first = rows[0];
+    if (first) first.prepend(lucide("monitor"));
+    return [grp("Hardware"), ...rows, testOffer(v), card("cpu", "Graphics card", [cardNote(v)], null)].filter((n) => n !== null);
+  }
+  var languageName = (code) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
+  function languagesCard(v) {
+    return navCard("globe", "Languages you use", "dictation, translation and the screen\u2019s text are read as one of these", myLanguages(v.settings).map(languageName).join(", "), () => openSub("languages"), "languages");
+  }
+  function languagesPage(v) {
     const s = v.settings;
-    const nameOf = (code) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
     const used = myLanguages(s);
     const rest = LANGUAGES.filter((l) => !used.includes(l.code));
-    const picker2 = addingLanguage ? select(
-      "",
-      [["", "Pick a language"], ...rest.map((l) => [l.code, `${l.name} \xB7 ${l.native}`])],
-      (code) => {
-        addingLanguage = false;
-        if (!code) return renderBody();
-        save({ languages: [...view?.settings.languages ?? s.languages, code] });
-      }
-    ) : null;
-    if (picker2) {
-      const box = picker2.querySelector("select");
-      box.addEventListener("keydown", (event) => event.key === "Escape" && (event.preventDefault(), event.stopPropagation(), addingLanguage = false, renderBody()));
-      window.setTimeout(() => box.focus(), 0);
-    }
+    const mine = () => view?.settings.languages ?? s.languages;
     return [
-      row(
-        "Languages you use",
-        ["dictation, translation and the screen\u2019s text are read as one of these"],
-        picker2 ?? linkBtn(
-          "+ Add",
-          () => {
-            addingLanguage = true;
-            renderBody();
-          },
-          rest.length === 0
-        )
+      grp("Add a language"),
+      card(
+        "plus",
+        "Add a language",
+        ["dictation never picks another; translation and the screen\u2019s text guess among them"],
+        select("", [["", "Pick a language"], ...rest.map((l) => [l.code, `${l.name} \xB7 ${l.native}`])], (code) => code && save({ languages: [...mine(), code] }))
       ),
-      el(
-        "div",
-        { class: "chiprow" },
-        chip(nameOf(used[0] ?? "")),
-        chip("English"),
-        ...s.languages.map(
-          (code) => el("span", { class: "chip" }, nameOf(code), el("button", { class: "ib", title: "Remove", "aria-label": `Remove ${nameOf(code)}`, onclick: () => save({ languages: s.languages.filter((c) => c !== code) }) }, icon("close")))
-        )
-      )
+      grp("Languages", used.length),
+      card("globe", languageName(used[0] ?? ""), ["your language \xB7 changed in Settings"], null),
+      card("globe", "English", ["always: the language Altype teaches"], null),
+      ...s.languages.map((code) => card("globe", languageName(code), [], ib("x", `Remove ${languageName(code)}`, () => save({ languages: mine().filter((c) => c !== code) }))))
     ];
   }
   function settingsPage(v) {
@@ -3247,23 +3498,27 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     const windows = v.hostVoices.find((h) => /^en\b/i.test(h.lang));
     const slow = naturalOn(v) && rtf !== void 0 && rtf > 1;
     const voiceNote = !naturalOn(v) ? ["a Windows voice"] : slow ? [`natural \xB7 ${v.natural.size} MB, on this computer`, bad("slower than it speaks on this computer: it pauses between sentences \xB7 a Windows voice is instant")] : [`natural \xB7 ${v.natural.size} MB, on this computer${rtf ? ` \xB7 makes speech ${Math.max(1, Math.round(1 / rtf))}\xD7 faster than it plays` : ""}`];
+    const d = v.speech.device;
+    const computer = `${shortCpu(d.cpu.name)} \xB7 ${d.ramGb} GB`;
     return [
       grp("Language and voice"),
-      row(
+      card(
+        "languages",
         "Your language",
-        [],
+        ["what Altype translates into and reads from"],
         select(
           s.native,
           v.languages.map((l) => [l.name, `${l.native} \xB7 ${l.name}`]),
           (native) => save({ native })
         )
       ),
-      ...languageRows(v),
-      row("Voice", voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, "").replace(/ Desktop$/, "")}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
+      languagesCard(v),
+      card("volume-2", "Voice", voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, "").replace(/ Desktop$/, "")}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
       naturalRow(v),
-      row(
+      card(
+        "play",
         "Speed",
-        [],
+        ["of the reading"],
         seg(
           s.rate,
           RATES.map((r) => [r, String(r)]),
@@ -3271,24 +3526,12 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           true
         )
       ),
-      row(
-        "Theme",
-        [],
-        seg(
-          s.theme,
-          [
-            ["system", "As Windows"],
-            ["light", "Light"],
-            ["dark", "Dark"]
-          ],
-          (theme) => save({ theme })
-        )
-      ),
       grp("The card"),
-      toggle("Read aloud when a card opens", s.autoRead, (autoRead) => save({ autoRead })),
-      toggle("Dotted line under less common words", s.rareWords, (rareWords) => save({ rareWords })),
-      toggle("Listen reads one sentence at a time", s.oneAtATime, (oneAtATime) => save({ oneAtATime })),
-      row(
+      toggleCard("volume-2", "Read aloud when a card opens", s.autoRead, (autoRead) => save({ autoRead })),
+      toggleCard("spell-check", "Dotted line under less common words", s.rareWords, (rareWords) => save({ rareWords })),
+      toggleCard("list", "Listen reads one sentence at a time", s.oneAtATime, (oneAtATime) => save({ oneAtATime })),
+      card(
+        "book-open",
         "Word meanings on",
         [],
         select(
@@ -3301,15 +3544,32 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           (wordHint) => save({ wordHint })
         )
       ),
-      grp("This computer"),
-      ...computerRows(v),
-      toggle("Start with Windows", s.startWithWindows, (startWithWindows) => save({ startWithWindows })),
-      row(
+      grp("Altype"),
+      card(
+        "monitor",
+        "Theme",
+        [],
+        seg(
+          s.theme,
+          [
+            ["system", "As Windows"],
+            ["light", "Light"],
+            ["dark", "Dark"]
+          ],
+          (theme) => save({ theme })
+        )
+      ),
+      toggleCard("power", "Start with Windows", s.startWithWindows, (startWithWindows) => save({ startWithWindows })),
+      toggleCard("pause", "Pause Altype", s.paused, (paused) => save({ paused }), "every key and reaction off until it is turned back on \xB7 also in the tray"),
+      card(
+        "rotate-cw",
         `Version ${v.version}`,
         [u.status === "failed" ? bad(updateText(u)) : updateText(u)],
         linkBtn("Check for updates", () => post({ type: "checkUpdates" }), u.status === "dev" || u.status === "checking" || u.status === "downloading")
       ),
-      ...speechSettings(v)
+      grp("Speech"),
+      engineCard(v),
+      navCard("monitor", "This computer", "what speech runs on, and the speed test", computer, () => openSub("computer"), "computer")
     ].filter((n) => n !== null);
   }
   function aboutPage(v) {
@@ -3347,6 +3607,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   }
   function showTab(tab) {
     if (tab === "home" || tab === "howto") closePage();
+    else if (open?.name === tab && open.sub) popSub(false);
     else openPage(tab);
   }
   function start(v) {
@@ -3371,6 +3632,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       else askedTranscript = m.id, askedTab = "transcripts";
       return;
     }
+    if (m.type === "appWindow") return windowState(m.maximized);
     if (m.type !== "app") return;
     const first = view === void 0;
     view = m.view;

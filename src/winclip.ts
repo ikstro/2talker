@@ -16,7 +16,8 @@ const AddClipboardFormatListener = user32.func('bool __stdcall AddClipboardForma
 const RemoveClipboardFormatListener = user32.func('bool __stdcall RemoveClipboardFormatListener(intptr_t hwnd)')
 const GetAsyncKeyState = user32.func('short __stdcall GetAsyncKeyState(int vKey)')
 
-function handleOf(window: BrowserWindow): bigint {
+/** The window's HWND, as koffi takes an `intptr_t`. */
+export function handleOf(window: BrowserWindow): bigint {
   const buffer = window.getNativeWindowHandle()
   return buffer.length >= 8 ? buffer.readBigUInt64LE(0) : BigInt(buffer.readUInt32LE(0))
 }

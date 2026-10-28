@@ -2,7 +2,8 @@
 // build/icon.svg) into the pictures the app uses: build/icon.png (512 px),
 // build/icon.ico (16, 24, 32, 48, 256: the installer and the program),
 // media/icon.png (128 px, the window and About), media/tray.png and
-// tray@2x.png (16 and 32 px), and copies the SVG to media/. From 32 px up the
+// tray@2x.png (16 and 32 px), tray-paused.png and its @2x (the same at 45 %,
+// while Altype is paused), and copies the SVG to media/. From 32 px up the
 // mark is drawn from the SVG's numbers; at 16 and 24 the legend is set pixel
 // by pixel, so "alt" stays a word in the tray. It is drawn on a canvas, whose
 // pixels keep their transparency in an ordinary page. Run under Electron:
@@ -21,8 +22,8 @@ const INK = { tile: '#1c2128', edge: '#444c56', cap: '#cdd9e5', ledge: '#768390'
 // "alt", 8 × 5 pixels: a double-storey a, l, a short t.
 const GLYPH = ['....X.X.', 'XX..X.XX', '.XX.X.X.', 'X.X.X.X.', 'XXX.X..X']
 
-/** Runs in the page: draws the mark at `size` and returns it as a PNG data URL. */
-function draw(size, ink, glyph) {
+/** Runs in the page: draws the mark at `size`, `alpha` opaque, and returns it as a PNG data URL. */
+function draw(size, ink, glyph, alpha = 1) {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const g = canvas.getContext('2d')
@@ -63,7 +64,14 @@ function draw(size, ink, glyph) {
     g.textAlign = 'center'
     g.fillText('alt', 32, 36.5)
   }
-  return canvas.toDataURL('image/png')
+  if (alpha === 1) return canvas.toDataURL('image/png')
+  // Faded as a whole, so the cap does not let the tile show through.
+  const faded = document.createElement('canvas')
+  faded.width = faded.height = size
+  const f = faded.getContext('2d')
+  f.globalAlpha = alpha
+  f.drawImage(canvas, 0, 0)
+  return faded.toDataURL('image/png')
 }
 
 /** An .ico holding PNG pictures, smallest first. */
@@ -97,8 +105,8 @@ async function main() {
   const win = new BrowserWindow({ width: 320, height: 240, show: false, webPreferences: { offscreen: true } })
   await win.loadFile(path.join(work, 'icons.html'))
   await win.webContents.executeJavaScript(`document.fonts.load('800 17px "JetBrains Mono"').then(() => true)`)
-  const at = async size => {
-    const url = await win.webContents.executeJavaScript(`(${draw.toString()})(${size}, ${JSON.stringify(INK)}, ${JSON.stringify(GLYPH)})`)
+  const at = async (size, alpha = 1) => {
+    const url = await win.webContents.executeJavaScript(`(${draw.toString()})(${size}, ${JSON.stringify(INK)}, ${JSON.stringify(GLYPH)}, ${alpha})`)
     return Buffer.from(url.split(',')[1], 'base64')
   }
   const pngs = []
@@ -108,6 +116,8 @@ async function main() {
   fs.writeFileSync(path.join(root, 'media', 'icon.png'), await at(128))
   fs.writeFileSync(path.join(root, 'media', 'tray.png'), pngs[0][1])
   fs.writeFileSync(path.join(root, 'media', 'tray@2x.png'), pngs[2][1])
+  fs.writeFileSync(path.join(root, 'media', 'tray-paused.png'), await at(16, 0.45))
+  fs.writeFileSync(path.join(root, 'media', 'tray-paused@2x.png'), await at(32, 0.45))
   fs.copyFileSync(path.join(root, 'build', 'icon.svg'), path.join(root, 'media', 'icon.svg'))
   win.destroy()
   fs.rmSync(work, { recursive: true, force: true })

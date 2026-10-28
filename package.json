@@ -1,7 +1,7 @@
 {
   "name": "altype",
   "productName": "Altype",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Your language. Your shortcut. Listen to English, translate, fix keyboard layouts: offline, from any program.",
   "author": {
     "name": "Yevhen Peshynskyi",
@@ -23,7 +23,9 @@
     "test": "vitest run",
     "test:engine": "uv run --project engine --frozen --no-sync pytest engine/tests -q -p no:cacheprovider",
     "dist": "node esbuild.mjs && electron-builder --win --x64",
-    "models": "node scripts/build-mt.mjs"
+    "models": "node scripts/build-mt.mjs",
+    "glyphs": "node scripts/build-glyphs.mjs",
+    "shots": "node scripts/shots.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -31,6 +33,7 @@
     "electron": "45.0.0",
     "electron-builder": "^26.0.0",
     "esbuild": "^0.25.0",
+    "lucide-static": "^1.63.0",
     "onnxruntime-common": "1.30.0",
     "onnxruntime-node": "1.30.0",
     "typescript": "^5.6.0",

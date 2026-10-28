@@ -101,6 +101,8 @@ export type Settings = {
   naturalDismissed: boolean
   /** The Home's opening moment (one line through fix, translate, listen) has played once; Replay plays it again. */
   introSeen: boolean
+  /** Altype paused: all its keys and reactions off (Ctrl+C twice, the keyboard helper, dictation) until turned back on. */
+  paused: boolean
 }
 
 export const DEFAULTS: Settings = {
@@ -142,6 +144,7 @@ export const DEFAULTS: Settings = {
   startWithWindows: true,
   naturalDismissed: false,
   introSeen: false,
+  paused: false,
 }
 
 export const VOCABULARY = { lines: 200, chars: 120 }
@@ -227,5 +230,6 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     startWithWindows: flag(r.startWithWindows, DEFAULTS.startWithWindows),
     naturalDismissed: flag(r.naturalDismissed, DEFAULTS.naturalDismissed),
     introSeen: flag(r.introSeen, DEFAULTS.introSeen),
+    paused: flag(r.paused, DEFAULTS.paused),
   }
 }

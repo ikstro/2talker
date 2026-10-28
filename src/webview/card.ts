@@ -11,7 +11,7 @@ import { hotkeyLabel } from '../hotkey'
 import { findLanguage, labelCode, langCode, voiceMatches } from '../languages'
 import { chosenNatural } from '../natural'
 import type { CardKind, CardState, CardView, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
-import { el, html, icon } from './dom'
+import { dwmFlag, el, html, icon } from './dom'
 import { glyph } from './glyphs'
 import { WordHover } from './hover'
 import { Player } from './player'
@@ -23,6 +23,8 @@ declare global {
     tutorHost: TutorHost
   }
 }
+
+dwmFlag()
 
 const post = (message: ToHost) => window.tutorHost.post(message)
 

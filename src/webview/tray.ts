@@ -1,13 +1,16 @@
 // The tray's panel, in place of Windows' menu: the way into the app window at
-// the top (the brand, or Open), Altype's commands for the copied text and for
-// a piece of the screen with their keys, the switch for fixing the layout
-// while typing, and Quit as the last row. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
-// puts it away (the main process hides it, and after any command). Everything
-// shown comes in one `tray` message, sent again whenever any of it changes.
+// the top (the brand, or Open) with Altype's state, Altype's commands for the
+// copied text and for a piece of the screen with their keys, the speech ones
+// once the engine is in, three quick settings, then Settings and Quit. A menu
+// in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere puts it away
+// (the main process hides it, and after any command). Everything shown comes
+// in one `tray` message, sent again whenever any of it changes.
 
+import type { Settings } from '../settings'
 import type { ToHost, ToView, TrayCommand, TrayView, TutorHost } from '../protocol'
-import { el } from './dom'
+import { dwmFlag, el } from './dom'
 import { caps } from './keycaps'
+import { lucide, type LucideName } from './lucide'
 
 declare global {
   interface Window {
@@ -15,19 +18,53 @@ declare global {
   }
 }
 
+dwmFlag()
+
 const post = (message: ToHost) => window.tutorHost.post(message)
 
 const root = document.getElementById('root') as HTMLDivElement
 
-/** One command: a full-width row, its keys at the right end (none when it has no key). */
-function command(label: string, run: TrayCommand, hotkey = ''): HTMLElement {
-  return el('button', { class: 'cmd', 'data-nav': true, onclick: () => post({ type: 'tray', command: run }) }, el('span', { class: 'l' }, label), hotkey ? caps(hotkey) : null)
+/** One command: a full-width row, its icon, its keys at the right end (none when it has no key). */
+function command(id: string, icon: LucideName, label: string, run: TrayCommand, hotkey = ''): HTMLElement {
+  return el(
+    'button',
+    { class: 'cmd', 'data-nav': true, 'data-id': id, onclick: () => post({ type: 'tray', command: run }) },
+    lucide(icon, 's'),
+    el('span', { class: 'l' }, label),
+    hotkey ? caps(hotkey) : null,
+  )
 }
 
-const grp = (text: string) => el('div', { class: 'grp' }, text)
+type Switch = 'autoFix' | 'doubleCopy' | 'paused'
 
-/** Whether the translator for the person's language is here, in a few words; nothing when there is nothing to say. */
+/** One quick setting: saved at once, and the panel stays, as a switch is not a command. */
+function toggle(id: Switch, icon: LucideName, label: string, on: boolean): HTMLElement {
+  const knob = el('span', { class: on ? 'tg on' : 'tg' })
+  const row: HTMLElement = el(
+    'button',
+    {
+      class: 'cmd',
+      'data-nav': true,
+      'data-id': id,
+      role: 'switch',
+      'aria-checked': String(on),
+      onclick: () => {
+        const next = row.getAttribute('aria-checked') !== 'true'
+        row.setAttribute('aria-checked', String(next))
+        knob.classList.toggle('on', next)
+        post({ type: 'saveSettings', patch: { [id]: next } as Partial<Settings> })
+      },
+    },
+    lucide(icon, 's'),
+    el('span', { class: 'l' }, label),
+    knob,
+  )
+  return row
+}
+
+/** Altype's state in a few words: paused, or whether the translator for the person's language is here; nothing when there is nothing to say. */
 function status(v: TrayView): HTMLElement | null {
+  if (v.paused) return el('span', { class: 'st paused', title: 'Keys and Ctrl+C twice are off' }, el('span', { class: 'dot' }), 'paused')
   switch (v.translator) {
     case 'ready':
       return el('span', { class: 'st', title: `${v.native} ⇄ English, offline` }, el('span', { class: 'dot' }), 'ready')
@@ -42,52 +79,39 @@ function status(v: TrayView): HTMLElement | null {
 
 function render(v: TrayView): void {
   const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.id : undefined
-  const knob = el('span', { class: v.autoFix ? 'tg on' : 'tg' })
-  const fix = el(
-    'button',
-    {
-      class: 'cmd trow',
-      'data-nav': true,
-      'data-id': 'autoFix',
-      role: 'switch',
-      'aria-checked': String(v.autoFix),
-      // Saved at once; the panel stays, as a switch is not a command.
-      onclick: () => {
-        const next = fix.getAttribute('aria-checked') !== 'true'
-        fix.setAttribute('aria-checked', String(next))
-        knob.classList.toggle('on', next)
-        post({ type: 'saveSettings', patch: { autoFix: next } })
-      },
-    },
-    el('span', { class: 'l' }, 'Fix the layout as I type'),
-    knob,
-  )
-  const cmds = [
-    command('Listen', 'listenCopied', v.keys.listenCopied),
-    command('Translate', 'translateCopied'),
-    command('Listen', 'listenScreen', v.keys.snipListen),
-    command('Translate', 'translateScreen', v.keys.snipTranslate),
-  ]
-  cmds.forEach((c, i) => (c.dataset.id = String(i)))
-  const note = command(v.speech.recording ? 'Save the note' : 'New note', 'note', v.speech.noteKey)
-  note.dataset.id = 'note'
-  const transcripts = command('Transcripts', 'transcripts')
-  transcripts.dataset.id = 'transcripts'
   const openApp = () => post({ type: 'tray', command: 'open' })
   // The brand opens the window too; Open is the one the keys reach.
-  const brand = el('button', { class: 'brand', tabindex: '-1', title: 'Open Altype', onclick: openApp }, el('span', { class: 'key' }, 'alt'), el('span', { class: 'wm' }, 'altype'))
+  const brand = el('button', { class: 'brand', tabindex: '-1', title: 'Open Altype', onclick: openApp }, el('span', { class: 'key mark' }, 'alt'), el('span', { class: 'wm' }, 'altype'))
   const open = el('button', { class: 'open', 'data-nav': true, 'data-id': 'open', onclick: openApp }, 'Open')
-  const quit = command('Quit', 'quit')
-  quit.dataset.id = 'quit'
   const panel = el(
     'div',
     { class: 'panel' },
     el('header', { class: 'head' }, brand, el('div', { class: 'side' }, status(v), open)),
-    el('section', { class: 'sec' }, grp('Copied text'), cmds[0], cmds[1]),
-    el('section', { class: 'sec' }, grp('A piece of the screen'), cmds[2], cmds[3]),
-    v.speech.installed ? el('section', { class: 'sec' }, grp('Speech'), note, transcripts) : null,
-    el('section', { class: 'sec sw' }, fix),
-    el('section', { class: 'sec' }, quit),
+    el(
+      'section',
+      { class: 'sec' },
+      command('listenCopied', 'volume-2', 'Listen to the copied text', 'listenCopied', v.keys.listenCopied),
+      command('translateCopied', 'languages', 'Translate the copied text', 'translateCopied'),
+      command('listenScreen', 'scan', 'Listen to a screen snip', 'listenScreen', v.keys.snipListen),
+      command('translateScreen', 'scan', 'Translate a screen snip', 'translateScreen', v.keys.snipTranslate),
+    ),
+    v.speech.installed
+      ? el(
+          'section',
+          { class: 'sec' },
+          command('note', 'notebook-pen', v.speech.recording ? 'Save the note' : 'New note', 'note', v.speech.noteKey),
+          command('transcripts', 'file-text', 'Transcripts', 'transcripts'),
+        )
+      : null,
+    el(
+      'section',
+      { class: 'sec sw' },
+      el('div', { class: 'grp' }, 'Quick settings'),
+      toggle('autoFix', 'keyboard', 'Fix the layout as I type', v.autoFix),
+      toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy),
+      toggle('paused', 'pause', 'Pause Altype', v.paused),
+    ),
+    el('section', { class: 'sec' }, command('settings', 'settings', 'Settings', 'settings'), command('quit', 'power', 'Quit', 'quit')),
   )
   root.replaceChildren(panel)
   // A change while the panel is open keeps the focus where it was.

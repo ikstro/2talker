@@ -18,6 +18,8 @@ body { font: 400 var(--t-body) / 1.45 var(--font); color: var(--text); user-sele
   flex-direction: column;
   gap: 7px;
 }
+/* Windows 11 draws the frame itself (?frame=dwm): the border stays, unseen, so the size holds. */
+html.dwm .badge { border-color: transparent; }
 
 /* The phrase as it stands: whole, wrapping, the latest words in view; six
    lines at most (the window's 180 px), whole lines, the earlier ones fading
@@ -43,7 +45,7 @@ body { font: 400 var(--t-body) / 1.45 var(--font); color: var(--text); user-sele
   align-items: center;
   gap: 8px;
   min-height: 18px;
-  font-size: var(--t-small);
+  font: 400 var(--t-small) / 1.45 var(--font);
   -webkit-app-region: drag;
 }
 .what { color: var(--strong); font-weight: 600; white-space: nowrap; }
@@ -55,14 +57,8 @@ body { font: 400 var(--t-body) / 1.45 var(--font); color: var(--text); user-sele
 .dot.behind { background: var(--orange); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-.meter { margin-left: auto; display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
-.meter i { width: 3px; border-radius: 1px; background: var(--border); }
-.meter i:nth-child(1) { height: 4px; }
-.meter i:nth-child(2) { height: 6px; }
-.meter i:nth-child(3) { height: 9px; }
-.meter i:nth-child(4) { height: 11px; }
-.meter i:nth-child(5) { height: 14px; }
-.meter i.on { background: var(--green); }
+/* The last three seconds of sound, newest at the right (dictation.ts draws it). */
+canvas.wave { flex: 1; min-width: 0; height: 16px; margin-left: 6px; }
 
 .spin { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

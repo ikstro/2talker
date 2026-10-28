@@ -170,6 +170,8 @@
     }
   };
   var STREAM_CHUNK = 4e3;
+  var LEVEL_SPAN = 800;
+  var LEVELS_KEPT = 60;
   var StreamRecorder = class {
     constructor(call, session, expected, onStatus2) {
       this.call = call;
@@ -187,6 +189,10 @@
     uploads = Promise.resolve();
     broken = false;
     loudness = 0;
+    /** The sound's levels, one per 50 ms, not yet taken by the page. */
+    heard = [];
+    spanSum = 0;
+    spanCount = 0;
     speech(method, route, body) {
       return this.call({ call: "speech", method, route, body });
     }
@@ -203,10 +209,16 @@
       source.connect(tap).connect(mute).connect(this.context.destination);
     }
     take(samples) {
-      let sum = 0;
       for (let i = 0; i < samples.length; i++) {
         const v = samples[i];
-        sum += v * v;
+        this.spanSum += v * v;
+        if (++this.spanCount === LEVEL_SPAN) {
+          this.loudness = Math.min(1, Math.sqrt(this.spanSum / LEVEL_SPAN) * 4);
+          this.heard.push(this.loudness);
+          if (this.heard.length > LEVELS_KEPT) this.heard.shift();
+          this.spanSum = 0;
+          this.spanCount = 0;
+        }
         this.waiting[this.filled++] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
         if (this.filled === STREAM_CHUNK) {
           this.send(this.waiting);
@@ -214,7 +226,6 @@
           this.filled = 0;
         }
       }
-      this.loudness = Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 4);
     }
     send(chunk) {
       this.kept.push(chunk);
@@ -231,8 +242,15 @@
         this.broken = true;
       });
     }
+    /** How loud the latest 50 ms were, 0…1. */
     level() {
       return this.loudness;
+    }
+    /** Every level since the last call, oldest first, one per 50 ms of sound: the wave misses none. */
+    levels() {
+      const taken = this.heard;
+      this.heard = [];
+      return taken;
     }
     get seconds() {
       return this.startedAt ? (Date.now() - this.startedAt) / 1e3 : 0;
@@ -278,6 +296,7 @@
   // src/webview/dictation.ts
   var host = window.tutorHost;
   var root = document.getElementById("badge");
+  document.documentElement.classList.toggle("dwm", new URLSearchParams(location.search).get("frame") === "dwm");
   var TITLES = { type: "Dictate", english: "Dictate in English", note: "A note" };
   var recorder;
   var mode = "type";
@@ -322,22 +341,69 @@
     dot.classList.toggle("behind", status.pending > BEHIND);
     dot.title = status.pending > BEHIND ? "catching up" : "";
   }
+  var WAVE = 60;
+  var STEP = 3;
+  var BAR = 2;
+  var levels = new Array(WAVE).fill(0);
+  var wave;
+  var frame;
+  var fresh = false;
+  function hear(level) {
+    levels.push(level);
+    if (levels.length > WAVE) levels.shift();
+    fresh = true;
+  }
+  function draw() {
+    frame = requestAnimationFrame(draw);
+    if (!wave) return;
+    const ratio = devicePixelRatio || 1;
+    const w = wave.clientWidth;
+    const h = wave.clientHeight;
+    const sized = wave.width === Math.round(w * ratio) && wave.height === Math.round(h * ratio);
+    if (!fresh && sized) return;
+    fresh = false;
+    if (!sized) {
+      wave.width = Math.round(w * ratio);
+      wave.height = Math.round(h * ratio);
+    }
+    const c = wave.getContext("2d");
+    if (!c) return;
+    c.setTransform(ratio, 0, 0, ratio, 0, 0);
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    c.globalAlpha = 0.7;
+    const shown = Math.min(WAVE, Math.floor(w / STEP));
+    for (let i = 0; i < shown; i++) {
+      const bar = Math.max(2, Math.round(levels[WAVE - shown + i] * h));
+      c.fillRect(w - (shown - i) * STEP, (h - bar) / 2, BAR, bar);
+    }
+  }
+  function quiet() {
+    clearInterval(timer);
+    timer = void 0;
+    if (frame !== void 0) cancelAnimationFrame(frame);
+    frame = void 0;
+    wave = void 0;
+  }
   function recording() {
+    quiet();
     time = el("span", { class: "time" }, "0:00");
-    const bars = Array.from({ length: 5 }, () => el("i"));
+    wave = el("canvas", { class: "wave" });
     dot = el("span", { class: "dot" });
     words = wordsOf("", "Listening\u2026");
     said = "";
     fetching = false;
-    show("rec", words, dot, el("span", { class: "what" }, TITLES[mode]), time, el("span", { class: "meter" }, ...bars));
+    show("rec", words, dot, el("span", { class: "what" }, TITLES[mode]), time, wave);
     postHeight(true);
-    clearInterval(timer);
+    levels.fill(0);
+    fresh = true;
     timer = window.setInterval(() => {
       if (!recorder || !time) return;
       if (!fetching) time.textContent = clock(recorder.seconds);
-      const level = recorder.level();
-      bars.forEach((bar, i) => bar.classList.toggle("on", level > (i + 0.5) / bars.length));
-    }, 80);
+      if (recorder instanceof StreamRecorder) for (const level of recorder.levels()) hear(level);
+      else hear(recorder.level());
+    }, 50);
+    frame = requestAnimationFrame(draw);
   }
   async function start(next, session, expected = []) {
     mode = next;
@@ -349,13 +415,13 @@
       await starting;
     } catch (error) {
       recorder = void 0;
-      clearInterval(timer);
+      quiet();
       host.post({ type: "dictationFailed", message: micTrouble(error) });
     }
   }
   async function stop() {
     await starting.catch(() => void 0);
-    clearInterval(timer);
+    quiet();
     const r = recorder;
     recorder = void 0;
     if (!r) return;
@@ -377,7 +443,7 @@
   var busy;
   async function cancel() {
     await starting.catch(() => void 0);
-    clearInterval(timer);
+    quiet();
     const r = recorder ?? busy;
     recorder = void 0;
     busy = void 0;

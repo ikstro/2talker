@@ -34,11 +34,13 @@ import { execFile } from 'node:child_process'
 
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
 
+import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
 import { Dictation } from './dictation'
 import { DictationLog } from './dictationlog'
 import { DictionaryStore } from './dictstore'
 import { openStream } from './download'
+import { frameWindow, WIN11 } from './dwm'
 import { createTranslator, NATIVES } from './engine'
 import { hotkeyLabel, isAccelerator } from './hotkey'
 import { KeyboardHelper, keyboardLayouts } from './keyboard'
@@ -96,7 +98,7 @@ const KEYBOARD_APPS: Record<string, string> = {
   'logioptionsplus_agent.exe': 'Logitech Options+',
 }
 /** The tray's panel: its width; a click on the tray icon this soon after the panel hid on that click's blur only closes it. */
-const TRAY_WIDTH = 300
+const TRAY_WIDTH = 340
 const TRAY_REOPEN_MS = 300
 /** Ctrl+C pressed twice, as a card's header draws the key that called it. */
 const DOUBLE_COPY = 'Control+C*2'
@@ -226,8 +228,10 @@ function saveSettings(patch: Partial<Settings>): void {
   }
   if ('startWithWindows' in patch) applyLoginItem()
   // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
-  if ([...ACTION_KEYS, ...DICTATION_KEYS].some(k => k in patch)) registerShortcuts()
-  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'languages', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge'].some(k => k in patch)) applyKeyboard()
+  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'paused'].some(k => k in patch)) registerShortcuts()
+  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'languages', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge', 'paused'].some(k => k in patch)) applyKeyboard()
+  // Paused while a phrase is recorded: the phrase is dropped, as Esc would.
+  if (patch.paused && settings.paused) dictation?.cancel()
   if ('theme' in patch) applyTheme()
   // The speech models are chosen from these (speechplan.ts), and the words to spell go with the plan: sent to the engine again.
   if (speech && (['native', 'speechPrefer', 'dictationModel', 'transcriptsModel', 'speechTestAgreed', 'vocabulary'] as const).some(k => k in patch)) speech.replan()
@@ -249,16 +253,36 @@ function config(): ViewConfig {
   return { voice: settings.voice, rate: settings.rate, wordHint: settings.wordHint, rareWords: settings.rareWords, oneAtATime: settings.oneAtATime }
 }
 
-/** What a window shows before its page paints: the card's surface, the app window's ground (theme.css). */
-const cardColor = () => (nativeTheme.shouldUseDarkColors ? '#22272e' : '#ffffff')
-const appColor = () => (nativeTheme.shouldUseDarkColors ? '#1c2128' : '#f6f8fa')
+/** What a window shows before its page paints: the card's and the badge's surface, the app window's and the tray's ground (theme.css). */
+const cardColor = () => (nativeTheme.shouldUseDarkColors ? '#2b2b2b' : '#fbfbfb')
+const appColor = () => (nativeTheme.shouldUseDarkColors ? '#202020' : '#f3f3f3')
+/** The windows' edge, drawn by Windows 11 (dwm.ts): theme.css's `--border`. */
+const borderColor = () => (nativeTheme.shouldUseDarkColors ? '#3d3d3d' : '#e5e5e5')
 
-/** Light, dark or as Windows is: both pages follow `prefers-color-scheme`, which this sets. */
+/** The page to load, told whether Windows draws its edge (then it draws none of its own). */
+const frameQuery = WIN11 ? { query: { frame: 'dwm' } } : undefined
+
+/** Light, dark or as Windows is: the pages follow `prefers-color-scheme`, which this sets. */
 function applyTheme(): void {
   nativeTheme.themeSource = settings.theme
-  if (card && !card.isDestroyed()) card.setBackgroundColor(cardColor())
-  if (appWin && !appWin.isDestroyed()) appWin.setBackgroundColor(appColor())
-  if (trayPanel && !trayPanel.isDestroyed()) trayPanel.setBackgroundColor(appColor())
+  applyColors()
+}
+
+/** The open windows' ground and edge in the theme's colors: on a change of the setting, and of Windows' own theme. */
+function applyColors(): void {
+  if (card && !card.isDestroyed()) {
+    card.setBackgroundColor(cardColor())
+    frameWindow(card, { corner: 'round', border: borderColor() })
+  }
+  if (appWin && !appWin.isDestroyed()) {
+    appWin.setBackgroundColor(appColor())
+    frameWindow(appWin, { corner: 'default', border: borderColor() })
+  }
+  if (trayPanel && !trayPanel.isDestroyed()) {
+    trayPanel.setBackgroundColor(appColor())
+    frameWindow(trayPanel, { corner: 'round', border: borderColor() })
+  }
+  dictation?.reframe()
 }
 
 // ---------------------------------------------------------------- speech and words
@@ -411,6 +435,7 @@ function createCard(): BrowserWindow {
       backgroundThrottling: false,
     },
   })
+  frameWindow(win, { corner: 'round', border: borderColor() })
   // A drag of an edge (never the card's own growing) sets the width, or how tall a card may grow.
   win.on('will-resize', () => {
     if (!maximizedFrom) resizeFrom ??= win.getBounds()
@@ -441,7 +466,7 @@ function createCard(): BrowserWindow {
   win.hookWindowMessage(WM_NCLBUTTONDBLCLK, wParam => {
     if (wParam.readUInt32LE(0) === HTCAPTION) maximizeCard(!maximizedFrom)
   })
-  void win.loadFile(path.join(app.getAppPath(), 'media', 'card.html'))
+  void win.loadFile(path.join(app.getAppPath(), 'media', 'card.html'), frameQuery)
   return win
 }
 
@@ -533,9 +558,13 @@ function createAppWindow(): BrowserWindow {
       spellcheck: false,
     },
   })
+  frameWindow(win, { corner: 'default', border: borderColor() })
   win.removeMenu()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', event => event.preventDefault())
+  // The page's maximize button shows Maximize or Restore, whichever way the window got there (a double click on the bar too).
+  win.on('maximize', () => postAppWindow())
+  win.on('unmaximize', () => postAppWindow())
   // A run from source shows the page's errors in the terminal.
   if (!app.isPackaged) {
     win.webContents.on('console-message', m => console.warn(`Altype app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
@@ -551,8 +580,13 @@ function createAppWindow(): BrowserWindow {
     appWin = undefined
     appReady = false
   })
-  void win.loadFile(path.join(app.getAppPath(), 'media', 'app.html'))
+  void win.loadFile(path.join(app.getAppPath(), 'media', 'app.html'), frameQuery)
   return win
+}
+
+/** Whether the app window fills the screen, for its maximize button. */
+function postAppWindow(): void {
+  if (appWin && appReady && !appWin.isDestroyed()) appWin.webContents.send('to-view', { type: 'appWindow', maximized: appWin.isMaximized() } satisfies ToView)
 }
 
 /** Shows the app window, on `tab` if one is named. */
@@ -775,6 +809,7 @@ function onMessage(message: ToHost): void {
     case 'appReady':
       appReady = true
       postApp()
+      postAppWindow()
       if (pendingTab) appWin?.webContents.send('to-view', { type: 'appTab', tab: pendingTab } satisfies ToView)
       if (pendingTranscript) appWin?.webContents.send('to-view', { type: 'openTranscript', id: pendingTranscript } satisfies ToView)
       pendingTab = undefined
@@ -801,7 +836,10 @@ function onMessage(message: ToHost): void {
       return
     case 'window':
       if (message.action === 'minimize') appWin?.minimize()
-      else appWin?.hide()
+      else if (message.action === 'maximize') {
+        if (appWin?.isMaximized()) appWin.unmaximize()
+        else appWin?.maximize()
+      } else appWin?.hide()
       return
     case 'trayReady':
       trayReady = true
@@ -879,7 +917,7 @@ function translateText(text: string, kind: CardKind, at: Point, via?: string): v
  * text, the card showing why.
  */
 async function recognizeSnip(id: number, png: Buffer): Promise<{ text: string; misread: boolean } | undefined> {
-  const file = path.join(app.getPath('temp'), `2talker-${process.pid}-${id}.png`)
+  const file = path.join(app.getPath('temp'), `altype-${process.pid}-${id}.png`)
   try {
     fs.writeFileSync(file, png)
     const native = langCode(settings.native)
@@ -1058,8 +1096,8 @@ function onClipboardChange(): void {
     })
     return
   }
-  // Copying from the card itself is not a request.
-  if (card?.isFocused() || !settings.doubleCopy) return
+  // Copying from the card itself is not a request, nor is any copy while Altype is paused.
+  if (card?.isFocused() || !settings.doubleCopy || settings.paused) return
   if (!copies.change(now, ctrlHeld())) return
   const at = screen.getCursorScreenPoint()
   afterSettling(async () => {
@@ -1074,6 +1112,12 @@ function selection(purpose: Purpose, via?: string): void {
 
 function registerShortcuts(): void {
   globalShortcut.unregisterAll()
+  // Paused: no key at all, and none is "taken".
+  if (settings.paused) {
+    keysOk = { snip: true, select: true, translate: true, text: true }
+    speechKeysOk = { dictate: true, english: true, note: true, again: true }
+    return
+  }
   // A key Electron cannot hold (a double tap of Ctrl, a mouse button) is the keyboard thread's: applyKeyboard().
   const register = (accelerator: string, run: () => void): boolean => {
     if (!accelerator || !isAccelerator(accelerator)) return true
@@ -1121,8 +1165,16 @@ function registerShortcuts(): void {
 function applyKeyboard(): void {
   keyboardTrouble = undefined
   try {
+    // Paused: no key and no fixing, so the helper ends its thread.
+    const none = { selectKey: '', snipKey: '', translateKey: '', textKey: '', switchKey: '', fixKey: '', dictateKey: '', englishKey: '', noteKey: '', againKey: '' }
     // Dictate's keys work only once the engine is installed, here as with Electron's shortcuts.
-    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '' })
+    keyboard.apply(
+      settings.paused
+        ? { ...settings, ...none, autoFix: false, layoutBadge: false }
+        : speech?.installed
+          ? settings
+          : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '' },
+    )
   } catch (error) {
     keyboardTrouble = messageOf(error)
   }
@@ -1238,6 +1290,8 @@ function trayView(): TrayView {
   return {
     keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', snipListen: settings.snipKey, snipTranslate: settings.textKey },
     autoFix: settings.autoFix,
+    doubleCopy: settings.doubleCopy,
+    paused: settings.paused,
     speech: { installed: speech?.installed ?? false, recording: dictation?.state === 'recording', noteKey: settings.noteKey },
     translator: translator.state(langCode(settings.native)).status,
     native: settings.native,
@@ -1247,19 +1301,32 @@ function trayView(): TrayView {
 function refreshTray(): void {
   if (!tray) return
   tray.setToolTip(tooltip())
+  tray.setImage(trayIcon(settings.paused))
   if (trayPanel && trayReady && !trayPanel.isDestroyed()) trayPanel.webContents.send('to-view', { type: 'tray', view: trayView() } satisfies ToView)
 }
 
 function tooltip(): string {
+  if (settings.paused) return 'Altype · paused'
   const ways = [settings.doubleCopy ? 'Ctrl+C twice' : '', settings.selectKey ? keyLabel(settings.selectKey) : ''].filter(Boolean)
   const listen = ways.length ? `${ways.join(' or ')} to listen` : ''
   const translate = settings.translateKey ? `${keyLabel(settings.translateKey)} to translate` : ''
   return ['Altype', listen, translate].filter(Boolean).join(' · ')
 }
 
+/** The tray's mark, made once each: tray.png, or tray-paused.png (the same, faded) while Altype is paused. */
+const trayIcons = new Map<boolean, Electron.NativeImage>()
+function trayIcon(paused: boolean): Electron.NativeImage {
+  let icon = trayIcons.get(paused)
+  if (!icon) {
+    // The 16 px mark set pixel by pixel; Electron takes the @2x file beside it on a screen at 200 %.
+    icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'media', paused ? 'tray-paused.png' : 'tray.png'))
+    trayIcons.set(paused, icon)
+  }
+  return icon
+}
+
 function createTray(): Tray {
-  // tray.png is the 16 px mark set pixel by pixel; Electron takes tray@2x.png on a screen at 200 %.
-  const t = new Tray(nativeImage.createFromPath(path.join(app.getAppPath(), 'media', 'tray.png')))
+  const t = new Tray(trayIcon(settings.paused))
   // Either button opens Altype's own panel: Windows' menu cannot take Altype's look.
   t.on('click', () => toggleTrayPanel())
   t.on('right-click', () => toggleTrayPanel())
@@ -1290,6 +1357,7 @@ function createTrayPanel(): BrowserWindow {
       spellcheck: false,
     },
   })
+  frameWindow(win, { corner: 'round', border: borderColor() })
   win.setAlwaysOnTop(true, 'pop-up-menu')
   win.removeMenu()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -1303,7 +1371,7 @@ function createTrayPanel(): BrowserWindow {
     trayPanel = undefined
     trayReady = false
   })
-  void win.loadFile(path.join(app.getAppPath(), 'media', 'tray.html'))
+  void win.loadFile(path.join(app.getAppPath(), 'media', 'tray.html'), frameQuery)
   return win
 }
 
@@ -1357,6 +1425,9 @@ function runTrayCommand(command: TrayCommand): void {
       return
     case 'transcripts':
       openApp('transcripts')
+      return
+    case 'settings':
+      openApp('settings')
       return
     case 'open':
       openApp()
@@ -1431,6 +1502,7 @@ function setUpSpeechEngine(): void {
     page: path.join(app.getAppPath(), 'media', 'dictation.html'),
     preload: path.join(__dirname, 'preload.js'),
     background: cardColor,
+    border: borderColor,
     speech,
     paste: typeText,
     toEnglish: (text, from) => translatePlain(text, from, 'en', translator.translate),
@@ -1476,6 +1548,8 @@ async function hostCall(request: HostCall): Promise<unknown> {
     case 'copy':
       clipboard.writeText(request.text)
       return null
+    case 'openChrome':
+      return openInChrome(request.url)
   }
 }
 
@@ -1485,6 +1559,8 @@ function start(): void {
   settings = readSettings()
   if (firstRun) saveSettings({})
   applyTheme()
+  // Windows' own light or dark, switched while Altype runs (the theme "system"), repaints the windows' ground and edge.
+  nativeTheme.on('updated', applyColors)
   applyLoginItem()
   setUpSpeech()
   words = new WordStore(path.join(userDir(), 'words.json'))

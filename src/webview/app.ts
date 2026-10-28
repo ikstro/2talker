@@ -11,6 +11,7 @@
 // comes from the main process in one `app` message, sent again whenever any
 // of it changes; every change goes back as a message.
 
+import { shortCpu } from '../hardware'
 import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
 import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
@@ -20,9 +21,10 @@ import { parseEntry } from '../vocabulary'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
-import { bad, btn, chip, grp, link, linkBtn, post, row, seg, select, toggle, toggleKnob, warn } from './ui'
+import { lucide, type LucideName } from './lucide'
+import { aside, bad, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, warn } from './ui'
 import { seconds } from '../speechplan'
-import { api, cardNote, computerRows, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, speakerRows, testOffer, toast } from './speech'
+import { api, cardNote, computerRows, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, speakerRows, testOffer, toast } from './speech'
 import { backToList, enterTranscripts, leaveTranscripts, newRows, openTranscript, setTranscriptHooks, transcriptsBody, transcriptsCap } from './transcripts'
 
 declare global {
@@ -38,6 +40,8 @@ type Page = Action | 'words' | 'transcripts' | 'settings' | 'about'
 
 const ACTIONS: readonly Action[] = ['listen', 'translate', 'screen', 'dictate', 'transcribe', 'keyboard']
 const isAction = (name: Page): name is Action => (ACTIONS as readonly string[]).includes(name)
+/** Each action's icon, on its Home card and its page. */
+const ICONS: Record<Action, LucideName> = { listen: 'volume-2', translate: 'languages', screen: 'scan', dictate: 'mic', transcribe: 'audio-lines', keyboard: 'keyboard' }
 const TITLES: Record<Page, string> = {
   listen: 'Listen',
   translate: 'Translate',
@@ -59,16 +63,6 @@ let askedTranscript = ''
 let search = ''
 /** Why the last key was not taken, shown under its row until another change. */
 let keyTrouble: { name: KeyName; text: string } | undefined
-/** The layout chip tapped on the Keyboard page: it shows how to move it or leave it out. */
-let pickedLayout = ''
-/** The box for a program's name on the Keyboard page is open. */
-let addingApp = false
-/** The box for a word to keep as typed on the Keyboard page is open. */
-let addingWord = false
-/** The box for a word to spell on the Dictate page is open. */
-let addingTerm = false
-/** The list of languages to add on the Settings page is open. */
-let addingLanguage = false
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)')
 // #t= and #pt= freeze the moment and a page's growth at a time (seconds), for
@@ -230,14 +224,25 @@ const nav = el(
   pill('settings', icon('settings'), el('span', { class: 'lbl' }, 'Settings')),
 )
 // The window has no Windows frame: the header is its title bar (dragged by
-// its empty parts) and ends in the window's own minimize and close.
+// its empty parts) and ends in the window's own minimize, maximize and close.
+const maxButton = el('button', { class: 'icon-btn max', title: 'Maximize', 'aria-label': 'Maximize', onclick: () => post({ type: 'window', action: 'maximize' }) }, glyph('maximize'))
 const winButtons = el(
   'div',
   { class: 'wbtns' },
   el('button', { class: 'icon-btn', title: 'Minimize', 'aria-label': 'Minimize', onclick: () => post({ type: 'window', action: 'minimize' }) }, glyph('minimize')),
+  maxButton,
   el('button', { class: 'icon-btn', title: 'Close', 'aria-label': 'Close', onclick: () => post({ type: 'window', action: 'close' }) }, glyph('close')),
 )
-const top = el('header', { class: 'top' }, el('div', { class: 'brand' }, el('span', { class: 'key' }, 'alt'), el('span', { class: 'wm' }, 'altype')), nav, winButtons)
+
+/** The window was maximized or put back (by the button, a double click on the bar, Win+↑): the button shows the other way. */
+function windowState(maximized: boolean): void {
+  const label = maximized ? 'Restore' : 'Maximize'
+  maxButton.replaceChildren(glyph(maximized ? 'restore' : 'maximize'))
+  maxButton.title = label
+  maxButton.setAttribute('aria-label', label)
+  root.classList.toggle('maxed', maximized)
+}
+const top = el('header', { class: 'top' }, el('div', { class: 'brand' }, el('span', { class: 'key mark' }, 'alt'), el('span', { class: 'wm' }, 'altype')), nav, winButtons)
 const home = el('main', { class: 'home' })
 
 const pGround = el('div', { class: 'pgg' })
@@ -302,9 +307,22 @@ function homeRow(action: Action, v: AppView): HTMLElement {
         if (key === 'Enter' || key === ' ') (event.preventDefault(), go())
       },
     },
+    lucide(ICONS[action]),
     el('div', {}, el('div', { class: 'an' }, el('b', {}, t.title), el('i', {}, t.cap)), el('div', { class: 'ad' }, t.desc)),
     el('div', { class: 'keys' }, ...keysOf(action, v.settings, true)),
-    icon('chevron-right', 'chev'),
+    lucide('chevron-right', 'chev'),
+  )
+}
+
+/** Altype is paused: every key and reaction is off until Resume, here or in the tray. */
+function pausedNotice(v: AppView): HTMLElement | null {
+  if (!v.settings.paused) return null
+  return el(
+    'div',
+    { class: 'row notice' },
+    lucide('pause'),
+    el('div', { class: 'l' }, 'Altype is paused', el('small', {}, 'its keys and the layout fixing do nothing until it resumes')),
+    btn('Resume', () => save({ paused: false }), 'primary'),
   )
 }
 
@@ -326,9 +344,10 @@ function homeNodes(v: AppView): HTMLElement[] {
       ),
       el('p', { class: 'hcap' }, ...readiness(v)),
     ),
+    pausedNotice(v),
     el('ul', { class: 'acts' }, ...ACTIONS.map(a => homeRow(a, v))),
     el('p', { class: 'foot' }, 'Tap an action to change its keys.'),
-  ]
+  ].filter((n): n is HTMLElement => n !== null)
 }
 
 /** Set while the moment plays or a page grows: Home is redrawn once they are done. */
@@ -673,7 +692,11 @@ type Growth = {
   dst: { title: Box; cap: Box; keys: Box; tfont: number }
 }
 
-let open: { name: Page } | undefined
+/** A page of a page: a list or a long part of an action's page, opened from a card with a chevron. */
+type SubId = 'vocabulary' | 'recent' | 'model' | 'meet' | 'speakers' | 'layouts' | 'programs' | 'kept' | 'languages' | 'engine' | 'computer'
+
+/** The open page: its name, the second-level page on it, and where the first was scrolled to before it. */
+let open: { name: Page; sub?: SubId; parentScroll?: number } | undefined
 let praf = 0
 let animating = false
 
@@ -777,11 +800,6 @@ function openPage(name: Page, animate = !reduced.matches): void {
   if (open) closePage(false)
   open = { name }
   search = ''
-  pickedLayout = ''
-  addingApp = false
-  addingWord = false
-  addingTerm = false
-  addingLanguage = false
   keyTrouble = undefined
   if (name === 'transcripts') enterTranscripts()
   fillHeader()
@@ -802,8 +820,9 @@ function openPage(name: Page, animate = !reduced.matches): void {
   grow(gr, true, settle)
 }
 
-/** Back (or Esc): from a transcript to the library first, from anything else to Home. */
+/** Back (or Esc): from a second-level page to its page, from a transcript to the library, from anything else to Home. */
 function back(): void {
+  if (open?.sub) return popSub()
   if (open?.name === 'transcripts' && backToList()) return
   closePage()
 }
@@ -811,6 +830,11 @@ function back(): void {
 function closePage(animate = !reduced.matches): void {
   if (!open) return
   const name = open.name
+  // The fold takes the title back to its row: the crumb of a second-level page would not fit it.
+  if (open.sub) {
+    open.sub = undefined
+    fillHeader()
+  }
   if (name === 'transcripts') leaveTranscripts()
   const done = () => {
     root.classList.remove('page-open')
@@ -832,10 +856,88 @@ function closePage(animate = !reduced.matches): void {
   })
 }
 
+// ---------------------------------------------------------------- second-level pages
+// A card with a chevron opens a page of its own on the same ground: the body
+// slides over, the title becomes a crumb (the page, quiet, then this one),
+// Back or Esc slides back to where the first page was scrolled to.
+
+type Sub = { title: string; cap?: (v: AppView) => string; body: (v: AppView) => HTMLElement[]; valid?: (v: AppView) => boolean }
+
+const SUBS: Record<SubId, Sub> = {
+  vocabulary: { title: 'Words to spell', body: vocabularyPage },
+  recent: { title: 'Recent phrases', cap: () => 'kept 30 days on this computer', body: recentPage },
+  model: { title: 'Speech model', body: modelPage, valid: running },
+  meet: { title: 'Google Meet', cap: () => 'the Altype extension for Chrome', body: meetPage },
+  speakers: { title: 'Speakers', cap: () => 'who spoke when', body: speakerRows, valid: v => hasPart(v, 'speakers') && running(v) },
+  layouts: { title: 'Layouts', cap: () => 'in the order the keys go through them', body: layoutsPage },
+  programs: { title: 'Programs left out', body: programsPage },
+  kept: { title: 'Kept as typed', body: keptPage },
+  languages: { title: 'Languages you use', body: languagesPage },
+  engine: { title: 'Speech engine', body: enginePage },
+  computer: { title: 'This computer', body: computerPage },
+}
+
+let sliding: Animation[] = []
+
+/** Draws the body again with the old one sliding out of the way: right to left opening (`dir` 1), back when closing. */
+function slideBody(dir: 1 | -1): void {
+  if (!view || !open) return
+  for (const a of sliding) a.finish()
+  sliding = []
+  const ghost = el('div', { class: 'pbody pghost', inert: true, 'aria-hidden': 'true' })
+  const scroll = pBody.scrollTop
+  ghost.append(...pBody.childNodes)
+  pg.append(ghost)
+  ghost.scrollTop = scroll
+  bodyPending = false
+  pBody.replaceChildren(...bodyOf(view))
+  if (reduced.matches) return ghost.remove()
+  const easing = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
+  const duration = 220
+  const out = ghost.animate([{ transform: 'none', opacity: 1 }, { transform: `translateX(${-48 * dir}px)`, opacity: 0 }], { duration, easing, fill: 'forwards' })
+  const inn = pBody.animate([{ transform: `translateX(${48 * dir}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration, easing })
+  out.onfinish = () => ghost.remove()
+  sliding = [out, inn]
+}
+
+function openSub(id: SubId): void {
+  if (!view || !open || open.sub === id) return
+  open.parentScroll = pBody.scrollTop
+  open.sub = id
+  keyTrouble = undefined
+  fillHeader()
+  slideBody(1)
+  pBody.scrollTop = 0
+  pBack.focus({ preventScroll: true })
+}
+
+function popSub(animate = !reduced.matches): void {
+  if (!view || !open?.sub) return
+  const id = open.sub
+  open.sub = undefined
+  keyTrouble = undefined
+  fillHeader()
+  if (animate) slideBody(-1)
+  else {
+    bodyPending = false
+    pBody.replaceChildren(...bodyOf(view))
+  }
+  pBody.scrollTop = open.parentScroll ?? 0
+  const from = pBody.querySelector<HTMLElement>(`[data-sub="${id}"]`)
+  ;(from ?? pBack).focus({ preventScroll: true })
+}
+
 function fillHeader(): void {
   if (!view || !open) return
   const name = open.name
   const v = view
+  if (open.sub) {
+    const sub = SUBS[open.sub]
+    pTitle.replaceChildren(el('button', { class: 'pcrumb', onclick: () => popSub() }, TITLES[name]), el('span', { class: 'psep' }, '›'), sub.title)
+    pCap.textContent = sub.cap?.(v) ?? ''
+    pKeys.replaceChildren()
+    return
+  }
   pTitle.textContent = TITLES[name]
   pCap.textContent = isAction(name)
     ? actionText(name, v).cap
@@ -859,12 +961,33 @@ let pointerDown = false
 
 function busy(): boolean {
   const a = document.activeElement
-  return !!a && pBody.contains(a) && (a.matches('input[type=text], input[type=search], input[type=password], input[type=range]') || (a as HTMLElement).isContentEditable || a.classList.contains('recording'))
+  return !!a && pBody.contains(a) && (a.matches('input[type=text]:not([data-live]), input[type=search], input[type=password], input[type=range]') || (a as HTMLElement).isContentEditable || a.classList.contains('recording'))
+}
+
+/**
+ * The fields that keep what was typed across a redraw (`data-live`, the add
+ * fields of a list): the ones in use or holding text move into the new body in
+ * place of their fresh twins, so an item added shows at once under the field.
+ */
+function carryFields(next: HTMLElement): HTMLInputElement[] {
+  const carried: HTMLInputElement[] = []
+  for (const old of pBody.querySelectorAll<HTMLInputElement>('input[data-live]')) {
+    if (!old.value && document.activeElement !== old) continue
+    const fresh = next.querySelector<HTMLInputElement>(`input[data-live="${old.dataset.live}"]`)
+    if (!fresh) continue
+    fresh.replaceWith(old)
+    carried.push(old)
+  }
+  return carried
 }
 
 function renderBody(): void {
   if (!view || !open) return
-  const next = el('div', {}, ...bodyOf(open.name, view))
+  if (open.sub && SUBS[open.sub].valid?.(view) === false) {
+    open.sub = undefined
+    fillHeader()
+  }
+  const next = el('div', {}, ...bodyOf(view))
   if (next.innerHTML === pBody.innerHTML) return
   if (busy()) {
     bodyPending = true
@@ -872,8 +995,12 @@ function renderBody(): void {
   }
   bodyPending = false
   const scroll = pBody.scrollTop
+  const focused = document.activeElement
+  const carried = carryFields(next)
   pBody.replaceChildren(...next.childNodes)
   pBody.scrollTop = scroll
+  const live = carried.find(f => f === focused)
+  if (live) live.focus({ preventScroll: true })
 }
 
 // A redraw waits for the click that took the focus away, so the click lands on what it was aimed at.
@@ -886,8 +1013,10 @@ pBody.addEventListener('focusout', () => {
 window.addEventListener('pointerdown', () => (pointerDown = true), true)
 window.addEventListener('pointerup', () => (pointerDown = false), true)
 
-function bodyOf(name: Page, v: AppView): HTMLElement[] {
-  switch (name) {
+function bodyOf(v: AppView): HTMLElement[] {
+  if (!open) return []
+  if (open.sub) return SUBS[open.sub].body(v)
+  switch (open.name) {
     case 'listen':
       return listenPage(v)
     case 'translate':
@@ -953,7 +1082,7 @@ function saveKey(name: KeyName, key: string): void {
  * a moment for a second tap), modifiers pressed together, Pause or Caps Lock
  * alone, the mouse's side buttons. Esc gives up; × clears the key.
  */
-function keyRow(name: KeyName, label: string, note: string, taken = false): HTMLElement {
+function keyRow(name: KeyName, label: string, note: string, taken = false, iconName?: LucideName): HTMLElement {
   const current = view?.settings[name] ?? ''
   const recorder = new HotkeyRecorder()
   let waiting: number | undefined
@@ -1025,15 +1154,17 @@ function keyRow(name: KeyName, label: string, note: string, taken = false): HTML
             save({ [name]: '' })
           },
         },
-        icon('close'),
+        lucide('x', 's'),
       )
     : null
   const trouble = keyTrouble?.name === name ? keyTrouble.text : ''
-  return row(
+  const node = row(
     label,
     [note, taken && current ? bad('Taken by another program; choose another.') : null, trouble ? bad(trouble) : null],
     el('span', { class: 'kchg' }, field, clear, linkBtn(current ? 'Change' : 'Set', () => field.click())),
   )
+  if (iconName) node.prepend(lucide(iconName))
+  return node
 }
 
 /** A key that cannot be changed, shown where it works. */
@@ -1046,18 +1177,19 @@ function listenPage(v: AppView): HTMLElement[] {
   const how = s.doubleCopy ? 'Select this text, press Ctrl + C twice.' : s.selectKey ? `Select this text, press ${said(s.selectKey)}.` : 'Turn on Ctrl + C twice or set a key above, then select this text.'
   return [
     grp('Keys'),
-    row(
+    card(
+      'copy',
       'Copied text',
       ['press Ctrl + C twice, quickly'],
       el('span', { class: 'kchg' }, caps(COPY_TWICE), el('span', { class: 'tgwrap' }, toggleKnob(s.doubleCopy, doubleCopy => save({ doubleCopy }), 'Ctrl + C twice'))),
     ),
-    keyRow('selectKey', 'Selected text', s.selectKey ? 'Altype copies the selection itself' : 'one key, if you want one', !v.keysOk.select),
-    keyRow('snipKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.snip),
+    keyRow('selectKey', 'Selected text', s.selectKey ? 'Altype copies the selection itself' : 'one key, if you want one', !v.keysOk.select, 'volume-2'),
+    keyRow('snipKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.snip, 'scan'),
     grp('In the card'),
-    row('Play or stop · step through sentences', [], el('span', { class: 'kg2' }, caps('Space'), caps('←'), caps('→'))),
-    row('A word: its meanings, its sound, a star to keep it in Words', ['click it'], null),
-    row('A sentence: its translation marked', ['click it · ▶ in the margin reads one paragraph'], null),
-    row('Close, and stop the voice', [], caps('Esc')),
+    card('play', 'Play or stop · step through sentences', [], el('span', { class: 'kg2' }, caps('Space'), caps('←'), caps('→'))),
+    card('book-open', 'A word: its meanings, its sound, a star to keep it in Words', ['click it'], null),
+    card('languages', 'A sentence: its translation marked', ['click it · ▶ in the margin reads one paragraph'], null),
+    card('x', 'Close, and stop the voice', [], caps('Esc')),
     tryIt('The morning was quiet. A small boat drifted along the river, and two children watched the ducks from the bridge.', how),
   ]
 }
@@ -1089,11 +1221,12 @@ function translatePage(v: AppView): HTMLElement[] {
   const how = s.translateKey ? `Select it, ${usage(s.translateKey)}.` : 'Set a key above, then select it and press the key.'
   return [
     grp('Keys'),
-    keyRow('translateKey', 'Selected text', s.translateKey ? usage(s.translateKey) : 'one key: Left Ctrl twice, for example', !v.keysOk.translate),
-    keyRow('textKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.text),
+    keyRow('translateKey', 'Selected text', s.translateKey ? usage(s.translateKey) : 'one key: Left Ctrl twice, for example', !v.keysOk.translate, 'languages'),
+    keyRow('textKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.text, 'scan'),
     fixedKey('Paste the translation over the selection', 'Enter'),
     grp('Languages'),
-    row(pairOf(v), [note], state),
+    card('globe', pairOf(v), [note], state),
+    languagesCard(v),
     tryIt(text, how),
   ]
 }
@@ -1101,12 +1234,12 @@ function translatePage(v: AppView): HTMLElement[] {
 function screenPage(v: AppView): HTMLElement[] {
   return [
     grp('Keys'),
-    keyRow('snipKey', 'Listen to a piece of the screen', '', !v.keysOk.snip),
-    keyRow('textKey', 'Translate a piece of the screen', '', !v.keysOk.text),
+    keyRow('snipKey', 'Listen to a piece of the screen', '', !v.keysOk.snip, 'volume-2'),
+    keyRow('textKey', 'Translate a piece of the screen', '', !v.keysOk.text, 'languages'),
     grp('How'),
-    row('Windows dims the screen; draw a box over the words', [], null),
-    row('Windows OCR reads them on this computer', ['in the languages Windows can read; add one there'], linkBtn('Languages…', () => post({ type: 'openLanguageSettings' }))),
-    row('Fix what it misread in the card, then translate', [], null),
+    card('scan', 'Windows dims the screen; draw a box over the words', [], null),
+    card('type', 'Windows OCR reads them on this computer', ['in the languages Windows can read; add one there'], linkBtn('Languages…', () => post({ type: 'openLanguageSettings' }))),
+    card('spell-check', 'Fix what it misread in the card, then translate', [], null),
   ]
 }
 
@@ -1117,7 +1250,7 @@ const pathNote = (path: string) => el('small', { class: 'path', title: path }, e
 /** Where notes go: the knowledge base folder and the folder inside it, the engine's own settings. */
 function kbRows(v: AppView): HTMLElement[] {
   const e = engineSettings(v)
-  if (!running(v) || !e) return [row('Folder', [installed(v) ? 'shown once the speech engine runs' : 'chosen once the speech engine is here'], null)]
+  if (!running(v) || !e) return [card('folder', 'Folder', [installed(v) ? 'shown once the speech engine runs' : 'chosen once the speech engine is here'], null)]
   const inbox = el('input', {
     type: 'text',
     class: 'field',
@@ -1128,32 +1261,49 @@ function kbRows(v: AppView): HTMLElement[] {
     onchange: (event: Event) => void saveEngine({ kbInbox: (event.target as HTMLInputElement).value.trim() }),
   })
   return [
-    row('Folder', [e.kbDir ? pathNote(e.kbDir) : 'not chosen · notes need one; an Obsidian vault will do'], linkBtn(e.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
-    row('Notes go into', ['a folder inside it · empty: the folder itself'], inbox),
+    card('folder', 'Folder', [e.kbDir ? pathNote(e.kbDir) : 'not chosen · notes need one; an Obsidian vault will do'], linkBtn(e.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
+    card('notebook-pen', 'Notes go into', ['a folder inside it · empty: the folder itself'], inbox),
   ]
 }
+
+/** The card that opens the words to spell: how many there are. */
+function vocabularyCard(v: AppView): HTMLElement {
+  const n = v.settings.vocabulary.length
+  return navCard('spell-check', 'Words to spell', 'names and terms, written as you say them', n ? `${n} ${n === 1 ? 'word' : 'words'}` : 'none yet', () => openSub('vocabulary'), 'vocabulary')
+}
+
+/** The card that opens a feature's speech models: the one in use. */
+function modelCard(v: AppView, feature: 'dictation' | 'transcripts'): HTMLElement | null {
+  if (!running(v)) return null
+  const p = feature === 'dictation' ? v.speech.plan.dictation : v.speech.plan.transcripts
+  const how = feature === 'dictation' ? `a phrase in ≈${seconds(p.chosen.estimate)}` : `an hour in ≈${minutesText(p.chosen.estimate)}`
+  return navCard('cpu', 'Speech model', `${how} on this computer`, p.pinned ? p.chosen.label : `Automatic · ${p.chosen.label}`, () => openSub('model'), 'model')
+}
+
+/** "3 min", "1 h 10 min": an estimate of minutes. */
+const minutesText = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.max(1, Math.round(m))} min`)
 
 function dictatePage(v: AppView): HTMLElement[] {
   const s = v.settings
   const k = v.speech.keysOk
   const offer = engineRows(v, 'Dictate')
+  const recent = v.dictation.recent
   return [
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
     testOffer(v),
     grp('Keys'),
-    keyRow('dictateKey', 'Dictate', 'types what you say where the cursor is', !k.dictate),
-    keyRow('englishKey', 'Dictate in English', `say it in ${s.native}, English is typed`, !k.english),
-    keyRow('noteKey', 'A note', 'kept in the knowledge base as a .md file', !k.note),
-    keyRow('againKey', 'Type the last phrase again', 'what was dictated last, where the cursor is', !k.again),
-    row('Tap the key, talk, tap it again', ['the words show as you speak · Esc throws the phrase away, while it records and while it types'], null),
+    keyRow('dictateKey', 'Dictate', 'types what you say where the cursor is', !k.dictate, 'mic'),
+    keyRow('englishKey', 'Dictate in English', `say it in ${s.native}, English is typed`, !k.english, 'languages'),
+    keyRow('noteKey', 'A note', 'kept in the knowledge base as a .md file', !k.note, 'notebook-pen'),
+    keyRow('againKey', 'Type the last phrase again', 'what was dictated last, where the cursor is', !k.again, 'rotate-cw'),
+    aside('info', 'Tap the key, talk, tap it again. The words show as you speak; Esc throws the phrase away, while it records and while it types.'),
     grp('Knowledge base'),
     ...kbRows(v),
-    grp('Words to spell'),
-    ...termRows(v),
-    grp('Recent phrases'),
-    ...recentRows(v),
-    ...(running(v) ? [grp('Speech model'), ...modelRows(v, 'dictation')] : []),
-    el('p', { class: 'privacy' }, icon('lock'), 'Speech is recognized on this computer; nothing is sent anywhere.'),
+    grp('Words and phrases'),
+    vocabularyCard(v),
+    navCard('clock', 'Recent phrases', 'what was dictated lately, to copy again', recent.length ? recent[0]?.text ?? '' : 'none yet', () => openSub('recent'), 'recent'),
+    modelCard(v, 'dictation'),
+    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Speech is recognized on this computer; nothing is sent anywhere.'),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -1161,79 +1311,84 @@ function dictatePage(v: AppView): HTMLElement[] {
  * Words to spell: names and terms dictation and transcripts write as the
  * person does, each with what it may be heard as (vocabulary.ts). Altype's own
  * setting, sent to the engine with its plan, so it can be filled in before the
- * engine is here.
+ * engine is here. Two fields add one: the word as written, and the heard
+ * forms; a tap on a word puts it back into the fields to change it.
  */
-function termRows(v: AppView): HTMLElement[] {
+function vocabularyPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const wordOf = (line: string) => parseEntry(line).word.toLowerCase()
-  const add = (text: string) => {
-    const line = text.replace(/\s+/g, ' ').trim()
-    addingTerm = false
-    if (!parseEntry(line).word) return renderBody()
+  const word = liveField('word', 'Word, as it should be written', 'Word to spell', key => (key === 'Enter' ? add() : clear()))
+  const heard = liveField('heard', 'Heard as (optional): альтайп, all type', 'What it is heard as', key => (key === 'Enter' ? add() : clear()))
+  const clear = () => {
+    word.value = ''
+    heard.value = ''
+    word.focus()
+  }
+  const add = () => {
+    const w = word.value.replace(/\s+/g, ' ').trim()
+    const h = heard.value.replace(/\s+/g, ' ').replace(/[()]/g, '').trim()
+    if (!w) return word.focus()
+    const line = h ? `${w} (${h})` : w
+    if (!parseEntry(line).word) return
     // The same word again is the person correcting it: the new line replaces the old.
-    const lines = (view?.settings.vocabulary ?? s.vocabulary).filter(l => wordOf(l) !== wordOf(line))
+    const lines = (view?.settings.vocabulary ?? s.vocabulary).filter(l => wordOf(l) !== w.toLowerCase())
+    clear()
     save({ vocabulary: [...lines, line] })
   }
-  const input = addingTerm
-    ? el('input', {
-        type: 'text',
-        class: 'field term',
-        placeholder: 'Peshynskyi, or Altype (altype, альтайп)',
-        'aria-label': 'Word to spell, and what it is heard as',
-        onkeydown: (event: Event) => {
-          const key = (event as KeyboardEvent).key
-          if (key === 'Enter') add((event.target as HTMLInputElement).value)
-          if (key === 'Escape') (event.preventDefault(), (addingTerm = false), renderBody())
-        },
-      })
-    : null
-  if (input) window.setTimeout(() => input.focus(), 0)
-  const chips = s.vocabulary.map(line => {
-    const { word, heard } = parseEntry(line)
+  const edit = (line: string) => {
+    const { word: w, heard: hs } = parseEntry(line)
+    word.value = w
+    heard.value = hs.join(', ')
+    word.focus()
+  }
+  const items = s.vocabulary.map(line => {
+    const { word: w, heard: hs } = parseEntry(line)
     return el(
-      'span',
-      { class: 'chip term', title: line },
-      el('b', {}, word),
-      heard.length ? el('span', { class: 'heard' }, ` · ${heard.join(', ')}`) : null,
-      el('button', { class: 'ib', title: 'Remove', 'aria-label': `Remove ${word}`, onclick: () => save({ vocabulary: s.vocabulary.filter(l => l !== line) }) }, icon('close')),
+      'div',
+      { class: 'row' },
+      el('button', { class: 'l', title: 'Change it', onclick: () => edit(line) }, w, hs.length ? el('small', {}, `heard as ${hs.join(', ')}`) : null),
+      ib('x', `Remove ${w}`, () => save({ vocabulary: (view?.settings.vocabulary ?? s.vocabulary).filter(l => l !== line) })),
     )
   })
   return [
-    row(
-      'Names and terms',
-      ['Dictation and transcripts spell these as written; a heard form is replaced wherever it is said'],
-      el(
-        'span',
-        { class: 'kchg' },
-        input,
-        input
-          ? null
-          : linkBtn('Add…', () => {
-              addingTerm = true
-              renderBody()
-            }),
-      ),
+    grp('Add a word'),
+    el(
+      'div',
+      { class: 'row add' },
+      el('div', { class: 'fields' }, word, heard, btn([lucide('plus', 's'), 'Add'], add, 'primary')),
+      el('small', {}, 'A name or a term; dictation and transcripts write it this way, and a heard form is replaced wherever it is said.'),
     ),
-    chips.length ? el('div', { class: 'chiprow' }, ...chips) : null,
-  ].filter((n): n is HTMLElement => n !== null)
+    grp('Words', items.length || undefined, items.length ? linkBtn('Clear all', () => save({ vocabulary: [] })) : null),
+    ...(items.length ? items : [aside('info', 'Nothing yet. Add a name or a word above.')]),
+    aside('info', 'Shared by Dictate and Transcribe.'),
+  ]
 }
 
 /** The phrases typed lately (dictationlog.ts), each to copy; Altype forgets them after 30 days by itself. */
-function recentRows(v: AppView): HTMLElement[] {
+function recentPage(v: AppView): HTMLElement[] {
   const recent = v.dictation.recent
-  if (recent.length === 0) return [row('None yet', ['kept 30 days on this computer'], null)]
   return [
-    ...recent.map(e =>
-      el(
-        'div',
-        { class: 'row phrase' },
-        el('div', { class: 'l' }, el('span', { class: 'said', title: e.heard ? `${e.text}
+    grp('Phrases', recent.length || undefined, recent.length ? linkBtn('Clear', () => post({ type: 'clearDictation' })) : null),
+    ...(recent.length
+      ? recent.map(e =>
+          el(
+            'div',
+            { class: 'row phrase' },
+            el('div', { class: 'l' }, el('span', { class: 'said', title: e.heard ? `${e.text}\n\nSaid: ${e.heard}` : e.text }, e.text), el('small', {}, whenSaid(e.at, Date.now()))),
+            linkBtn('Copy', () => copyText(e.text)),
+          ),
+        )
+      : [aside('info', 'Nothing yet. Dictated phrases (not notes) are kept here 30 days, 200 at most.')]),
+  ]
+}
 
-Said: ${e.heard}` : e.text }, e.text), el('small', {}, whenSaid(e.at, Date.now()))),
-        linkBtn('Copy', () => copyText(e.text)),
-      ),
-    ),
-    row('Kept 30 days on this computer', [], linkBtn('Clear', () => post({ type: 'clearDictation' }))),
+/** The speech models of the open action's feature: Dictate's, or Transcribe's. */
+function modelPage(v: AppView): HTMLElement[] {
+  const feature = open?.name === 'dictate' ? 'dictation' : 'transcripts'
+  return [
+    grp(feature === 'dictation' ? 'For dictation' : 'For transcripts'),
+    ...modelRows(v, feature),
+    aside('info', feature === 'dictation' ? 'Transcripts have a model of their own, on the Transcribe page.' : 'Dictation has a model of its own, on the Dictate page.'),
   ]
 }
 
@@ -1250,16 +1405,87 @@ function whenSaid(iso: string, now: number): string {
 
 const copyText = (text: string) => void window.tutorHost.call({ call: 'copy', text }).then(() => toast(`Copied: ${text}`), fault)
 
-/** How to record a Google Meet call: the Chrome extension, loaded from Altype's folder. */
-function meetRows(v: AppView): HTMLElement[] {
+/** "just now", "4 min ago", "2 h ago", "yesterday", "26 Oct": a moment, as of now. */
+function ago(epochSeconds: number): string {
+  const s = Math.max(0, Date.now() / 1000 - epochSeconds)
+  if (s < 90) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)} min ago`
+  if (s < 86_400) return `${Math.round(s / 3600)} h ago`
+  if (s < 2 * 86_400) return 'yesterday'
+  const d = new Date(epochSeconds * 1000)
+  return `${d.getDate()} ${d.toLocaleDateString('en-GB', { month: 'short' })}`
+}
+
+/** Chrome opens its own page, started by Altype; without Chrome the address is copied to paste into its bar. */
+function openChrome(url: string): void {
+  void window.tutorHost.call({ call: 'openChrome', url }).then(
+    ok => {
+      if (ok) return
+      void window.tutorHost.call({ call: 'copy', text: url }).then(() => toast(`Chrome was not found. The address is copied: paste it into Chrome’s address bar.`), fault)
+    },
+    fault,
+  )
+}
+
+/** The extension as the engine last saw it: it says hello when Chrome starts it, and every quarter of an hour. */
+const extensionSeen = (v: AppView) => v.speech.health?.extension ?? null
+
+/** The card that opens the Google Meet page: whether the extension is in Chrome. */
+function meetCard(v: AppView): HTMLElement {
+  const ext = extensionSeen(v)
+  return navCard('video', 'Google Meet', 'record a call in Chrome with the Altype extension', ext ? `Installed · v${ext.version}` : 'set up in Chrome', () => openSub('meet'), 'meet', !!ext)
+}
+
+/** How to record a Google Meet call: the Chrome extension, loaded from Altype's folder, and whether it is there. */
+function meetPage(v: AppView): HTMLElement[] {
   const dir = v.speech.extensionDir
+  const ext = extensionSeen(v)
+  const offer = engineRows(v, 'Google Meet')
+  const status = ext
+    ? card('circle-check', `Installed in Chrome · v${ext.version}`, [el('small', { class: 'ok' }, `seen ${ago(ext.seen)} · the call’s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY))
+    : card('video', 'Not set up yet', [running(v) ? 'three steps in Chrome, once; this line says when the extension is in' : 'the speech engine must run for the extension to work'], null)
   return [
-    row('1 · In Chrome, open chrome://extensions and turn on Developer mode', [], linkBtn('Copy address', () => copyText('chrome://extensions'))),
-    row('2 · Load unpacked, then pick the extension’s folder', [pathNote(dir)], linkBtn('Show the folder', () => post({ type: 'showInFolder', path: dir }))),
-    row('3 · In a meeting: the Altype icon → Record, or the key', ['the call’s sound and your microphone'], caps(MEET_KEY)),
-    row('4 · If the key does nothing, set it at chrome://extensions/shortcuts', [], linkBtn('Copy address', () => copyText('chrome://extensions/shortcuts'))),
-    row('After Altype updates, press Reload on the extension at chrome://extensions', ['Chrome keeps the old copy until then'], linkBtn('Copy address', () => copyText('chrome://extensions'))),
-  ]
+    ...(offer.length ? [grp('Speech engine'), ...offer] : []),
+    grp('Chrome extension'),
+    status,
+    grp('Set it up'),
+    card('external-link', '1 · Open Chrome’s extensions page and turn on Developer mode', ['chrome://extensions · the switch is at the top right'], btn('Open in Chrome', () => openChrome('chrome://extensions/'))),
+    card(
+      'folder',
+      '2 · Load unpacked, paste the folder’s path',
+      [pathNote(dir), 'Ctrl+V into the folder picker’s address line, then Select folder'],
+      el('span', { class: 'kchg' }, linkBtn('Show the folder', () => post({ type: 'showInFolder', path: dir })), btn([lucide('copy', 's'), 'Copy path'], () => copyText(dir), 'primary')),
+    ),
+    card('mic', '3 · In a meeting: the Altype icon → Record, or the key', ['the call’s sound and your microphone · the transcript appears in Transcripts'], caps(MEET_KEY)),
+    grp('If something is off'),
+    card('keyboard', 'The key does nothing', ['set it at chrome://extensions/shortcuts'], btn('Open in Chrome', () => openChrome('chrome://extensions/shortcuts'))),
+    card('rotate-cw', 'After Altype updates, press Reload on the extension', ['Chrome keeps the old copy until then'], btn('Open in Chrome', () => openChrome('chrome://extensions/'))),
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
+/** The card that opens the speakers' setup, or the download of their part. */
+function speakersCard(v: AppView): HTMLElement | null {
+  if (!installed(v)) return null
+  if (!hasPart(v, 'speakers')) {
+    const rows = speakerRows(v)
+    const first = rows[0]
+    if (first) first.prepend(lucide('users'))
+    return first ?? null
+  }
+  if (!running(v)) return card('users', 'Who spoke when', ['set up once the speech engine runs'], null)
+  const state = diarizationOf(v)
+  const STATES: Record<typeof state, [string, boolean]> = {
+    ready: ['ready', true],
+    missing: ['key saved', true],
+    checking: ['checking…', false],
+    downloading: ['downloading…', false],
+    'needs-token': ['needs a key', false],
+    'bad-token': ['the key failed', false],
+    'no-access': ['no access yet', false],
+    failed: ['could not check', false],
+  }
+  const [value, ok] = STATES[state]
+  return navCard('users', 'Who spoke when', 'speakers told apart with a free Hugging Face key, once', value, () => openSub('speakers'), 'speakers', ok)
 }
 
 function transcribePage(v: AppView): HTMLElement[] {
@@ -1268,162 +1494,94 @@ function transcribePage(v: AppView): HTMLElement[] {
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
     testOffer(v),
     ...(running(v) ? [grp('New transcription'), ...newRows(v)] : []),
-    ...(installed(v) ? [grp('Speakers'), ...speakerRows(v)] : []),
-    grp('Words to spell'),
-    row('Names and terms', ['spelled as the Dictate page’s Words to spell say'], linkBtn('Open Dictate', () => openPage('dictate'))),
-    grp('Google Meet'),
-    ...meetRows(v),
-    ...(running(v)
-      ? [
-          grp('Speech model'),
-          ...modelRows(v, 'transcripts'),
-          row('Every transcript, searched by its words', [], linkBtn('Transcripts', () => openPage('transcripts'))),
-        ]
-      : []),
+    grp('Setup'),
+    speakersCard(v),
+    vocabularyCard(v),
+    meetCard(v),
+    modelCard(v, 'transcripts'),
+    grp('Library'),
+    navCard('file-text', 'Transcripts', 'every transcript, searched by its words', null, () => openPage('transcripts')),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
-/** Windows' layouts as chips, in the order the keys go through them; a tap on one shows how to move it or leave it out. */
-function layoutChips(v: AppView): HTMLElement {
+/** Windows' layouts in the order the keys go through them: each moved earlier or later, left out, another added. */
+function layoutsPage(v: AppView): HTMLElement[] {
   const cycle = cycleOf(v)
   const ids = cycle.map(l => l.id)
   const rest = v.layouts.filter(l => !ids.includes(l.id))
-  const at = ids.indexOf(pickedLayout)
-  const move = (to: number) => {
-    const next = ids.filter(id => id !== pickedLayout)
-    next.splice(to, 0, pickedLayout)
+  const own = v.settings.layouts.length > 0
+  const move = (id: string, to: number) => {
+    const next = ids.filter(x => x !== id)
+    next.splice(to, 0, id)
     save({ layouts: next })
   }
-  const pick = (id: string) => {
-    pickedLayout = pickedLayout === id ? '' : id
-    renderBody()
-  }
-  const picked = cycle[at]
-  return row(
-    'In this order',
-    [picked ? `${picked.name} · move it, or leave it out` : 'tap one to move it or leave it out'],
-    el(
-      'span',
-      { class: 'chips' },
-      ...cycle.map(l => el('button', { class: l.id === pickedLayout ? 'chip lit' : 'chip', title: l.name, 'aria-pressed': String(l.id === pickedLayout), onclick: () => pick(l.id) }, l.short)),
-      ...rest.map(l => el('button', { class: 'chip off', title: `Add ${l.name}`, onclick: () => save({ layouts: [...ids, l.id] }) }, `+ ${l.short}`)),
-      picked
-        ? el(
-            'span',
-            { class: 'chipctl' },
-            el('button', { class: 'ib', title: 'Earlier', 'aria-label': 'Earlier', disabled: at === 0, onclick: () => move(at - 1) }, icon('arrow-left')),
-            el('button', { class: 'ib', title: 'Later', 'aria-label': 'Later', disabled: at === ids.length - 1, onclick: () => move(at + 1) }, icon('arrow-right')),
-            // The last one left cannot go: the keys need a layout to go to.
-            linkBtn(
-              'Leave out',
-              () => {
-                pickedLayout = ''
-                save({ layouts: ids.filter(id => id !== picked.id) })
-              },
-              ids.length === 1,
-            ),
-          )
-        : null,
-    ),
-  )
-}
-
-/** Removable chips: programs left out, words kept as typed. */
-function chipList(items: readonly string[], remove: (item: string) => void): HTMLElement {
-  return el(
-    'div',
-    { class: 'chiprow' },
-    ...items.map(item => el('span', { class: 'chip' }, item, el('button', { class: 'ib', title: 'Remove', 'aria-label': `Remove ${item}`, onclick: () => remove(item) }, icon('close')))),
-  )
-}
-
-function programsRow(v: AppView): HTMLElement[] {
-  const s = v.settings
-  const add = (exe: string) => {
-    const name = exe.trim().toLowerCase()
-    addingApp = false
-    if (!name) return renderBody()
-    const apps = view?.settings.fixApps ?? s.fixApps
-    save({ fixApps: [...apps, /\.exe$/.test(name) ? name : `${name}.exe`] })
-  }
-  const input = addingApp
-    ? el('input', {
-        type: 'text',
-        class: 'field',
-        placeholder: 'program.exe',
-        'aria-label': 'Program to leave out',
-        onkeydown: (event: Event) => {
-          const key = (event as KeyboardEvent).key
-          if (key === 'Enter') add((event.target as HTMLInputElement).value)
-          if (key === 'Escape') (event.preventDefault(), (addingApp = false), renderBody())
-        },
-      })
-    : null
-  if (input) window.setTimeout(() => input.focus(), 0)
-  const suggest = v.lastApp && !s.fixApps.includes(v.lastApp) ? linkBtn(`Add ${v.lastApp}`, () => add(v.lastApp ?? '')) : null
   return [
-    row(
-      'Not in these programs',
-      [s.fixApps.length ? 'words typed there are never fixed by themselves' : 'none'],
-      el(
-        'span',
-        { class: 'kchg' },
-        input,
-        suggest,
-        input
-          ? null
-          : linkBtn('Add…', () => {
-              addingApp = true
-              renderBody()
-            }),
+    grp('In this order', cycle.length),
+    ...cycle.map((l, i) =>
+      card(
+        'keyboard',
+        `${i + 1} · ${l.name}`,
+        [l.short],
+        el(
+          'span',
+          { class: 'kchg' },
+          ib('arrow-up', 'Earlier', () => move(l.id, i - 1), i === 0),
+          ib('arrow-down', 'Later', () => move(l.id, i + 1), i === ids.length - 1),
+          // The last one left cannot go: the keys need a layout to go to.
+          linkBtn('Leave out', () => save({ layouts: ids.filter(id => id !== l.id) }), ids.length === 1),
+        ),
       ),
     ),
-    s.fixApps.length ? chipList(s.fixApps, exe => save({ fixApps: s.fixApps.filter(a => a !== exe) })) : null,
+    rest.length
+      ? card(
+          'plus',
+          'Add a layout',
+          ['one Windows has; it goes last'],
+          select<string>('', [['', 'Pick a layout'], ...rest.map((l): [string, string] => [l.id, l.name])], id => id && save({ layouts: [...ids, id] })),
+        )
+      : null,
+    aside('info', own ? 'Your own order. Leave every layout out to go back to the languages you use.' : 'The order comes from the languages you use (Settings); move one or leave one out to set your own.'),
   ].filter((n): n is HTMLElement => n !== null)
+}
+
+/** Programs where words are never fixed by themselves. */
+function programsPage(v: AppView): HTMLElement[] {
+  const s = v.settings
+  const apps = () => view?.settings.fixApps ?? s.fixApps
+  const add = (exe: string) => save({ fixApps: [...apps(), exe] })
+  const suggest = v.lastApp && !s.fixApps.includes(v.lastApp) ? v.lastApp : ''
+  return listPage({
+    label: 'Add a program',
+    placeholder: 'program.exe',
+    note: 'The name of its .exe. Words typed there are never fixed by themselves; the fix key still works.',
+    items: s.fixApps,
+    count: 'Programs',
+    empty: 'None yet. Add a program above, or the one in front a moment ago.',
+    normalize: text => {
+      const name = text.trim().toLowerCase()
+      return name ? (/\.exe$/.test(name) ? name : `${name}.exe`) : ''
+    },
+    add,
+    remove: exe => save({ fixApps: apps().filter(a => a !== exe) }),
+    extra: suggest ? card('plus', `Add ${suggest}`, ['the program in front a moment ago'], btn('Add', () => add(suggest))) : null,
+  })
 }
 
 /** Words never fixed by themselves: Backspace after a fix adds one, and so can the person, before the fix ever happens. */
-function keptRow(v: AppView): HTMLElement[] {
+function keptPage(v: AppView): HTMLElement[] {
   const s = v.settings
-  const add = (text: string) => {
-    const word = text.trim().toLowerCase()
-    addingWord = false
-    if (!word) return renderBody()
-    const words = view?.settings.keepWords ?? s.keepWords
-    save({ keepWords: [...words, word] })
-  }
-  const input = addingWord
-    ? el('input', {
-        type: 'text',
-        class: 'field',
-        placeholder: 'word',
-        'aria-label': 'Word to keep as typed',
-        onkeydown: (event: Event) => {
-          const key = (event as KeyboardEvent).key
-          if (key === 'Enter') add((event.target as HTMLInputElement).value)
-          if (key === 'Escape') (event.preventDefault(), (addingWord = false), renderBody())
-        },
-      })
-    : null
-  if (input) window.setTimeout(() => input.focus(), 0)
-  return [
-    row(
-      'Kept as typed',
-      [s.keepWords.length ? 'never fixed by themselves' : 'none · Backspace right after a fix adds the word'],
-      el(
-        'span',
-        { class: 'kchg' },
-        input,
-        input
-          ? null
-          : linkBtn('Add…', () => {
-              addingWord = true
-              renderBody()
-            }),
-      ),
-    ),
-    s.keepWords.length ? chipList(s.keepWords, word => save({ keepWords: s.keepWords.filter(w => w !== word) })) : null,
-  ].filter((n): n is HTMLElement => n !== null)
+  const words = () => view?.settings.keepWords ?? s.keepWords
+  return listPage({
+    label: 'Add a word',
+    placeholder: 'word, as you type it',
+    note: 'Backspace right after a fix adds the word too.',
+    items: s.keepWords,
+    count: 'Words',
+    empty: 'None yet. Add a word above, or press Backspace right after a fix you did not want.',
+    normalize: text => text.trim().toLowerCase(),
+    add: word => save({ keepWords: [...words(), word] }),
+    remove: word => save({ keepWords: words().filter(w => w !== word) }),
+  })
 }
 
 /** Other programs at the keyboard, named calmly: no harm, so the person knows who else is there. */
@@ -1434,27 +1592,29 @@ function othersLine(v: AppView): HTMLElement | null {
     : v.foreignKeys
       ? `A program ${presses}`
       : ''
-  return text ? el('p', { class: 'aside' }, icon('info'), text) : null
+  return text ? aside('info', text) : null
 }
 
 function keyboardPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const sample = sampleOf(s.native)
   const [typed = '', fixed = ''] = [sample.typed.split(' ')[0], sample.fixed.split(' ')[0]]
+  const count = (n: number, one: string) => (n ? `${n} ${n === 1 ? one : one + 's'}` : 'none')
   return [
     grp('Keys'),
-    keyRow('switchKey', 'Switch the layout', s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below'),
-    keyRow('fixKey', 'Fix what was typed wrong', 'the last word; again for the next layout; or the selection'),
-    grp('Layouts'),
-    layoutChips(v),
-    toggle('Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} on the space · Backspace takes it back`),
-    toggle('Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge })),
-    ...(s.autoFix ? programsRow(v) : []),
-    ...keptRow(v),
+    keyRow('switchKey', 'Switch the layout', s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below', false, 'keyboard'),
+    keyRow('fixKey', 'Fix what was typed wrong', 'the last word; again for the next layout; or the selection', false, 'rotate-cw'),
+    grp('As you type'),
+    toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} on the space · Backspace takes it back`),
+    toggleCard('type', 'Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge }), 'a small badge whenever the layout changes'),
+    grp('Lists'),
+    navCard('keyboard', 'Layouts', 'the ones the keys go through, in order', cycleOf(v).map(l => l.short).join(' · '), () => openSub('layouts'), 'layouts'),
+    navCard('monitor', 'Programs left out', 'where words are never fixed by themselves', count(s.fixApps.length, 'program'), () => openSub('programs'), 'programs'),
+    navCard('lock', 'Kept as typed', 'words never fixed by themselves', count(s.keepWords.length, 'word'), () => openSub('kept'), 'kept'),
     v.rivals.length ? warn(`${v.rivals.join(' and ')} ${v.rivals.length > 1 ? 'are' : 'is'} running: turn off its layout switching, or words get fixed twice.`) : null,
     v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
     othersLine(v),
-    el('p', { class: 'privacy' }, icon('lock'), 'Altype looks only at the keys of what you are typing, keeps nothing and sends nothing anywhere.'),
+    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Altype looks only at the keys of what you are typing, keeps nothing and sends nothing anywhere.'),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -1593,23 +1753,29 @@ let removingSpeech = false
 
 const PART_NAMES = { core: 'speech to text', gpu: 'graphics card', speakers: 'speakers' } as const
 
-/** Settings → Speech engine: its parts, the card, the service, where things live, Restart and Remove. */
-function speechSettings(v: AppView): HTMLElement[] {
+/** The card that opens the speech engine's page: whether it is here, and its parts. */
+function engineCard(v: AppView): HTMLElement {
+  const p = v.speech.pack
+  const value = !installed(v) ? (p.status === 'installing' ? 'downloading…' : 'not downloaded') : p.parts.map(part => PART_NAMES[part]).join(', ')
+  return navCard('cpu', 'Speech engine', 'for Dictate and Transcribe · downloads once, then works offline', value, () => openSub('engine'), 'engine')
+}
+
+/** Settings › Speech engine: its parts, the card, the service, where things live, Restart and Remove. */
+function enginePage(v: AppView): HTMLElement[] {
   const sp = v.speech
   const p = sp.pack
   const h = sp.health
-  const head = grp('Speech engine')
-  const out: (HTMLElement | null)[] = [head]
   if (!installed(v)) {
     const offer = engineRows(v, 'Dictate and Transcribe')
-    if (p.status === 'installing' || p.status === 'removing') return [head, ...offer]
-    return [head, row('Not downloaded', ['for Dictate and Transcribe · downloads once, then works offline'], linkBtn('Set up…', () => openPage('dictate')))]
+    if (p.status === 'installing' || p.status === 'removing') return [grp('Download'), ...offer]
+    return [grp('Download'), ...offer]
   }
-  const work = engineRows(v, '')
+  const out: (HTMLElement | null)[] = [grp('Parts')]
   const add = (part: 'gpu' | 'speakers', mb: number) =>
     el('button', { class: 'chip off', title: `Add · ≈${mb} MB`, disabled: p.status !== 'ready', onclick: () => post({ type: 'installSpeech', parts: [part] }) }, `+ ${PART_NAMES[part]}`)
   out.push(
-    row(
+    card(
+      'download',
       'Parts',
       [(p.nvidia && !hasPart(v, 'gpu')) || !hasPart(v, 'speakers') ? 'downloaded once · tap one to add it' : 'all downloaded, once'],
       el(
@@ -1620,12 +1786,10 @@ function speechSettings(v: AppView): HTMLElement[] {
         !hasPart(v, 'speakers') ? add('speakers', sp.download.speakers) : null,
       ),
     ),
-  )
-  out.push(...work)
-  const service = { off: 'off', starting: 'starting…', ready: h?.busy ? 'running · transcribing now' : 'running', down: 'stopped' }[sp.service]
-  out.push(
-    row('Graphics card', [cardNote(v)], null),
-    row(
+    ...engineRows(v, ''),
+    card('monitor', 'Graphics card', [cardNote(v)], null),
+    card(
+      'cpu',
       'Speech models',
       [v.settings.speechPrefer === 'speed' ? 'quicker ones, a little less accurate' : 'the most accurate ones this computer runs in time'],
       seg(
@@ -1637,16 +1801,20 @@ function speechSettings(v: AppView): HTMLElement[] {
         speechPrefer => post({ type: 'saveSettings', patch: { speechPrefer } }),
       ),
     ),
-    row('Service', [`${service} · 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn('Restart', () => post({ type: 'restartSpeech' }), p.status !== 'ready')),
+    grp('Service'),
   )
+  const service = { off: 'off', starting: 'starting…', ready: h?.busy ? 'running · transcribing now' : 'running', down: 'stopped' }[sp.service]
+  out.push(card('play', 'Service', [`${service} · 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn('Restart', () => post({ type: 'restartSpeech' }), p.status !== 'ready')))
   if (h) {
     out.push(
-      row('Transcripts are kept in', [pathNote(h.dataDir)], linkBtn('Open', () => post({ type: 'openPath', path: h.dataDir }))),
-      row('Notes go to', [h.kbDir ? pathNote(h.kbDir) : 'no knowledge base folder yet'], linkBtn(h.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
+      card('folder', 'Transcripts are kept in', [pathNote(h.dataDir)], linkBtn('Open', () => post({ type: 'openPath', path: h.dataDir }))),
+      card('folder', 'Notes go to', [h.kbDir ? pathNote(h.kbDir) : 'no knowledge base folder yet'], linkBtn(h.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
     )
   }
   out.push(
-    row(
+    grp('Remove'),
+    card(
+      'trash-2',
       'Remove the speech engine',
       [removingSpeech ? 'its parts and models go; transcripts and notes stay. Remove?' : 'gives the space back · transcripts and notes stay'],
       removingSpeech
@@ -1662,51 +1830,39 @@ function speechSettings(v: AppView): HTMLElement[] {
   return out.filter((n): n is HTMLElement => n !== null)
 }
 
+/** Settings › This computer: what it is, the speed test, and what speech runs on. */
+function computerPage(v: AppView): HTMLElement[] {
+  const rows = computerRows(v)
+  const first = rows[0]
+  if (first) first.prepend(lucide('monitor'))
+  return [grp('Hardware'), ...rows, testOffer(v), card('cpu', 'Graphics card', [cardNote(v)], null)].filter((n): n is HTMLElement => n !== null)
+}
+
+const languageName = (code: string) => LANGUAGES.find(l => l.code === code)?.name ?? code
+
+/** The card that opens the languages the person uses: their names. */
+function languagesCard(v: AppView): HTMLElement {
+  return navCard('globe', 'Languages you use', 'dictation, translation and the screen’s text are read as one of these', myLanguages(v.settings).map(languageName).join(', '), () => openSub('languages'), 'languages')
+}
+
 /** The languages the person uses: their own and English always, others added; what dictation, the translator and the screen's text are read as. */
-function languageRows(v: AppView): HTMLElement[] {
+function languagesPage(v: AppView): HTMLElement[] {
   const s = v.settings
-  const nameOf = (code: string) => LANGUAGES.find(l => l.code === code)?.name ?? code
   const used = myLanguages(s)
   const rest = LANGUAGES.filter(l => !used.includes(l.code))
-  const picker = addingLanguage
-    ? select<string>(
-        '',
-        [['', 'Pick a language'], ...rest.map((l): [string, string] => [l.code, `${l.name} · ${l.native}`])],
-        code => {
-          addingLanguage = false
-          if (!code) return renderBody()
-          save({ languages: [...(view?.settings.languages ?? s.languages), code] })
-        },
-      )
-    : null
-  if (picker) {
-    const box = picker.querySelector('select') as HTMLSelectElement
-    box.addEventListener('keydown', event => event.key === 'Escape' && (event.preventDefault(), event.stopPropagation(), (addingLanguage = false), renderBody()))
-    window.setTimeout(() => box.focus(), 0)
-  }
+  const mine = () => view?.settings.languages ?? s.languages
   return [
-    row(
-      'Languages you use',
-      ['dictation, translation and the screen’s text are read as one of these'],
-      picker ??
-        linkBtn(
-          '+ Add',
-          () => {
-            addingLanguage = true
-            renderBody()
-          },
-          rest.length === 0,
-        ),
+    grp('Add a language'),
+    card(
+      'plus',
+      'Add a language',
+      ['dictation never picks another; translation and the screen’s text guess among them'],
+      select<string>('', [['', 'Pick a language'], ...rest.map((l): [string, string] => [l.code, `${l.name} · ${l.native}`])], code => code && save({ languages: [...mine(), code] })),
     ),
-    el(
-      'div',
-      { class: 'chiprow' },
-      chip(nameOf(used[0] ?? '')),
-      chip('English'),
-      ...s.languages.map(code =>
-        el('span', { class: 'chip' }, nameOf(code), el('button', { class: 'ib', title: 'Remove', 'aria-label': `Remove ${nameOf(code)}`, onclick: () => save({ languages: s.languages.filter(c => c !== code) }) }, icon('close'))),
-      ),
-    ),
+    grp('Languages', used.length),
+    card('globe', languageName(used[0] ?? ''), ['your language · changed in Settings'], null),
+    card('globe', 'English', ['always: the language Altype teaches'], null),
+    ...s.languages.map(code => card('globe', languageName(code), [], ib('x', `Remove ${languageName(code)}`, () => save({ languages: mine().filter(c => c !== code) })))),
   ]
 }
 
@@ -1722,23 +1878,27 @@ function settingsPage(v: AppView): HTMLElement[] {
     : slow
       ? [`natural · ${v.natural.size} MB, on this computer`, bad('slower than it speaks on this computer: it pauses between sentences · a Windows voice is instant')]
       : [`natural · ${v.natural.size} MB, on this computer${rtf ? ` · makes speech ${Math.max(1, Math.round(1 / rtf))}× faster than it plays` : ''}`]
+  const d = v.speech.device
+  const computer = `${shortCpu(d.cpu.name)} · ${d.ramGb} GB`
   return [
     grp('Language and voice'),
-    row(
+    card(
+      'languages',
       'Your language',
-      [],
+      ['what Altype translates into and reads from'],
       select(
         s.native,
         v.languages.map(l => [l.name, `${l.native} · ${l.name}`]),
         native => save({ native }),
       ),
     ),
-    ...languageRows(v),
-    row('Voice', voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, '').replace(/ Desktop$/, '')}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), voice => save({ voice }))),
+    languagesCard(v),
+    card('volume-2', 'Voice', voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, '').replace(/ Desktop$/, '')}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), voice => save({ voice }))),
     naturalRow(v),
-    row(
+    card(
+      'play',
       'Speed',
-      [],
+      ['of the reading'],
       seg(
         s.rate,
         RATES.map(r => [r, String(r)]),
@@ -1746,24 +1906,12 @@ function settingsPage(v: AppView): HTMLElement[] {
         true,
       ),
     ),
-    row(
-      'Theme',
-      [],
-      seg<ThemeMode>(
-        s.theme,
-        [
-          ['system', 'As Windows'],
-          ['light', 'Light'],
-          ['dark', 'Dark'],
-        ],
-        theme => save({ theme }),
-      ),
-    ),
     grp('The card'),
-    toggle('Read aloud when a card opens', s.autoRead, autoRead => save({ autoRead })),
-    toggle('Dotted line under less common words', s.rareWords, rareWords => save({ rareWords })),
-    toggle('Listen reads one sentence at a time', s.oneAtATime, oneAtATime => save({ oneAtATime })),
-    row(
+    toggleCard('volume-2', 'Read aloud when a card opens', s.autoRead, autoRead => save({ autoRead })),
+    toggleCard('spell-check', 'Dotted line under less common words', s.rareWords, rareWords => save({ rareWords })),
+    toggleCard('list', 'Listen reads one sentence at a time', s.oneAtATime, oneAtATime => save({ oneAtATime })),
+    card(
+      'book-open',
       'Word meanings on',
       [],
       select(
@@ -1776,15 +1924,32 @@ function settingsPage(v: AppView): HTMLElement[] {
         wordHint => save({ wordHint }),
       ),
     ),
-    grp('This computer'),
-    ...computerRows(v),
-    toggle('Start with Windows', s.startWithWindows, startWithWindows => save({ startWithWindows })),
-    row(
+    grp('Altype'),
+    card(
+      'monitor',
+      'Theme',
+      [],
+      seg<ThemeMode>(
+        s.theme,
+        [
+          ['system', 'As Windows'],
+          ['light', 'Light'],
+          ['dark', 'Dark'],
+        ],
+        theme => save({ theme }),
+      ),
+    ),
+    toggleCard('power', 'Start with Windows', s.startWithWindows, startWithWindows => save({ startWithWindows })),
+    toggleCard('pause', 'Pause Altype', s.paused, paused => save({ paused }), 'every key and reaction off until it is turned back on · also in the tray'),
+    card(
+      'rotate-cw',
       `Version ${v.version}`,
       [u.status === 'failed' ? bad(updateText(u)) : updateText(u)],
       linkBtn('Check for updates', () => post({ type: 'checkUpdates' }), u.status === 'dev' || u.status === 'checking' || u.status === 'downloading'),
     ),
-    ...speechSettings(v),
+    grp('Speech'),
+    engineCard(v),
+    navCard('monitor', 'This computer', 'what speech runs on, and the speed test', computer, () => openSub('computer'), 'computer'),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -1828,6 +1993,7 @@ function aboutPage(v: AppView): HTMLElement[] {
 
 function showTab(tab: AppTab): void {
   if (tab === 'home' || tab === 'howto') closePage()
+  else if (open?.name === tab && open.sub) popSub(false)
   else openPage(tab)
 }
 
@@ -1856,6 +2022,7 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
     else (askedTranscript = m.id), (askedTab = 'transcripts')
     return
   }
+  if (m.type === 'appWindow') return windowState(m.maximized)
   if (m.type !== 'app') return
   const first = view === undefined
   view = m.view

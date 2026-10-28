@@ -32,6 +32,11 @@ export function setIcon(node: Element | null, name: string): void {
   node.classList.add(`codicon-${name}`)
 }
 
+/** Windows 11 draws this window's edge (`?frame=dwm`, main.ts): `html.dwm` leaves the page's own border out. */
+export function dwmFlag(): void {
+  document.documentElement.classList.toggle('dwm', new URLSearchParams(location.search).get('frame') === 'dwm')
+}
+
 export function html(markup: string): DocumentFragment {
   const template = document.createElement('template')
   template.innerHTML = markup

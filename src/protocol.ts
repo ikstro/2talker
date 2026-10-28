@@ -164,7 +164,10 @@ export type AppView = {
 export type TrayView = {
   /** The keys of its commands, hotkey.ts notation ("Control+C*2" for Ctrl+C twice); empty when there is none. */
   keys: { listenCopied: string; snipListen: string; snipTranslate: string }
+  /** The quick settings' switches: fixing as one types, Ctrl+C twice, Altype paused. */
   autoFix: boolean
+  doubleCopy: boolean
+  paused: boolean
   /** The speech engine is installed: a note can be started from here; one is being recorded now. */
   speech: { installed: boolean; recording: boolean; noteKey: string }
   /** The translator between English and the person's language (as `AppView.translator`). */
@@ -173,7 +176,7 @@ export type TrayView = {
 }
 
 /** What the tray's panel can do; each puts the panel away first. */
-export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'open' | 'quit'
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -203,6 +206,8 @@ export type ToView =
   | { type: 'app'; view: AppView }
   /** Show this tab of the app window (the tray's "About Altype…"). */
   | { type: 'appTab'; tab: AppTab }
+  /** The app window fills the screen or not (its button, a double click on its bar, Windows' keys): Maximize or Restore. */
+  | { type: 'appWindow'; maximized: boolean }
   /** The tray's panel's whole state. */
   | { type: 'tray'; view: TrayView }
   /** Show this transcript in the app window (a finished note's balloon, the extension). */
@@ -268,7 +273,7 @@ export type ToHost =
   /** Open one of the About tab's links in the browser. */
   | { type: 'openLink'; url: string }
   /** The app window's own buttons: it has no Windows frame. Close hides it, as Altype lives in the tray. */
-  | { type: 'window'; action: 'minimize' | 'close' }
+  | { type: 'window'; action: 'minimize' | 'maximize' | 'close' }
   // The tray's panel.
   | { type: 'trayReady' }
   /** The panel's content is this tall, in CSS pixels; the window follows. */
@@ -310,6 +315,8 @@ export type HostCall =
   /** Save a transcript: a Save dialog, then the engine writes the file. */
   | { call: 'exportTranscript'; id: string; format: string; name: string }
   | { call: 'copy'; text: string }
+  /** Open a page of Chrome's own (chrome://extensions/ or its shortcuts), which a link cannot; answers whether Chrome was started. */
+  | { call: 'openChrome'; url: string }
 
 /** What every page has as `window.tutorHost` (preload.ts). */
 export type TutorHost = {

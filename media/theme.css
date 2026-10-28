@@ -1,10 +1,10 @@
-/* Altype's materials, shared by every page (the app window, the card, the
-   badge): GitHub Light (light) and GitHub Dark Dimmed (dark) colors, which
-   `prefers-color-scheme` picks (nativeTheme.themeSource sets it from the
-   theme setting); Inter for text and JetBrains Mono for keys, captions and
-   states, both bundled (fonts/, OFL); radii; the keycap every key is drawn
-   with. The --vscode-* names the card's styles first came with point at the
-   same colors. */
+/* Altype's materials, shared by every page (the app window, the card, the tray
+   panel, the badges): the neutral colors of standard settings (Windows 11's
+   grays, a plain blue), picked by `prefers-color-scheme` (which
+   nativeTheme.themeSource sets from the theme setting); Inter for all text and
+   JetBrains Mono only for keys, times and numbers, both bundled (fonts/, OFL);
+   radii; the keycap every key is drawn with. The --vscode-* names the card's
+   styles first came with point at the same colors. */
 
 @font-face { font-family: 'Inter'; src: url('fonts/inter-latin.woff2') format('woff2'); font-weight: 100 900; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-21FF, U+2212, U+2215, U+2318, U+2325, U+2387, U+238B, U+23CE; }
 @font-face { font-family: 'Inter'; src: url('fonts/inter-cyrillic.woff2') format('woff2'); font-weight: 100 900; unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
@@ -13,63 +13,68 @@
 
 html {
   color-scheme: light;
-  /* surfaces, back to front */
-  --bg: #f6f8fa;
-  --surface: #ffffff;
-  --raised: #f6f8fa;
-  --overlay: #eaeef2;
-  --border: #d0d7de;
-  --border-soft: #e4e8ec;
+  /* surfaces, back to front: the window, a card on it, a raised part, an overlay */
+  --bg: #f3f3f3;
+  --surface: #fbfbfb;
+  --raised: #f6f6f6;
+  --overlay: #ededed;
+  --selected: #e6e6e6;
+  --border: #e5e5e5;
+  --border-soft: #ededed;
   /* text */
-  --text: #1f2328;
-  --strong: #0e1116;
-  --muted: #656d76;
-  /* pastel accents */
-  --coral: #d1583e;
-  --coral-soft: #fd8c73;
-  --blue: #0969da;
-  --blue-deep: #0550ae;
-  --sky: #54aeff;
-  --lilac: #8250df;
-  --green: #1a7f37;
-  --orange: #bc4c00;
-  --red: #cf222e;
-  /* roles */
-  --accent: var(--blue);
+  --text: #1b1b1b;
+  --strong: #0f0f0f;
+  --muted: #616161;
+  /* the accent and the states */
+  --accent: #0067c0;
+  --accent-hover: #005fb8;
   --on-accent: #ffffff;
-  --focus: #0969da;
-  --selection: rgba(9, 105, 218, 0.14);
-  --hover: rgba(175, 184, 193, 0.2);
-  --shadow: 0 12px 32px rgba(31, 35, 40, 0.14), 0 2px 6px rgba(31, 35, 40, 0.08);
+  --green: #0f7b0f;
+  --red: #c42b1c;
+  --orange: #9d5d00;
+  /* the speakers' colors and the card's few tints */
+  --blue: var(--accent);
+  --blue-deep: var(--accent-hover);
+  --sky: #2f80d0;
+  --lilac: #7a5bc7;
+  --coral: #c7503a;
+  --coral-soft: #e0785f;
+  /* roles */
+  --focus: #0067c0;
+  --selection: rgba(0, 103, 192, 0.16);
+  --hover: rgba(0, 0, 0, 0.04);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   html {
     color-scheme: dark;
-    --bg: #1c2128;
-    --surface: #22272e;
-    --raised: #2d333b;
-    --overlay: #373e47;
-    --border: #444c56;
-    --border-soft: #373e47;
-    --text: #adbac7;
-    --strong: #cdd9e5;
-    --muted: #768390;
-    --coral: #ec775c;
-    --coral-soft: #f47067;
-    --blue: #6cb6ff;
-    --blue-deep: #539bf5;
-    --sky: #96d0ff;
-    --lilac: #dcbdfb;
-    --green: #8ddb8c;
-    --orange: #f69d50;
-    --red: #e5534b;
-    --accent: var(--blue);
-    --on-accent: #1c2128;
-    --focus: #316dca;
-    --selection: rgba(108, 182, 255, 0.22);
-    --hover: rgba(99, 110, 123, 0.1);
-    --shadow: 0 12px 32px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
+    --bg: #202020;
+    --surface: #2b2b2b;
+    --raised: #323232;
+    --overlay: #3a3a3a;
+    --selected: #363636;
+    --border: #3d3d3d;
+    --border-soft: #353535;
+    --text: #e8e8e8;
+    --strong: #ffffff;
+    --muted: #9e9e9e;
+    --accent: #4cc2ff;
+    --accent-hover: #60cdff;
+    --on-accent: #0b1a26;
+    --green: #6ccb5f;
+    --red: #ff99a4;
+    --orange: #f0b429;
+    --blue: var(--accent);
+    --blue-deep: var(--accent-hover);
+    --sky: #7cc4ff;
+    --lilac: #c4a7f5;
+    --coral: #f08a72;
+    --coral-soft: #f4a08c;
+    --focus: #4cc2ff;
+    --selection: rgba(76, 194, 255, 0.22);
+    --hover: rgba(255, 255, 255, 0.06);
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -82,7 +87,7 @@ html {
   --r-lg: 12px;
   --r-xl: 16px;
   --r-pill: 9999px;
-  --t-caption: 11.5px;
+  --t-caption: 12px;
   --t-small: 12.5px;
   --t-body: 14px;
   --t-lead: 16px;
@@ -99,7 +104,7 @@ html {
   --vscode-editor-background: var(--surface);
   --vscode-descriptionForeground: var(--muted);
   --vscode-focusBorder: var(--focus);
-  --vscode-textLink-foreground: var(--blue);
+  --vscode-textLink-foreground: var(--accent);
   --vscode-widget-border: var(--border);
   --vscode-panel-border: var(--border-soft);
   --vscode-sideBar-background: var(--bg);
@@ -115,7 +120,7 @@ html {
   --vscode-list-inactiveSelectionBackground: var(--overlay);
   --vscode-button-background: var(--accent);
   --vscode-button-foreground: var(--on-accent);
-  --vscode-button-hoverBackground: var(--blue-deep);
+  --vscode-button-hoverBackground: var(--accent-hover);
   --vscode-button-border: transparent;
   --vscode-toolbar-hoverBackground: var(--hover);
   --vscode-widget-shadow: rgba(0, 0, 0, 0.25);
@@ -139,7 +144,7 @@ html {
   border-radius: var(--r-sm);
   background: var(--raised);
   color: var(--strong);
-  font: 500 var(--t-caption) / 1 var(--mono);
+  font: 500 11.5px / 1 var(--mono);
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
@@ -149,4 +154,33 @@ html {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, var(--raised));
   color: var(--accent);
+}
+
+/* The mark: "alt" on a keycap turned over, so it stands out of any surface. */
+.key.mark {
+  height: 22px;
+  min-width: 30px;
+  padding: 0 5px;
+  border-color: var(--strong);
+  border-bottom-color: var(--muted);
+  background: var(--strong);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+/* A Lucide icon: an outline on the 24 grid, 20 px on a card, 16 px (`.s`) in a row or a button. */
+svg.lu {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+svg.lu.s {
+  width: 16px;
+  height: 16px;
 }

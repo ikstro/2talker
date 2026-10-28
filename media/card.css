@@ -25,6 +25,11 @@ html {
   overflow-x: hidden;
 }
 
+/* Windows 11 draws the edge (dwm.ts); the pixel stays, so the height holds. */
+html.dwm {
+  border-color: transparent;
+}
+
 body {
   margin: 0;
   color: var(--text);

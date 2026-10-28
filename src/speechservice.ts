@@ -27,6 +27,8 @@ export type SpeechHealth = {
   models: Record<'transcripts' | 'dictation', { name: string; state: 'ready' | 'missing' | 'downloading'; progress?: number; device?: 'cuda' | 'cpu'; compute?: string }>
   /** The models downloaded (catalog names). */
   downloaded?: string[]
+  /** The Chrome extension last seen (it pings every 15 min; `seen` is Unix seconds). */
+  extension?: { id: string; version: string; seen: number } | null
   /** Why the card is not used though it is there. */
   fallback?: string | null
   /** The speed test. */

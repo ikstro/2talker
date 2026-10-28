@@ -19,6 +19,9 @@
     }
     return node;
   }
+  function dwmFlag() {
+    document.documentElement.classList.toggle("dwm", new URLSearchParams(location.search).get("frame") === "dwm");
+  }
 
   // src/hotkey.ts
   function hotkeyLabel(hotkey) {
@@ -45,14 +48,104 @@
     return el("span", attrs, ...parts.map((part) => el("span", { class: "key" }, hotkeyLabel(part))), twice ? el("span", { class: "x2" }, "\xD72") : null);
   }
 
+  // src/webview/lucide.ts
+  var LUCIDE = {
+    "volume-2": '<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" /> <path d="M16 9a5 5 0 0 1 0 6" /> <path d="M19.364 18.364a9 9 0 0 0 0-12.728" />',
+    "languages": '<path d="m5 8 6 6" /> <path d="m4 14 6-6 2-3" /> <path d="M2 5h12" /> <path d="M7 2h1" /> <path d="m22 22-5-10-5 10" /> <path d="M14 18h6" />',
+    "scan": '<path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" />',
+    "mic": '<path d="M12 19v3" /> <path d="M19 10v2a7 7 0 0 1-14 0v-2" /> <rect x="9" y="2" width="6" height="13" rx="3" />',
+    "audio-lines": '<path d="M2 10v3" /> <path d="M6 6v11" /> <path d="M10 3v18" /> <path d="M14 8v7" /> <path d="M18 5v13" /> <path d="M22 10v3" />',
+    "keyboard": '<path d="M10 8h.01" /> <path d="M12 12h.01" /> <path d="M14 8h.01" /> <path d="M16 12h.01" /> <path d="M18 8h.01" /> <path d="M6 8h.01" /> <path d="M7 16h10" /> <path d="M8 12h.01" /> <rect width="20" height="16" x="2" y="4" rx="2" />',
+    "file-text": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" />',
+    "notebook-pen": '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /> <path d="M2 6h4" /> <path d="M2 10h4" /> <path d="M2 14h4" /> <path d="M2 18h4" /> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" />',
+    "book-open": '<path d="M12 5v16" /> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" />',
+    "house": '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />',
+    "info": '<circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" />',
+    "settings": '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" />',
+    "file-audio": '<path d="M4 6.835V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-.343" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M2 19a2 2 0 0 1 4 0v1a2 2 0 0 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 0 1-4 0v-1a2 2 0 0 1 4 0" />',
+    "users": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" />',
+    "spell-check": '<path d="m20 15-5.5 5.5L12 18" /> <path d="m4 16 6-12 5.115 10.23" /> <path d="M6 12h8" />',
+    "video": '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" /> <rect x="2" y="6" width="14" height="12" rx="2" />',
+    "cpu": '<path d="M12 20v2" /> <path d="M12 2v2" /> <path d="M17 20v2" /> <path d="M17 2v2" /> <path d="M2 12h2" /> <path d="M2 17h2" /> <path d="M2 7h2" /> <path d="M20 12h2" /> <path d="M20 17h2" /> <path d="M20 7h2" /> <path d="M7 20v2" /> <path d="M7 2v2" /> <rect x="4" y="4" width="16" height="16" rx="2" /> <rect x="8" y="8" width="8" height="8" rx="1" />',
+    "folder": '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />',
+    "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />',
+    "external-link": '<path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
+    "rotate-cw": '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" />',
+    "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />',
+    "pause": '<rect x="14" y="3" width="5" height="18" rx="1" /> <rect x="5" y="3" width="5" height="18" rx="1" />',
+    "power": '<path d="M12 2v10" /> <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />',
+    "list": '<path d="M3 5h.01" /> <path d="M3 12h.01" /> <path d="M3 19h.01" /> <path d="M8 5h13" /> <path d="M8 12h13" /> <path d="M8 19h13" />',
+    "monitor": '<rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" />',
+    "clock": '<circle cx="12" cy="12" r="10" /> <path d="M12 6v6l4 2" />',
+    "lock": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" />',
+    "download": '<path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" />',
+    "globe": '<circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" />',
+    "type": '<path d="M12 4v16" /> <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" /> <path d="M9 20h6" />',
+    "message-square": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" />',
+    "star": '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" />',
+    "search": '<path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" />',
+    "trash-2": '<path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />',
+    "circle-alert": '<circle cx="12" cy="12" r="10" /> <line x1="12" x2="12" y1="8" y2="12" /> <line x1="12" x2="12.01" y1="16" y2="16" />',
+    "circle-check": '<circle cx="12" cy="12" r="10" /> <path d="m16 9-5.5 5.5L8 12" />',
+    "check": '<path d="M20 6 9 17l-5-5" />',
+    "link": '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /> <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />',
+    "plus": '<path d="M5 12h14" /> <path d="M12 5v14" />',
+    "x": '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
+    "minus": '<path d="M5 12h14" />',
+    "square": '<rect width="18" height="18" x="3" y="3" rx="2" />',
+    "chevron-right": '<path d="m9 18 6-6-6-6" />',
+    "chevron-left": '<path d="m15 18-6-6 6-6" />',
+    "chevron-down": '<path d="m6 9 6 6 6-6" />',
+    "arrow-up": '<path d="m5 12 7-7 7 7" /> <path d="M12 19V5" />',
+    "arrow-down": '<path d="M12 5v14" /> <path d="m19 12-7 7-7-7" />'
+  };
+  function lucide(name, cls = "") {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", cls ? `lu ${cls}` : "lu");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = LUCIDE[name];
+    return svg;
+  }
+
   // src/webview/tray.ts
+  dwmFlag();
   var post = (message) => window.tutorHost.post(message);
   var root = document.getElementById("root");
-  function command(label, run, hotkey = "") {
-    return el("button", { class: "cmd", "data-nav": true, onclick: () => post({ type: "tray", command: run }) }, el("span", { class: "l" }, label), hotkey ? caps(hotkey) : null);
+  function command(id, icon, label, run, hotkey = "") {
+    return el(
+      "button",
+      { class: "cmd", "data-nav": true, "data-id": id, onclick: () => post({ type: "tray", command: run }) },
+      lucide(icon, "s"),
+      el("span", { class: "l" }, label),
+      hotkey ? caps(hotkey) : null
+    );
   }
-  var grp = (text) => el("div", { class: "grp" }, text);
+  function toggle(id, icon, label, on) {
+    const knob = el("span", { class: on ? "tg on" : "tg" });
+    const row = el(
+      "button",
+      {
+        class: "cmd",
+        "data-nav": true,
+        "data-id": id,
+        role: "switch",
+        "aria-checked": String(on),
+        onclick: () => {
+          const next = row.getAttribute("aria-checked") !== "true";
+          row.setAttribute("aria-checked", String(next));
+          knob.classList.toggle("on", next);
+          post({ type: "saveSettings", patch: { [id]: next } });
+        }
+      },
+      lucide(icon, "s"),
+      el("span", { class: "l" }, label),
+      knob
+    );
+    return row;
+  }
   function status(v) {
+    if (v.paused) return el("span", { class: "st paused", title: "Keys and Ctrl+C twice are off" }, el("span", { class: "dot" }), "paused");
     switch (v.translator) {
       case "ready":
         return el("span", { class: "st", title: `${v.native} \u21C4 English, offline` }, el("span", { class: "dot" }), "ready");
@@ -66,51 +159,36 @@
   }
   function render(v) {
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.id : void 0;
-    const knob = el("span", { class: v.autoFix ? "tg on" : "tg" });
-    const fix = el(
-      "button",
-      {
-        class: "cmd trow",
-        "data-nav": true,
-        "data-id": "autoFix",
-        role: "switch",
-        "aria-checked": String(v.autoFix),
-        // Saved at once; the panel stays, as a switch is not a command.
-        onclick: () => {
-          const next = fix.getAttribute("aria-checked") !== "true";
-          fix.setAttribute("aria-checked", String(next));
-          knob.classList.toggle("on", next);
-          post({ type: "saveSettings", patch: { autoFix: next } });
-        }
-      },
-      el("span", { class: "l" }, "Fix the layout as I type"),
-      knob
-    );
-    const cmds = [
-      command("Listen", "listenCopied", v.keys.listenCopied),
-      command("Translate", "translateCopied"),
-      command("Listen", "listenScreen", v.keys.snipListen),
-      command("Translate", "translateScreen", v.keys.snipTranslate)
-    ];
-    cmds.forEach((c, i) => c.dataset.id = String(i));
-    const note = command(v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey);
-    note.dataset.id = "note";
-    const transcripts = command("Transcripts", "transcripts");
-    transcripts.dataset.id = "transcripts";
     const openApp = () => post({ type: "tray", command: "open" });
-    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Altype", onclick: openApp }, el("span", { class: "key" }, "alt"), el("span", { class: "wm" }, "altype"));
+    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Altype", onclick: openApp }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype"));
     const open = el("button", { class: "open", "data-nav": true, "data-id": "open", onclick: openApp }, "Open");
-    const quit = command("Quit", "quit");
-    quit.dataset.id = "quit";
     const panel = el(
       "div",
       { class: "panel" },
       el("header", { class: "head" }, brand, el("div", { class: "side" }, status(v), open)),
-      el("section", { class: "sec" }, grp("Copied text"), cmds[0], cmds[1]),
-      el("section", { class: "sec" }, grp("A piece of the screen"), cmds[2], cmds[3]),
-      v.speech.installed ? el("section", { class: "sec" }, grp("Speech"), note, transcripts) : null,
-      el("section", { class: "sec sw" }, fix),
-      el("section", { class: "sec" }, quit)
+      el(
+        "section",
+        { class: "sec" },
+        command("listenCopied", "volume-2", "Listen to the copied text", "listenCopied", v.keys.listenCopied),
+        command("translateCopied", "languages", "Translate the copied text", "translateCopied"),
+        command("listenScreen", "scan", "Listen to a screen snip", "listenScreen", v.keys.snipListen),
+        command("translateScreen", "scan", "Translate a screen snip", "translateScreen", v.keys.snipTranslate)
+      ),
+      v.speech.installed ? el(
+        "section",
+        { class: "sec" },
+        command("note", "notebook-pen", v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey),
+        command("transcripts", "file-text", "Transcripts", "transcripts")
+      ) : null,
+      el(
+        "section",
+        { class: "sec sw" },
+        el("div", { class: "grp" }, "Quick settings"),
+        toggle("autoFix", "keyboard", "Fix the layout as I type", v.autoFix),
+        toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy),
+        toggle("paused", "pause", "Pause Altype", v.paused)
+      ),
+      el("section", { class: "sec" }, command("settings", "settings", "Settings", "settings"), command("quit", "power", "Quit", "quit"))
     );
     root.replaceChildren(panel);
     if (focused) focusRow(root.querySelector(`[data-id="${focused}"]`));

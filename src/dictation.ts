@@ -15,6 +15,7 @@ import * as path from 'node:path'
 import { BrowserWindow, globalShortcut, screen, shell } from 'electron'
 
 import type { DictationLog } from './dictationlog'
+import { frameWindow, WIN11 } from './dwm'
 import { badgeOffset, placeBadge, type Rect } from './placement'
 import type { DictationMode, ToHost, ToView } from './protocol'
 import type { Settings } from './settings'
@@ -31,6 +32,8 @@ export type DictationOptions = {
   page: string
   preload: string
   background: () => string
+  /** The badge's edge, drawn by Windows 11 (dwm.ts). */
+  border: () => string
   speech: SpeechHost
   /** Types the text in the program in front, the clipboard kept. */
   paste: (text: string) => Promise<void>
@@ -269,6 +272,7 @@ export class Dictation {
       backgroundColor: this.o.background(),
       webPreferences: { preload: this.o.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, backgroundThrottling: false },
     })
+    frameWindow(b, { corner: 'round', border: this.o.border() })
     b.setAlwaysOnTop(true, 'pop-up-menu')
     b.removeMenu()
     b.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -279,9 +283,17 @@ export class Dictation {
       this.badge = undefined
       this.badgeReady = false
     })
-    void b.loadFile(this.o.page)
+    void b.loadFile(this.o.page, WIN11 ? { query: { frame: 'dwm' } } : undefined)
     this.badge = b
     return b
+  }
+
+  /** The theme changed: the badge's ground and edge in its colors. */
+  reframe(): void {
+    const b = this.badge
+    if (!b || b.isDestroyed()) return
+    b.setBackgroundColor(this.o.background())
+    frameWindow(b, { corner: 'round', border: this.o.border() })
   }
 
   /**

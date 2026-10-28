@@ -195,6 +195,10 @@ export class ChunkRecorder {
 
 /** Samples per chunk sent while dictating: a quarter of a second at 16 kHz. */
 const STREAM_CHUNK = 4000
+/** Samples per level for the badge's wave: 50 ms at 16 kHz. */
+const LEVEL_SPAN = 800
+/** Levels kept for a page that has not taken them: three seconds. */
+const LEVELS_KEPT = 60
 
 export type StreamStatus = { pending: number; heard: string; model?: { state: string; progress?: number } }
 export type Heard = { text: string; language: string; sure: number }
@@ -216,6 +220,10 @@ export class StreamRecorder {
   private uploads: Promise<void> = Promise.resolve()
   private broken = false
   private loudness = 0
+  /** The sound's levels, one per 50 ms, not yet taken by the page. */
+  private heard: number[] = []
+  private spanSum = 0
+  private spanCount = 0
 
   constructor(
     private readonly call: Call,
@@ -243,10 +251,17 @@ export class StreamRecorder {
   }
 
   private take(samples: Float32Array): void {
-    let sum = 0
     for (let i = 0; i < samples.length; i++) {
       const v = samples[i]!
-      sum += v * v
+      this.spanSum += v * v
+      if (++this.spanCount === LEVEL_SPAN) {
+        // How loud these 50 ms were, 0…1, as Meter measures it.
+        this.loudness = Math.min(1, Math.sqrt(this.spanSum / LEVEL_SPAN) * 4)
+        this.heard.push(this.loudness)
+        if (this.heard.length > LEVELS_KEPT) this.heard.shift()
+        this.spanSum = 0
+        this.spanCount = 0
+      }
       this.waiting[this.filled++] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)))
       if (this.filled === STREAM_CHUNK) {
         this.send(this.waiting)
@@ -254,7 +269,6 @@ export class StreamRecorder {
         this.filled = 0
       }
     }
-    this.loudness = Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 4)
   }
 
   private send(chunk: Int16Array): void {
@@ -273,8 +287,16 @@ export class StreamRecorder {
     })
   }
 
+  /** How loud the latest 50 ms were, 0…1. */
   level(): number {
     return this.loudness
+  }
+
+  /** Every level since the last call, oldest first, one per 50 ms of sound: the wave misses none. */
+  levels(): number[] {
+    const taken = this.heard
+    this.heard = []
+    return taken
   }
 
   get seconds(): number {

@@ -31,7 +31,7 @@ import {
   type Transcript,
   type Utterance,
 } from './speech'
-import { aside, btn, linkBtn, post, row, seg } from './ui'
+import { aside, btn, card, linkBtn, post, row, seg } from './ui'
 
 type Hooks = {
   view: () => AppView | undefined
@@ -153,8 +153,9 @@ export function newRows(v: AppView): HTMLElement[] {
   )
   return [
     zone,
-    row('Language', ['Auto: heard from the first seconds'], seg(tx.language, languages(v), language => (tx.language = language))),
-    row(
+    card('languages', 'Language', ['Auto: heard from the first seconds'], seg(tx.language, languages(v), language => (tx.language = language))),
+    card(
+      'users',
       'Speakers',
       ['how many talk · Auto finds out'],
       seg(tx.speakers, [[0, 'Auto'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']], speakers => (tx.speakers = speakers), true),
@@ -165,7 +166,7 @@ export function newRows(v: AppView): HTMLElement[] {
 
 function micRow(): HTMLElement {
   const r = tx.recorder
-  if (!r) return row('Record from the microphone', ['a talk, a lecture, people in the room · the text comes after Stop'], btn([el('i', { class: 'dot' }), 'Record'], () => void startMic(), 'rec'))
+  if (!r) return card('mic', 'Record from the microphone', ['a talk, a lecture, people in the room · the text comes after Stop'], btn([el('i', { class: 'dot' }), 'Record'], () => void startMic(), 'rec'))
   return el(
     'div',
     { class: 'row live' },
@@ -292,7 +293,7 @@ function libraryPage(v: AppView): HTMLElement[] {
       ),
       btn([icon('add'), 'New'], () => hooks.setup(), '', 'A new transcription'),
     ),
-    kb === '' ? aside('book', 'Notes need a knowledge base folder.', ' ', linkBtn('Choose…', () => void pickKb())) : null,
+    kb === '' ? aside('book-open', 'Notes need a knowledge base folder.', ' ', linkBtn('Choose…', () => void pickKb())) : null,
     speakersMissing(v, () => hooks.setup()),
     list(v),
   ].filter((n): n is HTMLElement => n !== null)
@@ -627,11 +628,11 @@ function notices(v: AppView, r: Row, t: Transcript): HTMLElement[] {
   const note = t.note
   if (note) {
     out.push(
-      aside('book', 'In the knowledge base: ', el('b', {}, fileName(note)), ' ', linkBtn('Open', () => post({ type: 'openPath', path: note })), linkBtn('Show in folder', () => post({ type: 'showInFolder', path: note }))),
+      aside('book-open', 'In the knowledge base: ', el('b', {}, fileName(note)), ' ', linkBtn('Open', () => post({ type: 'openPath', path: note })), linkBtn('Show in folder', () => post({ type: 'showInFolder', path: note }))),
     )
   }
   if (t.noteError) out.push(aside('info', t.noteError, ' ', linkBtn('Choose a folder', () => void pickKb())))
-  if (r.error) out.push(aside('warning', r.error))
+  if (r.error) out.push(aside('circle-alert', r.error))
   const speakers = speakersNotice(v, t)
   if (speakers) out.push(speakers)
   return out
@@ -649,23 +650,23 @@ function speakersNotice(v: AppView, t: Transcript): HTMLElement | null {
   if (t.source === 'note' || t.speakersStatus === 'ok' || t.speakersStatus === 'single') return null
   const why = t.speakersStatus === 'failed' ? 'Speakers could not be told apart; the text is one stream.' : 'Speakers are not told apart: it was made without a Hugging Face key.'
   const missing = speakersMissing(v, () => hooks.setup())
-  if (missing) return aside('person', why, ' ', linkBtn('Set up speakers', () => hooks.setup()))
+  if (missing) return aside('users', why, ' ', linkBtn('Set up speakers', () => hooks.setup()))
   const way = splitWay(t)
-  if (!way) return aside('person', `${why} This meeting can no longer be split: its words were not kept.`)
+  if (!way) return aside('users', `${why} This meeting can no longer be split: its words were not kept.`)
   const run = () => void splitSpeakers(t.id)
-  if (way === 'words') return aside('person', `${why} The text is not recognized again; edits stay.`, ' ', linkBtn('Split by speaker', run))
+  if (way === 'words') return aside('users', `${why} The text is not recognized again; edits stay.`, ' ', linkBtn('Split by speaker', run))
   // Made before the words' times were kept: only a full new pass can split it.
   const minutes = Math.max(1, Math.round((t.duration / 3600) * minutesPerHour(v)))
   if (tx.redoing) {
     return aside(
-      'person',
+      'users',
       t.edited ? 'Edits to the text will be lost. Go on?' : 'Go on?',
       ' ',
       linkBtn('Transcribe again', run),
       linkBtn('Not now', () => ((tx.redoing = false), redrawPage())),
     )
   }
-  return aside('person', `${why} It can be transcribed again, with speakers: about ${minutes} min.`, ' ', linkBtn('Transcribe again', () => ((tx.redoing = true), redrawPage())))
+  return aside('users', `${why} It can be transcribed again, with speakers: about ${minutes} min.`, ' ', linkBtn('Transcribe again', () => ((tx.redoing = true), redrawPage())))
 }
 
 async function splitSpeakers(id: string): Promise<void> {

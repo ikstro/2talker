@@ -19,7 +19,8 @@ What other apps may use, and keep using:
   POST /dictate/prepare               loads the dictation model, so the next phrase is quick
   POST /transcripts {path}            a file on this computer -> a transcript in the library
   POST /recordings ...                a recording that arrives in chunks (the extension)
-  GET  /health                        what is installed (parts), loaded and busy
+  GET  /health                        what is installed (parts), loaded and busy, and the Chrome
+                                      extension last seen ({id, version, seen} or null)
 
 Altype alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
 where, made from this computer's measurements; the words to spell right and what they
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import json
 import logging
 import os
 import secrets
@@ -70,6 +72,7 @@ MEDIA = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mp3", ".m4a", ".wav"
 
 log = logging.getLogger("altype")
 settings = Settings()
+EXTENSION_FILE = APP_DIR / "extension.json"
 
 
 class State:
@@ -82,6 +85,37 @@ class State:
             self.store = Store(Path(wanted))
             self.store_dir = wanted
         return self.store
+
+
+def load_extension() -> dict | None:
+    """The extension seen last time, so the app can say it is installed before it pings again."""
+    try:
+        found = json.loads(EXTENSION_FILE.read_text("utf-8"))
+        return {"id": str(found["id"]), "version": str(found["version"]), "seen": float(found["seen"])}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+extension: dict | None = load_extension()
+
+
+def note_extension(origin: str, version: str) -> None:
+    """The extension says who it is on every call (header X-Altype-Extension: its version).
+
+    The newest sighting stays in memory; the file is written only when the id or version
+    is new, as the extension pings every 15 minutes.
+    """
+    global extension
+    prefix = "chrome-extension://"
+    seen = {"id": origin[len(prefix):] if origin.startswith(prefix) else "", "version": version.strip()[:32], "seen": time.time()}
+    changed = extension is None or extension["id"] != seen["id"] or extension["version"] != seen["version"] or not EXTENSION_FILE.exists()
+    extension = seen
+    if changed:
+        try:
+            EXTENSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            EXTENSION_FILE.write_text(json.dumps(seen), "utf-8")
+        except OSError:
+            log.exception("could not save extension.json")
 
 
 state = State()
@@ -105,6 +139,9 @@ async def guard(request: Request, call_next):
     origin = request.headers.get("origin", "")
     if host not in ("127.0.0.1", "localhost") or (origin and not origin.startswith("chrome-extension://")):
         return JSONResponse({"detail": "forbidden"}, status_code=403)
+    version = request.headers.get("x-altype-extension", "")
+    if version.strip():
+        note_extension(origin, version)
     return await call_next(request)
 
 
@@ -142,6 +179,7 @@ def health():
         "queued": worker.queue.qsize(),
         "dataDir": s["dataDir"],
         "kbDir": s["kbDir"],
+        "extension": extension,
     }
 
 

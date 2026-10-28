@@ -500,5 +500,5 @@ export function speakersMissing(v: AppView, go: () => void): HTMLElement | null 
   const state = v.speech.health?.diarization
   if (hasPart(v, 'speakers') && state !== 'needs-token' && state !== 'bad-token' && state !== 'no-access' && state !== 'failed') return null
   const why = !hasPart(v, 'speakers') ? 'Speakers are not told apart yet: their part is not downloaded.' : 'Speakers are not told apart yet: a Hugging Face key is needed.'
-  return aside('person', why, ' ', linkBtn('Set up', go))
+  return aside('users', why, ' ', linkBtn('Set up', go))
 }

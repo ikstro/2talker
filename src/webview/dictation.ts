@@ -16,6 +16,8 @@ declare global {
 
 const host = window.tutorHost
 const root = document.getElementById('badge')!
+// Windows 11 draws the badge's frame itself: the page's border stays, unseen.
+document.documentElement.classList.toggle('dwm', new URLSearchParams(location.search).get('frame') === 'dwm')
 const TITLES: Record<DictationMode, string> = { type: 'Dictate', english: 'Dictate in English', note: 'A note' }
 
 type Recorder = PhraseRecorder | ChunkRecorder | StreamRecorder
@@ -77,23 +79,81 @@ function onStatus(status: StreamStatus): void {
   dot.title = status.pending > BEHIND ? 'catching up' : ''
 }
 
+/** The wave: the last three seconds of sound, one bar per 50 ms. */
+const WAVE = 60
+const STEP = 3
+const BAR = 2
+const levels: number[] = new Array<number>(WAVE).fill(0)
+let wave: HTMLCanvasElement | undefined
+let frame: number | undefined
+/** New levels came in since the wave was last drawn. */
+let fresh = false
+
+function hear(level: number): void {
+  levels.push(level)
+  if (levels.length > WAVE) levels.shift()
+  fresh = true
+}
+
+/** Each bar mirrored round the middle, newest at the right edge; silence is a row of 2 px dots. */
+function draw(): void {
+  frame = requestAnimationFrame(draw)
+  if (!wave) return
+  const ratio = devicePixelRatio || 1
+  const w = wave.clientWidth
+  const h = wave.clientHeight
+  const sized = wave.width === Math.round(w * ratio) && wave.height === Math.round(h * ratio)
+  if (!fresh && sized) return
+  fresh = false
+  if (!sized) {
+    wave.width = Math.round(w * ratio)
+    wave.height = Math.round(h * ratio)
+  }
+  const c = wave.getContext('2d')
+  if (!c) return
+  c.setTransform(ratio, 0, 0, ratio, 0, 0)
+  c.clearRect(0, 0, w, h)
+  c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+  c.globalAlpha = 0.7
+  const shown = Math.min(WAVE, Math.floor(w / STEP))
+  for (let i = 0; i < shown; i++) {
+    const bar = Math.max(2, Math.round(levels[WAVE - shown + i]! * h))
+    c.fillRect(w - (shown - i) * STEP, (h - bar) / 2, BAR, bar)
+  }
+}
+
+/** The clock, the levels and the wave stop together. */
+function quiet(): void {
+  clearInterval(timer)
+  timer = undefined
+  if (frame !== undefined) cancelAnimationFrame(frame)
+  frame = undefined
+  wave = undefined
+}
+
 function recording(): void {
+  quiet()
   time = el('span', { class: 'time' }, '0:00')
-  const bars = Array.from({ length: 5 }, () => el('i'))
+  wave = el('canvas', { class: 'wave' })
   dot = el('span', { class: 'dot' })
   words = wordsOf('', 'Listening…')
   said = ''
   fetching = false
-  show('rec', words, dot, el('span', { class: 'what' }, TITLES[mode]), time, el('span', { class: 'meter' }, ...bars))
+  show('rec', words, dot, el('span', { class: 'what' }, TITLES[mode]), time, wave)
   // A new phrase's window starts at its smallest: told the panel's height even when it is the last one's.
   postHeight(true)
-  clearInterval(timer)
+  // A new phrase starts flat: nothing of the last one's sound.
+  levels.fill(0)
+  fresh = true
+  // One tick per 50 ms: the clock, and the levels. A stream hands over every 50 ms it heard;
+  // the others are asked how loud it is now.
   timer = window.setInterval(() => {
     if (!recorder || !time) return
     if (!fetching) time.textContent = clock(recorder.seconds)
-    const level = recorder.level()
-    bars.forEach((bar, i) => bar.classList.toggle('on', level > (i + 0.5) / bars.length))
-  }, 80)
+    if (recorder instanceof StreamRecorder) for (const level of recorder.levels()) hear(level)
+    else hear(recorder.level())
+  }, 50)
+  frame = requestAnimationFrame(draw)
 }
 
 async function start(next: DictationMode, session?: string, expected: string[] = []): Promise<void> {
@@ -111,14 +171,14 @@ async function start(next: DictationMode, session?: string, expected: string[] =
     await starting
   } catch (error) {
     recorder = undefined
-    clearInterval(timer)
+    quiet()
     host.post({ type: 'dictationFailed', message: micTrouble(error) })
   }
 }
 
 async function stop(): Promise<void> {
   await starting.catch(() => undefined)
-  clearInterval(timer)
+  quiet()
   const r = recorder
   recorder = undefined
   if (!r) return
@@ -143,7 +203,7 @@ let busy: Recorder | undefined
 
 async function cancel(): Promise<void> {
   await starting.catch(() => undefined)
-  clearInterval(timer)
+  quiet()
   const r = recorder ?? busy
   recorder = undefined
   busy = undefined
