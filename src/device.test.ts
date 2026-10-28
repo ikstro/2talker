@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fingerprint, mainCard, parseNvidiaSmi, parseWindows, quickProfile, vendorOf, withNvidia } from './device'
+import { fingerprint, mainCard, nextVoiceSpeed, parseNvidiaSmi, parseWindows, quickProfile, vendorOf, withNvidia } from './device'
 
 const base = { cpu: { name: 'node cpu', cores: 8, threads: 16 }, ramGb: 32, gpus: [], laptop: false, at: 0 }
 
@@ -62,6 +62,16 @@ describe('device profile', () => {
     expect(fingerprint({ ...base, gpus: [{ ...card, driver: '610.91' }] })).toBe(a)
     expect(fingerprint({ ...base, gpus: [{ ...card, driver: '615.10' }] })).not.toBe(a)
     expect(fingerprint({ ...base, ramGb: 16, gpus: [card] })).not.toBe(a)
+  })
+
+  it('keeps the voice speed as an average that settles', () => {
+    let v = nextVoiceSpeed(undefined, 1, 4)
+    expect(v).toEqual({ rtf: 0.25, n: 1 })
+    v = nextVoiceSpeed(v, 3, 4)
+    expect(v?.rtf).toBeCloseTo(0.5, 5)
+    expect(nextVoiceSpeed(v, 5, 0.5)).toBe(v)
+    for (let i = 0; i < 40; i++) v = nextVoiceSpeed(v, 1.2, 1)
+    expect(v!.rtf).toBeGreaterThan(1.1)
   })
 
   it('knows the processor and memory at once', () => {

@@ -24,7 +24,8 @@ export type WorkerIn =
 /** `failed` with job -1: the model did not load. */
 export type WorkerOut =
   | { type: 'loaded' }
-  | { type: 'audio'; job: number; index: number; samples: Float32Array; words: WordTime[] }
+  /** `took`: seconds the sentence took to make (its sound lasts samples / 24 000). */
+  | { type: 'audio'; job: number; index: number; samples: Float32Array; words: WordTime[]; took?: number }
   | { type: 'failed'; job: number; index?: number; message: string }
   | { type: 'phonemes'; text: string; ipa: string }
 
@@ -38,6 +39,8 @@ export type SynthEvents = {
   audio: (id: number, index: number, samples: Float32Array, words: WordTime[]) => void
   failed: (id: number, message: string) => void
   phonemes: (text: string, ipa: string) => void
+  /** A sentence was made: how long that took and how long it plays, in seconds (this computer's speed). */
+  made?: (took: number, seconds: number) => void
 }
 
 type Made = { samples: Float32Array; words: WordTime[] }
@@ -64,7 +67,11 @@ type Request = { job: number; index: number; key: string }
 
 const keyOf = (text: string, voice: string, speed: number) => `${voice}|${speed}|${text}`
 
-export type SpeakerOptions = { fork?: typeof fork }
+export type SpeakerOptions = {
+  fork?: typeof fork
+  /** The threads the voice gets: this computer's physical cores when known (device.ts), else half its logical ones. */
+  threads?: () => number | undefined
+}
 
 export class NaturalSpeaker {
   private child: ChildProcess | undefined
@@ -75,6 +82,7 @@ export class NaturalSpeaker {
   private readonly cache = new Map<string, Made>()
   private requests: Request[] = []
   private readonly forkWorker: typeof fork
+  private readonly threads: () => number | undefined
 
   constructor(
     private readonly workerPath: string,
@@ -83,6 +91,7 @@ export class NaturalSpeaker {
     options: SpeakerOptions = {},
   ) {
     this.forkWorker = options.fork ?? fork
+    this.threads = options.threads ?? (() => undefined)
   }
 
   speak(id: number, items: string[], voice: string, speed: number, ahead: string[] = []): void {
@@ -200,7 +209,7 @@ export class NaturalSpeaker {
         TUTOR_VOICE_DIR: paths.dir,
         // A Windows path with backslashes, or Windows loads its own older onnxruntime.dll from System32.
         TUTOR_ORT_BINDING: path.resolve(paths.binding),
-        TUTOR_THREADS: String(Math.max(1, Math.min(8, Math.floor(os.availableParallelism() / 2)))),
+        TUTOR_THREADS: String(Math.max(1, Math.min(8, this.threads() ?? Math.floor(os.availableParallelism() / 2)))),
       },
       execArgv: [],
       serialization: 'advanced',
@@ -229,6 +238,7 @@ export class NaturalSpeaker {
     const request = at >= 0 ? this.requests.splice(at, 1)[0] : undefined
     const r = this.reading
     if (m.type === 'audio') {
+      if (m.took) this.events.made?.(m.took, m.samples.length / 24_000)
       if (!request) return
       const made = { samples: m.samples, words: m.words }
       this.keep(request.key, made)

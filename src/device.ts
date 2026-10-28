@@ -166,23 +166,56 @@ export async function probeDevice(): Promise<DeviceProfile> {
   return withNvidia(profile, parseNvidiaSmi(await nvidiaSmi()))
 }
 
-/** The profile saved last time, when it is one. */
-export function loadProfile(file: string): DeviceProfile | undefined {
+/** How fast the natural voice makes speech here: seconds per second of sound, over `n` sentences. */
+export type VoiceSpeed = { rtf: number; n: number }
+type DeviceFile = { profile?: DeviceProfile; voice?: VoiceSpeed }
+
+function readDeviceFile(file: string): DeviceFile {
   try {
-    const p = JSON.parse(fs.readFileSync(file, 'utf8')) as { profile?: DeviceProfile }
-    return p.profile && Array.isArray(p.profile.gpus) && p.profile.cpu ? p.profile : undefined
+    return JSON.parse(fs.readFileSync(file, 'utf8')) as DeviceFile
   } catch {
-    return undefined
+    return {}
   }
 }
 
-export function saveProfile(file: string, profile: DeviceProfile): void {
+function writeDeviceFile(file: string, changes: DeviceFile): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, JSON.stringify({ profile }, null, 2))
+    fs.writeFileSync(file, JSON.stringify({ ...readDeviceFile(file), ...changes }, null, 2))
   } catch (error) {
     console.warn('Altype: could not save device.json', error)
   }
+}
+
+/** The profile saved last time, when it is one. */
+export function loadProfile(file: string): DeviceProfile | undefined {
+  const p = readDeviceFile(file).profile
+  return p && Array.isArray(p.gpus) && p.cpu ? p : undefined
+}
+
+/** A new profile; another computer's voice speed goes with the old one. */
+export function saveProfile(file: string, profile: DeviceProfile): void {
+  const old = readDeviceFile(file)
+  const same = old.profile && fingerprint(old.profile) === fingerprint(profile)
+  writeDeviceFile(file, same ? { profile } : { profile, voice: undefined })
+}
+
+export function loadVoiceSpeed(file: string): VoiceSpeed | undefined {
+  const v = readDeviceFile(file).voice
+  return v && typeof v.rtf === 'number' && v.rtf > 0 ? v : undefined
+}
+
+export function saveVoiceSpeed(file: string, speed: VoiceSpeed): void {
+  writeDeviceFile(file, { voice: speed })
+}
+
+/** A sentence made in `took` seconds that plays `seconds`: the speed moved towards it (the first ones count fully). */
+export function nextVoiceSpeed(old: VoiceSpeed | undefined, took: number, seconds: number): VoiceSpeed | undefined {
+  if (seconds < 1 || took <= 0) return old
+  const rtf = took / seconds
+  if (!old) return { rtf, n: 1 }
+  const weight = Math.max(0.15, 1 / (old.n + 1))
+  return { rtf: old.rtf + (rtf - old.rtf) * weight, n: old.n + 1 }
 }
 
 /** Free space, in MB, on the drive a folder is (or will be) on. */

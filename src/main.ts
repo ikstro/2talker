@@ -40,6 +40,7 @@ import { openStream } from './download'
 import { createTranslator, NATIVES } from './engine'
 import { hotkeyLabel, isAccelerator } from './hotkey'
 import { KeyboardHelper, keyboardLayouts } from './keyboard'
+import { loadVoiceSpeed, nextVoiceSpeed, saveVoiceSpeed, type VoiceSpeed } from './device'
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { lookup, type Dictionary } from './lemma'
@@ -277,13 +278,21 @@ function setUpSpeech(): void {
       postApp()
     },
   })
-  natural = new NaturalSpeaker(unpacked('dist', 'voice-worker.js'), () => voiceStore.paths, {
-    audio: (id, index, samples, words) => post({ type: 'naturalAudio', id, index, samples, words }),
-    failed: (id, message) => post({ type: 'naturalFailed', id, message }),
-    phonemes: (text, ipa) => {
-      if (ipa) post({ type: 'ipa', word: text, ipa })
+  voiceSpeed = loadVoiceSpeed(deviceFile())
+  natural = new NaturalSpeaker(
+    unpacked('dist', 'voice-worker.js'),
+    () => voiceStore.paths,
+    {
+      audio: (id, index, samples, words) => post({ type: 'naturalAudio', id, index, samples, words }),
+      failed: (id, message) => post({ type: 'naturalFailed', id, message }),
+      phonemes: (text, ipa) => {
+        if (ipa) post({ type: 'ipa', word: text, ipa })
+      },
+      made: (took, seconds) => voiceMade(took, seconds),
     },
-  })
+    // The physical cores, once Windows has said them (speech.probe); half the threads until then.
+    { threads: () => (speech?.profile.at ? speech.profile.cpu.cores : undefined) },
+  )
   dictionaries = new DictionaryStore({
     bundledDir: path.join(app.getAppPath(), 'media', 'dict'),
     cacheDir: path.join(userDir(), 'dict'),
@@ -296,8 +305,24 @@ function setUpSpeech(): void {
   })
 }
 
+const deviceFile = () => path.join(userDir(), 'device.json')
+/** How fast the natural voice makes speech on this computer, measured while it reads. */
+let voiceSpeed: VoiceSpeed | undefined
+/** Shown once a few sentences were made, so one slow start does not decide. */
+const VOICE_SURE_AFTER = 3
+
+function voiceMade(took: number, seconds: number): void {
+  const before = naturalState().rtf
+  voiceSpeed = nextVoiceSpeed(voiceSpeed, took, seconds)
+  if (voiceSpeed && voiceSpeed.n % 5 === 0) saveVoiceSpeed(deviceFile(), voiceSpeed)
+  const after = naturalState().rtf
+  // The window learns of it when it first shows, and when the voice crosses being slower than it plays.
+  if (before === undefined ? after !== undefined : (before > 1) !== ((after ?? 0) > 1)) postApp()
+}
+
 function naturalState(): NaturalState {
-  return { ...voiceStore.state, dismissed: settings.naturalDismissed }
+  const rtf = voiceSpeed && voiceSpeed.n >= VOICE_SURE_AFTER ? Math.round(voiceSpeed.rtf * 100) / 100 : undefined
+  return { ...voiceStore.state, dismissed: settings.naturalDismissed, ...(rtf !== undefined ? { rtf } : {}) }
 }
 
 function stopSpeaking(): void {

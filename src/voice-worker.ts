@@ -3,7 +3,9 @@
 // Kokoro model from the downloaded files and turns each sentence into 24 kHz
 // audio with the time each word is spoken. A process of its own keeps the
 // model's memory and threads out of the extension host, and stopping it is a
-// kill away. Environment: TUTOR_VOICE_DIR, TUTOR_ORT_BINDING, TUTOR_THREADS.
+// kill away. Environment: TUTOR_VOICE_DIR, TUTOR_ORT_BINDING, TUTOR_THREADS;
+// TUTOR_MODEL (a model file other than kokoro.onnx: another precision), TUTOR_EP
+// ("dml": the graphics card through DirectML, any vendor's; the processor otherwise).
 
 import { createRequire } from 'node:module'
 import * as fs from 'node:fs'
@@ -17,11 +19,15 @@ import type { WorkerIn, WorkerOut } from './synth'
 
 const dir = process.env.TUTOR_VOICE_DIR ?? ''
 const threads = Math.max(1, Number(process.env.TUTOR_THREADS) || 2)
+const onCard = process.env.TUTOR_EP === 'dml'
 
 type Phonemize = (text: string, language: string) => Promise<string[]>
 const phonemize = (createRequire(__filename)(path.join(dir, 'phonemizer.cjs')) as { phonemize: Phonemize }).phonemize
 
-const session = ort.InferenceSession.create(path.join(dir, 'kokoro.onnx'), {
+const session = ort.InferenceSession.create(path.resolve(dir, process.env.TUTOR_MODEL || 'kokoro.onnx'), {
+  // DirectML runs what it can on the card and leaves the rest to the processor; it wants no memory pattern and one op at a time.
+  executionProviders: onCard ? ['dml', 'cpu'] : ['cpu'],
+  ...(onCard ? { enableMemPattern: false, executionMode: 'sequential' as const } : {}),
   intraOpNumThreads: threads,
   interOpNumThreads: 1,
   graphOptimizationLevel: 'all',
@@ -89,8 +95,9 @@ async function work(): Promise<void> {
   try {
     for (let next = queue.shift(); next; next = queue.shift()) {
       try {
+        const started = performance.now()
         const { samples, words } = await speak(next.text, next.voice, next.speed)
-        send({ type: 'audio', job: next.job, index: next.index, samples, words })
+        send({ type: 'audio', job: next.job, index: next.index, samples, words, took: (performance.now() - started) / 1000 })
       } catch (error) {
         send({ type: 'failed', job: next.job, index: next.index, message: error instanceof Error ? error.message : String(error) })
       }

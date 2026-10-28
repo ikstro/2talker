@@ -2680,7 +2680,7 @@
       keyRow("dictateKey", "Dictate", "types what you say where the cursor is", !k.dictate),
       keyRow("englishKey", "Dictate in English", `say it in ${s.native}, English is typed`, !k.english),
       keyRow("noteKey", "A note", "kept in the knowledge base as a .md file", !k.note),
-      row("Tap the key, talk, tap it again", ["Esc while it records throws it away"], null),
+      row("Tap the key, talk, tap it again", ["the words show as you speak \xB7 Esc throws the phrase away, while it records and while it types"], null),
       grp("Knowledge base"),
       ...kbRows(v),
       ...running(v) ? [grp("Speech model"), ...modelRows(v, "dictation")] : [],
@@ -3008,7 +3008,10 @@
   function settingsPage(v) {
     const s = v.settings;
     const u = v.update;
-    const voiceNote = naturalOn(v) ? `natural \xB7 ${v.natural.size} MB, on this computer` : "a Windows voice";
+    const rtf = v.natural.rtf;
+    const windows = v.hostVoices.find((h) => /^en\b/i.test(h.lang));
+    const slow = naturalOn(v) && rtf !== void 0 && rtf > 1;
+    const voiceNote = !naturalOn(v) ? ["a Windows voice"] : slow ? [`natural \xB7 ${v.natural.size} MB, on this computer`, bad("slower than it speaks on this computer: it pauses between sentences \xB7 a Windows voice is instant")] : [`natural \xB7 ${v.natural.size} MB, on this computer${rtf ? ` \xB7 makes speech ${Math.max(1, Math.round(1 / rtf))}\xD7 faster than it plays` : ""}`];
     return [
       grp("Language and voice"),
       row(
@@ -3020,7 +3023,7 @@
           (native) => save({ native })
         )
       ),
-      row("Voice", [voiceNote], select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
+      row("Voice", voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, "").replace(/ Desktop$/, "")}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
       naturalRow(v),
       row(
         "Speed",

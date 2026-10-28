@@ -26,6 +26,8 @@ export type NaturalState = {
   size: number
   /** The person closed the offer above the list. */
   dismissed: boolean
+  /** Seconds this computer takes to make a second of speech, as measured while reading (0: not yet); above 1 it pauses between sentences. */
+  rtf?: number
 }
 
 export function naturalLabel(v: NaturalVoice): string {
