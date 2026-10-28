@@ -102,9 +102,9 @@ const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'trans
 /** The links the About tab may open. */
 const LINKS = new Set([
   'https://ikstro.com',
-  'https://github.com/ikstro/2talker',
-  'https://github.com/ikstro/2talker/releases',
-  'https://github.com/ikstro/2talker/blob/main/NOTICE',
+  'https://github.com/ikstro/altype',
+  'https://github.com/ikstro/altype/releases',
+  'https://github.com/ikstro/altype/blob/main/NOTICE',
   // The steps to the speakers' model: an account, the model's terms, a Read token.
   'https://huggingface.co/join',
   'https://huggingface.co/pyannote/speaker-diarization-community-1',

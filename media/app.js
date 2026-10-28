@@ -2738,11 +2738,11 @@
           ...fact("uses the network", `Updates, and each part once: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
           ...fact(
             "links",
-            link("https://github.com/ikstro/2talker/releases", "Releases and what changed"),
+            link("https://github.com/ikstro/altype/releases", "Releases and what changed"),
             " \xB7 ",
-            link("https://github.com/ikstro/2talker", "Source on GitHub"),
+            link("https://github.com/ikstro/altype", "Source on GitHub"),
             " \xB7 ",
-            link("https://github.com/ikstro/2talker/blob/main/NOTICE", "Licenses")
+            link("https://github.com/ikstro/altype/blob/main/NOTICE", "Licenses")
           )
         )
       )

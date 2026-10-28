@@ -49,4 +49,4 @@ nsis:
 publish:
   provider: github
   owner: ikstro
-  repo: 2talker
+  repo: altype

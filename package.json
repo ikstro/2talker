@@ -12,7 +12,7 @@
   "main": "dist/main.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ikstro/2talker"
+    "url": "https://github.com/ikstro/altype"
   },
   "scripts": {
     "build": "node esbuild.mjs",

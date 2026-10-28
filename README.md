@@ -15,7 +15,7 @@ Select any text, press **Ctrl+C twice**, and hear it in English. A small Windows
 
 ## Install
 
-Download `Altype-Setup-<version>.exe` from the [releases](https://github.com/ikstro/2talker/releases) and run it. The installer is not signed (Altype is a free app), so Windows warns once: **More info → Run anyway**. Altype starts with Windows, lives in the tray and updates itself from the releases. It installs over 2Talker and takes its words and settings along.
+Download `Altype-Setup-<version>.exe` from the [releases](https://github.com/ikstro/altype/releases) and run it. The installer is not signed (Altype is a free app), so Windows warns once: **More info → Run anyway**. Altype starts with Windows, lives in the tray and updates itself from the releases. It installs over 2Talker and takes its words and settings along.
 
 The first translation downloads the translator for your language (about 85 MB for Russian ↔ English), once.
 
