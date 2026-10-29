@@ -48,7 +48,7 @@ const esc = (w: BrowserWindow) => js(w, `window.dispatchEvent(new KeyboardEvent(
 const colors = () => (nativeTheme.shouldUseDarkColors ? { bg: '#202020', surface: '#2b2b2b' } : { bg: '#f3f3f3', surface: '#fbfbfb' })
 
 // The pages' answers from "main": copies, Chrome, the speech engine's streaming session.
-const heard = 'Привет, это проверка диктовки: бейдж показывает фразу целиком, пока её слышит движок'
+const heard = 'РџСЂРёРІРµС‚, СЌС‚Рѕ РїСЂРѕРІРµСЂРєР° РґРёРєС‚РѕРІРєРё: Р±РµР№РґР¶ РїРѕРєР°Р·С‹РІР°РµС‚ С„СЂР°Р·Сѓ С†РµР»РёРєРѕРј, РїРѕРєР° РµС‘ СЃР»С‹С€РёС‚ РґРІРёР¶РѕРє'
 ipcMain.handle('host-call', async (_e, r: { call: string; method?: string; route?: string }) => {
   log.push(`host-call ${JSON.stringify(r).slice(0, 120)}`)
   if (r.call === 'speech') {
@@ -67,45 +67,54 @@ ipcMain.on('to-host', (e, m: { type: string; px?: number }) => {
   if ((m.type === 'dictationHeight' || m.type === 'trayHeight') && m.px) heights.set(e.sender.id, m.px)
 })
 
-async function appShots(theme: 'dark' | 'light', wide = false): Promise<void> {
+async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> {
   nativeTheme.themeSource = theme
-  const size = wide ? [1100, 720] : [640, 620]
+  // The usual window, and a narrow one where the sidebar keeps only its icons.
+  const size = narrow ? [640, 620] : [960, 700]
   const w = win('app.html', size[0]!, size[1]!, colors().bg)
   await new Promise<void>(r => w.webContents.once('did-finish-load', () => r()))
   await sleep(400)
   const v = appView()
   send(w, { type: 'app', view: v })
-  send(w, { type: 'appWindow', maximized: wide })
+  send(w, { type: 'appWindow', maximized: false })
   await sleep(700)
-  const tag = (n: string) => `app-${theme}${wide ? '-wide' : ''}-${n}`
+  const tag = (n: string) => `app-${theme}${narrow ? '-narrow' : ''}-${n}`
   await shot(w, tag('home'))
-  const page = async (sel: string, name: string, subs: string[] = []) => {
-    log.push(`${name}: ${await click(w, sel)}`)
-    await sleep(800)
-    await shot(w, tag(name))
+  // A place from the sidebar, then each second-level page of it (Esc goes back).
+  const page = async (name: string, subs: string[] = [], label = name) => {
+    log.push(`${label}: ${await click(w, `.side [data-nav="${name}"]`)}`)
+    await sleep(500)
+    await shot(w, tag(label))
     for (const sub of subs) {
-      log.push(`${name}/${sub}: ${await click(w, `[data-sub="${sub}"]`)}`)
-      await sleep(600)
-      await shot(w, tag(`${name}-${sub}`))
-      await esc(w)
+      log.push(`${label}/${sub}: ${await click(w, `[data-sub="${sub}"]`)}`)
       await sleep(500)
+      await shot(w, tag(`${label}-${sub}`))
+      await esc(w)
+      await sleep(400)
     }
-    await esc(w)
-    await sleep(700)
   }
-  if (wide) {
-    await page('.act[data-page="transcribe"]', 'transcribe', ['vocabulary'])
-    await page('.nav [data-page="settings"]', 'settings')
+  const home = async () => (await click(w, '.side [data-nav="home"]'), sleep(400))
+  if (narrow) {
+    await page('keyboard', ['fixing'])
+    await page('settings')
   } else if (theme === 'dark') {
-    await page('.act[data-page="transcribe"]', 'transcribe', ['vocabulary', 'meet', 'model', 'speakers'])
-    await page('.act[data-page="dictate"]', 'dictate', ['recent', 'model'])
-    await page('.act[data-page="keyboard"]', 'keyboard', ['layouts', 'fixing', 'programs', 'learned', 'kept'])
-    await page('.nav [data-page="settings"]', 'settings', ['languages', 'engine', 'computer'])
-    await page('.act[data-page="listen"]', 'listen')
-    await page('.act[data-page="translate"]', 'translate', ['translations'])
-    await page('.act[data-page="screen"]', 'screen')
-    await page('.nav [data-page="words"]', 'words')
-    await page('.nav [data-page="about"]', 'about')
+    await page('listen')
+    await page('translate')
+    await page('screen')
+    await page('dictate', ['model'])
+    await page('transcribe', ['meet', 'model', 'speakers'])
+    await page('keyboard', ['fixing'])
+    for (const name of ['words', 'transcripts', 'translations', 'phrases', 'vocabulary', 'kept', 'learned', 'programs', 'layouts']) await page(name)
+    await page('settings', ['languages'])
+    for (const name of ['engine', 'computer', 'about']) await page(name)
+    // The search, and a find opened with its line lit.
+    log.push(`search: ${await js(w, `(() => { const f = document.querySelector('.find input'); f.value = 'caps'; f.dispatchEvent(new Event('input')); return 'ok' })()`)}`)
+    await sleep(500)
+    await shot(w, tag('search'))
+    log.push(`search find: ${await click(w, '.row.found')}`)
+    await sleep(300)
+    await shot(w, tag('search-found'))
+    await home()
     // Paused: the notice on Home.
     send(w, { type: 'app', view: appView({ paused: true }) })
     await sleep(500)
@@ -115,22 +124,26 @@ async function appShots(theme: 'dark' | 'light', wide = false): Promise<void> {
     stale.speech = { ...stale.speech, extensionShipped: '0.2.1' }
     send(w, { type: 'app', view: stale })
     await sleep(300)
-    await page('.act[data-page="transcribe"]', 'transcribe-stale', ['meet'])
+    await page('transcribe', ['meet'], 'transcribe-stale')
     // Who spoke when installed on the card; then the processor picked, so it offers to switch.
     const card = appView()
     card.speech = { ...card.speech, pack: { status: 'ready', parts: ['core', 'gpu', 'speakers'], nvidia: true, speakersOn: 'cuda' }, health: { ...card.speech.health!, diarization: 'ready', parts: { core: true, gpu: true, speakers: true } } }
     send(w, { type: 'app', view: card })
     await sleep(300)
-    await page('.act[data-page="transcribe"]', 'tr-installed', ['speakers'])
+    await home()
+    await page('transcribe', ['speakers'], 'tr-installed')
     const cpu = appView({ speakersDevice: 'cpu' })
     cpu.speech = { ...card.speech, speakers: { ...card.speech.speakers, on: 'cpu' } }
     send(w, { type: 'app', view: cpu })
     await sleep(300)
-    await page('.act[data-page="transcribe"]', 'tr-switch', ['speakers'])
+    await home()
+    await page('transcribe', ['speakers'], 'tr-switch')
   } else {
-    await page('.act[data-page="transcribe"]', 'transcribe', ['vocabulary'])
-    await page('.act[data-page="keyboard"]', 'keyboard', ['layouts'])
-    await page('.nav [data-page="settings"]', 'settings')
+    await page('transcribe')
+    await page('keyboard', ['fixing'])
+    await page('kept')
+    await page('settings')
+    await page('listen')
   }
   w.destroy()
 }
@@ -138,7 +151,7 @@ async function appShots(theme: 'dark' | 'light', wide = false): Promise<void> {
 /** The first-run setup: its four steps, Next pressed between them; Download starts nothing here (the host-call answers are stubs). */
 async function setupShots(theme: 'dark' | 'light'): Promise<void> {
   nativeTheme.themeSource = theme
-  const w = win('app.html', 640, 620, colors().bg)
+  const w = win('app.html', 960, 700, colors().bg)
   await new Promise<void>(r => w.webContents.once('did-finish-load', () => r()))
   await sleep(400)
   send(w, { type: 'app', view: appView({}, true) })

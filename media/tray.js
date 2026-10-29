@@ -62,6 +62,9 @@
     "house": '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />',
     "info": '<circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" />',
     "settings": '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" />',
+    "list-ordered": '<path d="M11 5h10" /> <path d="M11 12h10" /> <path d="M11 19h10" /> <path d="M4 4h1v5" /> <path d="M4 9h2" /> <path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" />',
+    "message-square-text": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" /> <path d="M7 11h10" /> <path d="M7 15h6" /> <path d="M7 7h8" />',
+    "arrow-left": '<path d="m12 19-7-7 7-7" /> <path d="M19 12H5" />',
     "file-audio": '<path d="M4 6.835V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-.343" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M2 19a2 2 0 0 1 4 0v1a2 2 0 0 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 0 1-4 0v-1a2 2 0 0 1 4 0" />',
     "users": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" />',
     "spell-check": '<path d="m20 15-5.5 5.5L12 18" /> <path d="m4 16 6-12 5.115 10.23" /> <path d="M6 12h8" />',
@@ -151,6 +154,9 @@
     );
     return row;
   }
+  function group(label, ...rows) {
+    return el("section", { class: "sec" }, el("div", { class: "grp" }, label), ...rows);
+  }
   function status(v) {
     if (v.paused) return el("span", { class: "st paused", title: "Keys and Ctrl+C twice are off" }, el("span", { class: "dot" }), "paused");
     switch (v.translator) {
@@ -173,33 +179,25 @@
       "div",
       { class: "panel" },
       el("header", { class: "head" }, brand, el("div", { class: "side" }, status(v), open)),
-      el(
-        "section",
-        { class: "sec" },
+      group(
+        "Actions",
         command("listenCopied", "volume-2", "Listen to the copied text", "listenCopied", v.keys.listenCopied),
         command("translateCopied", "languages", "Translate the copied text", "translateCopied"),
         command("typeToTranslate", "type", "Type to translate\u2026", "typeToTranslate"),
         command("listenScreen", "scan", "Listen to a screen snip", "listenScreen", v.keys.snipListen),
-        command("translateScreen", "scan", "Translate a screen snip", "translateScreen", v.keys.snipTranslate)
+        command("translateScreen", "scan", "Translate a screen snip", "translateScreen", v.keys.snipTranslate),
+        v.speech.installed ? command("note", "notebook-pen", v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey) : null,
+        v.speech.installed ? command("transcripts", "file-text", "Transcripts", "transcripts") : null
       ),
-      v.speech.installed ? el(
-        "section",
-        { class: "sec" },
-        command("note", "notebook-pen", v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey),
-        command("transcripts", "file-text", "Transcripts", "transcripts")
-      ) : null,
-      el(
-        "section",
-        { class: "sec sw" },
-        el("div", { class: "grp" }, "Keyboard"),
+      group(
+        "Keyboard",
         toggle("autoFix", "spell-check", "Fix the layout as I type", v.autoFix),
         v.keys.switch ? toggle("switchOn", "keyboard", `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
         toggle("layoutBadge", "type", "Show the layout by the cursor", v.layoutBadge),
         toggle("trayLayout", "keyboard", "Show the layout in the tray", v.trayLayout)
       ),
-      el("section", { class: "sec sw" }, el("div", { class: "grp" }, "Listen"), toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)),
-      el("section", { class: "sec sw" }, toggle("paused", "pause", "Pause Altype", v.paused)),
-      el("section", { class: "sec" }, command("settings", "settings", "Settings", "settings"), command("quit", "power", "Quit", "quit"))
+      group("Listen", toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)),
+      group("Altype", toggle("paused", "pause", "Pause Altype", v.paused), command("settings", "settings", "Settings", "settings"), command("quit", "power", "Quit", "quit"))
     );
     root.replaceChildren(panel);
     if (focused) focusRow(root.querySelector(`[data-id="${focused}"]`));

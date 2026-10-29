@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url'
 const NAMES = [
   // actions and pages
   'volume-2', 'languages', 'scan', 'mic', 'audio-lines', 'keyboard', 'file-text', 'notebook-pen', 'book-open', 'house', 'info', 'settings',
+  // the sidebar
+  'list-ordered', 'message-square-text', 'arrow-left',
   // rows
   'file-audio', 'users', 'spell-check', 'video', 'cpu', 'folder', 'copy', 'external-link', 'rotate-cw', 'play', 'pause', 'power', 'list', 'monitor', 'clock', 'lock', 'download', 'globe', 'type', 'message-square', 'star', 'search', 'trash-2', 'circle-alert', 'circle-check', 'check', 'link', 'memory-stick', 'hard-drive', 'laptop', 'sparkles', 'wand-sparkles', 'thumbs-up', 'loader',
   // controls

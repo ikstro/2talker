@@ -76,27 +76,203 @@ button:disabled {
   background: var(--border) padding-box;
 }
 
-/* ---------------------------------------------------------------- window */
+/* ---------------------------------------------------------------- window
+   The sidebar on the left, the column of the bar and the content on the
+   right, both on the window's ground, a hairline between them (Claude's
+   settings are the reference). */
 
 .win {
-  /* The title bar's height: the header is the window's own frame. */
-  --bar: 56px;
+  /* The bar's height, and the sidebar's width. */
+  --bar: 52px;
+  --sw: 240px;
   position: relative;
+  display: grid;
+  grid-template-columns: var(--sw) minmax(0, 1fr);
   width: 100%;
   height: 100%;
   overflow: hidden;
   background: var(--bg);
 }
 
-/* The window's title bar on every view, above the pages (which grow under it):
-   dragged by its empty parts; a double click maximizes, as Windows does. */
+/* ---- the sidebar: the mark, the search, every place in groups */
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 10px 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: var(--bar);
+  padding: 0 8px;
+  -webkit-app-region: drag;
+}
+
+.wm {
+  font: 750 17px / 1 var(--font);
+  letter-spacing: -0.03em;
+  color: var(--strong);
+}
+
+.find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 32px;
+  margin-bottom: 8px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--muted);
+  cursor: text;
+}
+
+.find:focus-within {
+  border-color: var(--accent);
+}
+
+.find input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+}
+
+.find input::placeholder {
+  color: var(--muted);
+}
+
+.find .key {
+  height: 18px;
+  min-width: 0;
+  padding: 0 5px;
+  border-bottom-width: 1px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.tree {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 0 6px;
+  overflow: hidden auto;
+}
+
+.tree::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tree::-webkit-scrollbar-thumb {
+  border-width: 1px;
+}
+
+.gl {
+  margin: 16px 10px 4px;
+  font: 500 var(--t-caption) / 16px var(--font);
+  color: var(--muted);
+}
+
+.it {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  color: var(--text);
+  font: 450 14px / 1 var(--font);
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color 0.12s;
+}
+
+.it .lu {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.it:hover {
+  background: var(--hover);
+}
+
+.it.on {
+  background: var(--selected);
+  color: var(--strong);
+  font-weight: 550;
+}
+
+.it.on .lu {
+  color: var(--strong);
+}
+
+.it .lb {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.it .v {
+  font: 500 11.5px / 1 var(--mono);
+  color: var(--muted);
+}
+
+/* A transcript being made: a pulsing dot and how far it is, by Transcripts. */
+.it .v.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dot 1.6s ease-in-out infinite;
+}
+
+@keyframes dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- the column: the bar, then Home or a page */
+.main {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border-soft);
+  /* The content keeps to one column of 760 px however wide the window is. */
+  --side: max(32px, calc((100% - 760px) / 2));
+}
+
+/* The bar: where the person is, the action's keys, the window's buttons;
+   dragged by its empty parts, a double click maximizes, as Windows does. */
 .top {
   position: relative;
   z-index: 10;
   display: flex;
   align-items: center;
+  gap: 10px;
   height: var(--bar);
-  padding: 0 10px 0 24px;
+  padding: 0 10px 0 20px;
+  border-bottom: 1px solid var(--border-soft);
   -webkit-app-region: drag;
 }
 
@@ -104,12 +280,77 @@ button:disabled {
   -webkit-app-region: no-drag;
 }
 
-/* Minimize and close: the card's header buttons. */
+.top .gap {
+  flex: 1;
+}
+
+.top .back {
+  margin-left: -8px;
+}
+
+.ptitle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font: 600 15px / 1 var(--font);
+  color: var(--strong);
+  white-space: nowrap;
+}
+
+/* On a second-level page the title is a crumb: the parent, quiet and a way back, then the page. */
+.pcrumb {
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+}
+
+.pcrumb:hover {
+  color: var(--text);
+}
+
+.psep {
+  margin: 0 8px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.pcap {
+  min-width: 0;
+  overflow: hidden;
+  font: 400 var(--t-small) / 1 var(--font);
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The action's keys, quiet, before the window's buttons. */
+.pkeys {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+}
+
+.pkeys .kl {
+  margin-left: 6px;
+  font: 400 var(--t-caption) / 1 var(--font);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pkeys .kl:first-child {
+  margin-left: 0;
+}
+
+/* Minimize, maximize and close: the card's header buttons. */
 .wbtns {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: 10px;
+}
+
+.pkeys:not(:empty) + .wbtns {
+  margin-left: 6px;
   padding-left: 10px;
   border-left: 1px solid var(--border-soft);
 }
@@ -153,77 +394,96 @@ svg.glyph {
   stroke-linejoin: round;
 }
 
-.brand {
+/* A narrow window: the sidebar keeps its icons, each named in its tooltip. */
+@media (max-width: 760px) {
+  .win {
+    --sw: 60px;
+  }
+
+  .side {
+    align-items: center;
+    padding: 0 8px 10px;
+  }
+
+  .brand {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .brand .wm,
+  .find input,
+  .find .key,
+  .it .lb,
+  .it .v:not(.live) {
+    display: none;
+  }
+
+  .find {
+    justify-content: center;
+    width: 40px;
+    padding: 0;
+  }
+
+  .gl {
+    width: 24px;
+    height: 1px;
+    margin: 10px auto;
+    overflow: hidden;
+    background: var(--border);
+    color: transparent;
+  }
+
+  .it {
+    position: relative;
+    justify-content: center;
+    width: 40px;
+    padding: 0;
+  }
+
+  .it .v.live {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    font-size: 0;
+  }
+
+  .pkeys,
+  .pcap {
+    display: none;
+  }
+
+  .pkeys:not(:empty) + .wbtns {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* The setup: no sidebar and nothing in the bar but the window's buttons; the mark stands in the setup's head. */
+.win.setup {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.top .bb {
+  display: none;
+  padding: 0;
+}
+
+.win.setup .top .bb {
   display: flex;
-  align-items: center;
-  gap: 7px;
 }
 
-.wm {
-  font: 750 17px / 1 var(--font);
-  letter-spacing: -0.03em;
-  color: var(--strong);
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  padding-left: 20px;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: var(--r-sm);
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  transition: background-color 0.12s, color 0.12s;
-}
-
-.pill:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-
-.pill.on {
-  background: var(--selected);
-  color: var(--strong);
-}
-
-.pill.pressed {
-  background: var(--overlay);
-  color: var(--strong);
-}
-
-.pill .codicon {
-  font-size: 15px;
-}
-
-.pill .lu {
-  width: 16px;
-  height: 16px;
-}
-
-.pill .n {
-  font: 500 var(--t-caption) / 1 var(--mono);
-  color: var(--muted);
-}
-
-.pill .n:empty {
+.win.setup .side,
+.win.setup .top > :not(.wbtns, .gap, .bb) {
   display: none;
 }
 
-.nav .gap {
-  width: 1px;
-  height: 16px;
-  margin: 0 6px;
-  background: var(--border-soft);
+.win.setup .main {
+  border-left: 0;
+}
+
+.win.setup .top {
+  border-bottom: 0;
 }
 
 /* ---------------------------------------------------------------- home */
@@ -234,8 +494,6 @@ svg.glyph {
   display: flex;
   flex-direction: column;
   overflow: hidden auto;
-  /* The content keeps to one column on a wide window: the side margin grows past 800 px. */
-  --side: max(32px, calc((100% - 800px) / 2));
 }
 
 .head {
@@ -320,7 +578,7 @@ svg.glyph {
   padding: 0;
 }
 
-/* An action is a card: its icon, its name and what it does, its keys, a chevron. */
+/* An action is a line: its icon, its name and what it does, its keys, a chevron; a hairline over the next one. */
 .act {
   position: relative;
   display: grid;
@@ -329,18 +587,30 @@ svg.glyph {
   gap: 0 16px;
   /* Six rows fill a window of the usual height without a scroll bar. */
   min-height: min(76px, calc((100vh - 236px) / 6));
-  margin-bottom: 4px;
-  padding: 8px 14px 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
+  margin: 0 -12px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: background-color 0.12s;
 }
 
-.act:hover,
-.act.pressed {
-  background: var(--raised);
+.act + .act::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border-soft);
+}
+
+.act:hover {
+  background: var(--hover);
+}
+
+.act:hover::before,
+.act:hover + .act::before {
+  opacity: 0;
 }
 
 .act > .lu {
@@ -445,6 +715,7 @@ svg.glyph {
 /* ---------------------------------------------------------------- the moment */
 
 .win.playing .home,
+.win.playing .side,
 .win.playing .top {
   pointer-events: none;
 }
@@ -454,7 +725,6 @@ svg.glyph {
   inset: 0;
   z-index: 4;
   pointer-events: none;
-  --side: max(32px, calc((100% - 800px) / 2));
 }
 
 .eyebrow {
@@ -594,120 +864,25 @@ svg.glyph {
 }
 
 /* ---------------------------------------------------------------- pages
-   What was tapped grows into the page: a Home row (its title and keys become
-   the page's header) or a pill at the top. Back folds it back. */
-
-
-.pg {
-  position: absolute;
-  inset: 0;
-  z-index: 9;
-  visibility: hidden;
-  pointer-events: none;
-  overflow: hidden;
-  --side: max(32px, calc((100% - 800px) / 2));
-}
-
-.win.page-open .pg {
-  visibility: visible;
-  pointer-events: auto;
-}
-
-.pgg {
-  position: absolute;
-  inset: var(--bar) 0 0;
-  background: var(--surface);
-  box-shadow: 0 0 0 1px var(--border-soft);
-}
-
-.pback {
-  position: absolute;
-  left: calc(var(--side) - 14px);
-  top: calc(var(--bar) + 8px);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 5px 0 8px;
-  border-radius: var(--r-sm);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.pback:hover {
-  background: var(--hover);
-}
-
-.pback .key {
-  margin-left: 4px;
-  color: var(--muted);
-}
-
-.pth {
-  position: absolute;
-  left: var(--side);
-  top: calc(var(--bar) + 48px);
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  white-space: nowrap;
-}
-
-.ptitle {
-  font: 600 28px / 34px var(--font);
-  letter-spacing: -0.02em;
-  color: var(--strong);
-  transform-origin: 0 0;
-}
-
-/* On a second-level page the title is a crumb: the parent, quiet and a way back, then the page. */
-.pcrumb {
-  color: var(--muted);
-  font: inherit;
-  font-weight: 500;
-  letter-spacing: inherit;
-}
-
-.pcrumb:hover {
-  color: var(--text);
-}
-
-.psep {
-  margin: 0 8px;
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.pcap {
-  font: 400 var(--t-small) / 1 var(--font);
-  color: var(--muted);
-}
-
-.pkeys {
-  position: absolute;
-  right: calc(var(--side) + 30px);
-  top: calc(var(--bar) + 65px);
-  translate: 0 -50%;
-}
-
-.pline {
-  position: absolute;
-  left: var(--side);
-  right: var(--side);
-  top: calc(var(--bar) + 98px);
-  height: 1px;
-  background: var(--border-soft);
-  transform-origin: 0 0;
-}
+   A page under the bar, in Home's place: sections with a bold heading, lines
+   split by hairlines, each line's control on the right. */
 
 .pbody {
   position: absolute;
-  inset: calc(var(--bar) + 104px) 0 0;
-  /* The scroll bar sits in the right margin: cards end where the header's rule does. */
-  padding: 6px calc(var(--side) - 12px) 24px var(--side);
+  inset: var(--bar) 0 0;
+  /* The scroll bar sits in the right margin: lines end where Home's do. */
+  padding: 22px calc(var(--side) - 12px) 40px var(--side);
   overflow: hidden auto;
   scrollbar-gutter: stable;
+  visibility: hidden;
+}
+
+.win.page-open .pbody {
+  visibility: visible;
+}
+
+.win.page-open .home {
+  visibility: hidden;
 }
 
 /* The ghost of the body that slides away when a second-level page opens or closes. */
@@ -715,67 +890,88 @@ svg.glyph {
   pointer-events: none;
 }
 
-/* A group's name over its cards. */
+/* A section's heading over its lines. */
 .grp {
-  margin: 22px 0 8px;
-  font: 600 13.5px / 1.3 var(--font);
+  margin: 34px 0 4px;
+  font: 600 16px / 1.3 var(--font);
   color: var(--strong);
 }
 
 .grp:first-child {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .grp .n {
   margin-left: 8px;
-  font-weight: 400;
+  font: 500 var(--t-caption) / 1 var(--mono);
   color: var(--muted);
 }
 
 .grp .link {
   float: right;
+  margin-top: 2px;
 }
 
-/* A line of a page is a card: an icon, what it is with a note under it, its control. */
+/* A line: what it is with a note under it, its control on the right; a hairline over the next one. */
 .row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
-  width: 100%;
+  width: calc(100% + 24px);
   min-height: 56px;
-  margin-bottom: 4px;
-  padding: 10px 14px 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
+  margin: 0 -12px;
+  padding: 11px 12px;
+  border-radius: var(--r-md);
   font-size: 14px;
   color: var(--strong);
   text-align: left;
+  transition: background-color 0.12s;
 }
 
-.row > .lu {
-  color: var(--muted);
+.row + .row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border-soft);
+  transition: opacity 0.12s;
+}
+
+/* The icons stay in the sidebar and on Home's actions; a line is its words. */
+.row > svg.lu:first-child:not(.chev) {
+  display: none;
 }
 
 .row .l {
   flex: 1;
   min-width: 0;
+  font-weight: 500;
 }
 
 .row .l small {
   display: block;
   margin-top: 2px;
-  font: 400 var(--t-caption) / 1.4 var(--font);
+  font: 400 13px / 1.45 var(--font);
   color: var(--muted);
+}
+
+/* A line found by the search, lit where it is. */
+.row.flash {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+mark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: inherit;
 }
 
 /* ---------------------------------------------------------------- the setup
    A fresh install: four steps in Home's place, the pills of the bar put away
    until it is over. The head and the foot stay; the steps' cards scroll. */
-
-.win.setup .nav {
-  visibility: hidden;
-}
 
 .home.setup {
   overflow: hidden;
@@ -883,6 +1079,23 @@ svg.glyph {
   stroke-width: 2.5;
 }
 
+/* The two lines that stay framed: Home's notice and the setup's sum. */
+.row.notice,
+.row.total {
+  width: 100%;
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.row.notice::before,
+.row.total::before,
+.row.notice + .row::before,
+.row.total + .row::before {
+  display: none;
+}
+
 /* The sum of it all, and the verdict on this computer: a card on the accent's tint. */
 .row.total {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
@@ -924,7 +1137,12 @@ svg.glyph {
 }
 
 .row.navc:hover {
-  background: var(--raised);
+  background: var(--hover);
+}
+
+.row:is(.navc, .trow):hover::before,
+.row:is(.navc, .trow):hover + .row::before {
+  opacity: 0;
 }
 
 .row .v {
@@ -956,7 +1174,7 @@ svg.glyph {
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 14px 12px;
 }
 
 .row.add .fields {
@@ -998,7 +1216,7 @@ svg.glyph {
 }
 
 .trow:hover {
-  background: var(--raised);
+  background: var(--hover);
 }
 
 .seg {
@@ -1047,18 +1265,20 @@ svg.glyph {
   appearance: none;
   max-width: 100%;
   height: 32px;
-  padding: 0 30px 0 12px;
-  border: 1px solid var(--border);
+  padding: 0 30px 0 10px;
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--strong);
-  font-size: 13px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: right;
   text-overflow: ellipsis;
   cursor: pointer;
 }
 
-.sel select:hover {
-  background: var(--raised);
+.sel select:hover,
+.sel select:focus-visible {
+  background: var(--hover);
 }
 
 .sel option {
@@ -1077,11 +1297,11 @@ svg.glyph {
 .tg {
   position: relative;
   flex: none;
-  width: 40px;
+  width: 36px;
   height: 20px;
-  border: 1px solid var(--muted);
+  border: 1px solid var(--border);
   border-radius: var(--r-pill);
-  background: transparent;
+  background: var(--overlay);
   transition: background-color 0.15s, border-color 0.15s;
 }
 
@@ -1106,7 +1326,7 @@ svg.glyph {
   top: 2px;
   width: 14px;
   height: 14px;
-  transform: translateX(19px);
+  transform: translateX(15px);
   background: var(--on-accent);
 }
 
@@ -1547,11 +1767,20 @@ button.chip:hover {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 2px 16px;
-  margin-bottom: 4px;
-  padding: 12px 16px 13px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
+  margin: 0 -12px;
+  padding: 12px 12px 13px;
+  border-radius: var(--r-md);
+}
+
+.wi + .wi::before,
+.wl li + li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border-soft);
 }
 
 .wh {
@@ -2064,7 +2293,6 @@ button.chip:hover {
 
 .tl li {
   position: relative;
-  margin-bottom: 4px;
 }
 
 .tl .empty {
@@ -2074,19 +2302,29 @@ button.chip:hover {
 }
 
 .ti {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
-  padding: 10px 14px 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
+  width: calc(100% + 24px);
+  margin: 0 -12px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
   text-align: left;
 }
 
+li + li > .ti::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border-soft);
+}
+
 .ti:hover {
-  background: var(--raised);
+  background: var(--hover);
 }
 
 .ti .src {

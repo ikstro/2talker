@@ -1,8 +1,9 @@
-// The tray's panel, in place of Windows' menu: the way into the app window at
-// the top (the brand, or Open) with Altype's state, Altype's commands for the
-// copied text, a text to type and a piece of the screen with their keys, the
-// speech ones once the engine is in, the quick settings in groups (the
-// keyboard, listening, the pause), then Settings and Quit. A menu
+// The tray's panel, in place of Windows' menu, drawn as the window's sidebar:
+// the way into the app window at the top (the brand, or Open) with Altype's
+// state, then named groups: Actions (the copied text, a text to type, a piece
+// of the screen, with their keys; the note and Transcripts once the engine is
+// in), the quick settings of the Keyboard and Listen, and Altype (the pause,
+// Settings, Quit). A menu
 // in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere puts it away
 // (the main process hides it, and after any command). Everything shown comes
 // in one `tray` message, sent again whenever any of it changes.
@@ -64,6 +65,11 @@ function toggle(id: Switch, icon: LucideName, label: string, on: boolean): HTMLE
   return row
 }
 
+/** A group of rows under its name, as the sidebar's groups are. */
+function group(label: string, ...rows: (HTMLElement | null)[]): HTMLElement {
+  return el('section', { class: 'sec' }, el('div', { class: 'grp' }, label), ...rows)
+}
+
 /** Altype's state in a few words: paused, or whether the translator for the person's language is here; nothing when there is nothing to say. */
 function status(v: TrayView): HTMLElement | null {
   if (v.paused) return el('span', { class: 'st paused', title: 'Keys and Ctrl+C twice are off' }, el('span', { class: 'dot' }), 'paused')
@@ -89,35 +95,25 @@ function render(v: TrayView): void {
     'div',
     { class: 'panel' },
     el('header', { class: 'head' }, brand, el('div', { class: 'side' }, status(v), open)),
-    el(
-      'section',
-      { class: 'sec' },
+    group(
+      'Actions',
       command('listenCopied', 'volume-2', 'Listen to the copied text', 'listenCopied', v.keys.listenCopied),
       command('translateCopied', 'languages', 'Translate the copied text', 'translateCopied'),
       command('typeToTranslate', 'type', 'Type to translate…', 'typeToTranslate'),
       command('listenScreen', 'scan', 'Listen to a screen snip', 'listenScreen', v.keys.snipListen),
       command('translateScreen', 'scan', 'Translate a screen snip', 'translateScreen', v.keys.snipTranslate),
+      v.speech.installed ? command('note', 'notebook-pen', v.speech.recording ? 'Save the note' : 'New note', 'note', v.speech.noteKey) : null,
+      v.speech.installed ? command('transcripts', 'file-text', 'Transcripts', 'transcripts') : null,
     ),
-    v.speech.installed
-      ? el(
-          'section',
-          { class: 'sec' },
-          command('note', 'notebook-pen', v.speech.recording ? 'Save the note' : 'New note', 'note', v.speech.noteKey),
-          command('transcripts', 'file-text', 'Transcripts', 'transcripts'),
-        )
-      : null,
-    el(
-      'section',
-      { class: 'sec sw' },
-      el('div', { class: 'grp' }, 'Keyboard'),
+    group(
+      'Keyboard',
       toggle('autoFix', 'spell-check', 'Fix the layout as I type', v.autoFix),
       v.keys.switch ? toggle('switchOn', 'keyboard', `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
       toggle('layoutBadge', 'type', 'Show the layout by the cursor', v.layoutBadge),
       toggle('trayLayout', 'keyboard', 'Show the layout in the tray', v.trayLayout),
     ),
-    el('section', { class: 'sec sw' }, el('div', { class: 'grp' }, 'Listen'), toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy)),
-    el('section', { class: 'sec sw' }, toggle('paused', 'pause', 'Pause Altype', v.paused)),
-    el('section', { class: 'sec' }, command('settings', 'settings', 'Settings', 'settings'), command('quit', 'power', 'Quit', 'quit')),
+    group('Listen', toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy)),
+    group('Altype', toggle('paused', 'pause', 'Pause Altype', v.paused), command('settings', 'settings', 'Settings', 'settings'), command('quit', 'power', 'Quit', 'quit')),
   )
   root.replaceChildren(panel)
   // A change while the panel is open keeps the focus where it was.

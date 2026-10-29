@@ -1,20 +1,5 @@
 "use strict";
 (() => {
-  // src/hardware.ts
-  function nvidiaCard(p) {
-    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
-  }
-  function mainCard(p) {
-    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
-  }
-  function shortCpu(name) {
-    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
-  }
-  function cardText(g) {
-    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
-    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
-  }
-
   // src/natural.ts
   var NATURAL_PREFIX = "natural:";
   var NATURAL_VOICES = [
@@ -105,8 +90,8 @@
     const name = (mod) => mod === "Control" ? "Ctrl" : mod === "Super" ? "Win" : mod;
     return hotkey.split("+").map((part) => {
       const [key, times] = part.split("*");
-      const side = /^(Left|Right)(Control|Shift|Alt|Super)$/.exec(key ?? "");
-      if (side) return `${side[1]} ${name(side[2])}${times === "2" ? " twice" : ""}`;
+      const side2 = /^(Left|Right)(Control|Shift|Alt|Super)$/.exec(key ?? "");
+      if (side2) return `${side2[1]} ${name(side2[2])}${times === "2" ? " twice" : ""}`;
       if (part === "CapsLock") return "Caps Lock";
       if (part === "ScrollLock") return "Scroll Lock";
       if (part === "MouseBack") return "Mouse Back";
@@ -344,6 +329,9 @@
     "house": '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />',
     "info": '<circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" />',
     "settings": '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" />',
+    "list-ordered": '<path d="M11 5h10" /> <path d="M11 12h10" /> <path d="M11 19h10" /> <path d="M4 4h1v5" /> <path d="M4 9h2" /> <path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" />',
+    "message-square-text": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" /> <path d="M7 11h10" /> <path d="M7 15h6" /> <path d="M7 7h8" />',
+    "arrow-left": '<path d="m12 19-7-7 7-7" /> <path d="M19 12H5" />',
     "file-audio": '<path d="M4 6.835V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-.343" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M2 19a2 2 0 0 1 4 0v1a2 2 0 0 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 0 1-4 0v-1a2 2 0 0 1 4 0" />',
     "users": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" />',
     "spell-check": '<path d="m20 15-5.5 5.5L12 18" /> <path d="m4 16 6-12 5.115 10.23" /> <path d="M6 12h8" />',
@@ -786,6 +774,21 @@
     ]
   };
 
+  // src/hardware.ts
+  function nvidiaCard(p) {
+    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function mainCard(p) {
+    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function shortCpu(name) {
+    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
+  }
+  function cardText(g) {
+    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
+    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
+  }
+
   // src/speechplan.ts
   var MODELS = models_default.models;
   var SPEAKERS = models_default.speakers;
@@ -1003,10 +1006,10 @@
       const keeps = s.installed.core + (gpu ? s.installed.gpu : 0) + first.mb;
       const needs = Math.round((keeps + mb) * 1.1);
       const short = s.disk.freeMb > 0 && s.disk.freeMb < needs;
-      const go = () => post({ type: "installSpeech", parts: gpu ? ["core", "gpu"] : ["core"] });
+      const go2 = () => post({ type: "installSpeech", parts: gpu ? ["core", "gpu"] : ["core"] });
       const failed = s.pack.status === "failed";
       const card2 = nvidiaCard(s.device);
-      const download = btn(failed ? "Try again" : "Download", go, "primary");
+      const download = btn(failed ? "Try again" : "Download", go2, "primary");
       download.disabled = short;
       return [
         row(
@@ -1261,12 +1264,12 @@
     }
     return out;
   }
-  function speakersMissing(v, go) {
+  function speakersMissing(v, go2) {
     if (!installed(v)) return null;
     const state = v.speech.health?.diarization;
     if (hasPart(v, "speakers") && state !== "needs-token" && state !== "bad-token" && state !== "no-access" && state !== "failed") return null;
     const why = !hasPart(v, "speakers") ? "Speakers are not told apart yet: their part is not downloaded." : "Speakers are not told apart yet: a Hugging Face key is needed.";
-    return aside("users", why, " ", linkBtn("Set up", go));
+    return aside("users", why, " ", linkBtn("Set up", go2));
   }
 
   // src/webview/setup.ts
@@ -1295,7 +1298,7 @@
     const c = choice ??= recommendedChoice(v);
     const r = recommend(v);
     const body = step === 1 ? languageStep(v, h) : step === 2 ? computerStep(v, h, c, r) : step === 3 ? needStep(v, h, c, r) : downloadStep(v, h, c);
-    const go = (to) => {
+    const go2 = (to) => {
       step = Math.max(1, Math.min(4, to));
       h.redraw();
     };
@@ -1304,10 +1307,10 @@
     const download = () => {
       start(v, h, c);
       started = true;
-      go(4);
+      go2(4);
     };
     const room = step === 3 ? cost(c, v).fits : true;
-    const next = step === 3 ? btn([lucide("download", "s"), "Download"], download, "primary") : step === 4 ? btn("Finish", finish, "primary") : btn(["Next", lucide("chevron-right", "s")], () => go(step + 1), "primary");
+    const next = step === 3 ? btn([lucide("download", "s"), "Download"], download, "primary") : step === 4 ? btn("Finish", finish, "primary") : btn(["Next", lucide("chevron-right", "s")], () => go2(step + 1), "primary");
     if (!room) next.disabled = true;
     return [
       el(
@@ -1321,7 +1324,7 @@
       el(
         "div",
         { class: "sfoot" },
-        step > 1 && !(step === 4 && started) ? linkBtn("Back", () => go(step - 1)) : null,
+        step > 1 && !(step === 4 && started) ? linkBtn("Back", () => go2(step - 1)) : null,
         el("span", { class: "gap" }),
         step < 4 ? linkBtn("Skip for now", skip) : null,
         next
@@ -2353,7 +2356,7 @@
     window.setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }));
   }
   function utterances(t) {
-    const many = Object.keys(t.speakers).length > 1;
+    const many2 = Object.keys(t.speakers).length > 1;
     const list2 = el("div", { class: "utts" });
     t.utterances.forEach((u, i) => {
       const first = i === 0 || t.utterances[i - 1]?.speaker !== u.speaker;
@@ -2377,7 +2380,7 @@
         }
       });
       text.textContent = u.text;
-      const who = many && first ? el("button", { class: "who", "data-speaker": u.speaker, title: "Another speaker" }, t.speakers[u.speaker]?.name ?? u.speaker) : null;
+      const who = many2 && first ? el("button", { class: "who", "data-speaker": u.speaker, title: "Another speaker" }, t.speakers[u.speaker]?.name ?? u.speaker) : null;
       who?.addEventListener("click", (event) => (event.stopPropagation(), speakerMenu(t, i, who)));
       list2.append(
         el(
@@ -2453,16 +2456,16 @@
   function mark(t, at, follow2) {
     let lo = 0;
     let hi = t.utterances.length - 1;
-    let found = -1;
+    let found2 = -1;
     while (lo <= hi) {
       const mid = lo + hi >> 1;
-      if ((t.utterances[mid]?.start ?? 0) <= at + 0.3) found = mid, lo = mid + 1;
+      if ((t.utterances[mid]?.start ?? 0) <= at + 0.3) found2 = mid, lo = mid + 1;
       else hi = mid - 1;
     }
-    if (found === heard) return;
-    heard = found;
+    if (found2 === heard) return;
+    heard = found2;
     document.querySelector(".utt.now")?.classList.remove("now");
-    const node = document.querySelector(`.utt[data-i="${found}"]`);
+    const node = document.querySelector(`.utt[data-i="${found2}"]`);
     node?.classList.add("now");
     if (follow2 && node && !node.contains(document.activeElement)) node.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
@@ -2499,13 +2502,24 @@
     keyboard: "Keyboard",
     words: "Words",
     transcripts: "Transcripts",
+    translations: "Translations",
+    phrases: "Phrases",
+    vocabulary: "Words to spell",
+    kept: "Kept as typed",
+    learned: "Learned words",
+    programs: "Programs",
+    layouts: "Layouts",
     settings: "Settings",
-    about: "About"
+    engine: "Speech engine",
+    computer: "This computer",
+    about: "About",
+    search: "Search"
   };
   var view;
   var askedTab;
   var askedTranscript = "";
   var search = "";
+  var finding = "";
   var keyTrouble;
   var programOpen = "";
   var runningApps = [];
@@ -2515,16 +2529,15 @@
     return m ? parseFloat(m[1]) : void 0;
   };
   var FROZEN_T = frozenAt("t");
-  var FROZEN_PT = frozenAt("pt");
   var clamp = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
   var prog = (t, a, b) => clamp((t - a) / (b - a));
   var lerp = (a, b, p) => a + (b - a) * p;
   var spring = (x) => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.exp(-8 * x) * (Math.cos(8.5 * x) + 8 / 8.5 * Math.sin(8.5 * x));
   var pop = (x) => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.exp(-6.5 * x) * Math.cos(10 * x);
-  var pspring = (x) => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.exp(-9 * x) * (Math.cos(5 * x) + 1.8 * Math.sin(5 * x));
   var root = document.getElementById("root");
+  var mainCol = el("section", { class: "main" });
   function rel(node) {
-    const w = root.getBoundingClientRect();
+    const w = mainCol.getBoundingClientRect();
     const b = node.getBoundingClientRect();
     return { x: b.left - w.left, y: b.top - w.top, w: b.width, h: b.height };
   }
@@ -2611,17 +2624,76 @@
         };
     }
   }
-  var wordCount = el("span", { class: "n" });
-  var pill = (page, ...children) => el("button", page === "home" ? { class: "pill", "data-home": true, onclick: () => closePage() } : { class: "pill", "data-page": page, onclick: () => openPage(page) }, ...children);
-  var nav = el(
-    "nav",
-    { class: "nav" },
-    pill("home", el("span", { class: "lbl" }, "Home")),
-    pill("words", el("span", { class: "lbl" }, "Words"), wordCount),
-    pill("transcripts", el("span", { class: "lbl" }, "Transcripts")),
-    pill("about", el("span", { class: "lbl" }, "About")),
-    el("span", { class: "gap" }),
-    pill("settings", icon("settings"), el("span", { class: "lbl" }, "Settings"))
+  var many = (n) => n ? String(n) : "";
+  var NAV = [
+    { label: "", items: [{ page: "home", icon: "house", title: "Home" }] },
+    { label: "Actions", items: ACTIONS.map((a) => ({ page: a, icon: ICONS[a], title: TITLES[a] })) },
+    {
+      label: "Library",
+      items: [
+        { page: "words", icon: "book-open", title: "Words", value: (v) => many(v.words.length) },
+        { page: "transcripts", icon: "file-text", title: "Transcripts" },
+        { page: "translations", icon: "clock", title: "Translations", value: (v) => many(v.translations.length) },
+        { page: "phrases", icon: "message-square-text", title: "Phrases", value: (v) => many(v.dictation.recent.length) }
+      ]
+    },
+    {
+      label: "Your lists",
+      items: [
+        { page: "vocabulary", icon: "spell-check", title: "Words to spell", value: (v) => many(v.settings.vocabulary.length) },
+        { page: "kept", icon: "lock", title: "Kept as typed", value: (v) => many(v.settings.keepWords.length) },
+        { page: "learned", icon: "sparkles", title: "Learned words", value: (v) => many(v.learned.alwaysFix.length + v.learned.myWords.length) },
+        { page: "programs", icon: "monitor", title: "Programs", value: (v) => many(v.settings.apps.length) },
+        { page: "layouts", icon: "list-ordered", title: "Layouts", value: (v) => cycleOf(v).map((l) => l.short).join("\xB7") }
+      ]
+    },
+    {
+      label: "Altype",
+      items: [
+        { page: "settings", icon: "settings", title: "Settings" },
+        { page: "engine", icon: "hard-drive", title: "Speech engine" },
+        { page: "computer", icon: "cpu", title: "This computer" },
+        { page: "about", icon: "info", title: "About" }
+      ]
+    }
+  ];
+  var findField = el("input", {
+    type: "text",
+    placeholder: "Search settings",
+    spellcheck: "false",
+    autocomplete: "off",
+    "aria-label": "Search settings",
+    oninput: () => find(findField.value),
+    onkeydown: (event) => {
+      const key = event.key;
+      if (key === "Escape") {
+        event.preventDefault();
+        findField.value = "";
+        find("");
+        findField.blur();
+      } else if (key === "Enter") {
+        event.preventDefault();
+        pBody.querySelector(".row.found")?.click();
+      }
+    }
+  });
+  var tree = el("nav", { class: "tree" });
+  var navValues = /* @__PURE__ */ new Map();
+  for (const g of NAV) {
+    if (g.label) tree.append(el("div", { class: "gl" }, g.label));
+    for (const i of g.items) {
+      const value = el("span", { class: "v" });
+      navValues.set(i.page, value);
+      const page = i.page;
+      tree.append(el("button", { class: "it", "data-nav": page, title: i.title, onclick: () => page === "home" ? goHome() : go(page) }, lucide(i.icon), el("span", { class: "lb" }, i.title), value));
+    }
+  }
+  var side = el(
+    "aside",
+    { class: "side" },
+    el("div", { class: "brand" }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype")),
+    el("label", { class: "find", title: "Search settings (Ctrl+F)" }, lucide("search", "s"), findField, el("span", { class: "key" }, "Ctrl F")),
+    tree
   );
   var maxButton = el("button", { class: "icon-btn max", title: "Maximize", "aria-label": "Maximize", onclick: () => post({ type: "window", action: "maximize" }) }, glyph("maximize"));
   var winButtons = el(
@@ -2638,25 +2710,45 @@
     maxButton.setAttribute("aria-label", label);
     root.classList.toggle("maxed", maximized);
   }
-  var top = el("header", { class: "top" }, el("div", { class: "brand" }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype")), nav, winButtons);
-  var home = el("main", { class: "home" });
-  var pGround = el("div", { class: "pgg" });
-  var pBack = el("button", { class: "pback", onclick: () => back() }, icon("chevron-left"), "Back", el("span", { class: "key" }, "Esc"));
-  var pTitle = el("span", { class: "ptitle" });
+  var pBack = el("button", { class: "icon-btn back", title: "Back (Esc)", "aria-label": "Back", onclick: () => back() }, lucide("arrow-left", "s"));
+  var pTitle = el("div", { class: "ptitle" });
   var pCap = el("span", { class: "pcap" });
-  var pKeys = el("div", { class: "pkeys keys" });
-  var pLine = el("div", { class: "pline" });
+  var pKeys = el("div", { class: "pkeys" });
+  var barMark = el("div", { class: "brand bb" }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype"));
+  var top = el("header", { class: "top" }, barMark, pBack, pTitle, pCap, el("span", { class: "gap" }), pKeys, winButtons);
+  var home = el("main", { class: "home" });
   var pBody = el("div", { class: "pbody" });
-  var pg = el("section", { class: "pg", role: "dialog" }, pGround, pBack, el("div", { class: "pth" }, pTitle, pCap), pKeys, pLine, pBody);
-  root.append(top, home, pg);
+  mainCol.append(top, home, pBody);
+  root.append(side, mainCol);
+  var making;
   function updateNav() {
-    const n = view?.words.length ?? 0;
-    wordCount.textContent = n ? String(n) : "";
-    for (const b of nav.querySelectorAll(".pill")) {
-      const page = b.dataset.page;
-      b.classList.toggle("on", open && !isAction(open.name) ? page === open.name : b.hasAttribute("data-home"));
-    }
+    const lit = open?.name ?? "home";
+    for (const b of tree.querySelectorAll(".it")) b.classList.toggle("on", b.dataset.nav === lit);
+    const v = view;
+    if (!v) return;
+    for (const g of NAV) for (const i of g.items) if (i.value) navValues.get(i.page)?.replaceChildren(i.value(v));
+    const busy3 = running(v) ? v.speech.health?.busy : null;
+    const live = navValues.get("transcripts");
+    if (!live) return;
+    live.classList.toggle("live", !!busy3);
+    live.title = busy3 ? "A transcript is being made" : "";
+    live.replaceChildren(...busy3 ? [el("span", { class: "dot" }), making?.id === busy3 ? `${Math.round(making.progress * 100)}%` : ""] : []);
   }
+  async function followMaking() {
+    const id = view && running(view) ? view.speech.health?.busy : null;
+    if (!id) {
+      if (making) making = void 0, updateNav();
+      return;
+    }
+    if (document.hidden) return;
+    try {
+      const r = await api("GET", `/transcripts/${id}`);
+      making = r.row.status === "done" ? void 0 : { id, progress: r.row.progress };
+    } catch {
+    }
+    updateNav();
+  }
+  window.setInterval(() => void followMaking(), 3e3);
   function readiness(v) {
     const translator = {
       ready: "ready",
@@ -2673,7 +2765,7 @@
   }
   function homeRow(action, v) {
     const t = actionText(action, v);
-    const go = () => openPage(action);
+    const open2 = () => go(action);
     return el(
       "li",
       {
@@ -2681,10 +2773,10 @@
         "data-page": action,
         role: "button",
         tabindex: 0,
-        onclick: go,
+        onclick: open2,
         onkeydown: (event) => {
           const key = event.key;
-          if (key === "Enter" || key === " ") event.preventDefault(), go();
+          if (key === "Enter" || key === " ") event.preventDefault(), open2();
         }
       },
       lucide(ICONS[action]),
@@ -2726,14 +2818,8 @@
       el("p", { class: "foot" }, "Tap an action to change its keys.")
     ].filter((n) => n !== null);
   }
-  var homePending = false;
   function renderHome(force = false) {
-    if (!view) return;
-    if (moment || animating) {
-      homePending = true;
-      return;
-    }
-    homePending = false;
+    if (!view || moment) return;
     const next = el("div", {}, ...homeNodes(view));
     if (!force && next.innerHTML === home.innerHTML) return;
     home.replaceChildren(...next.childNodes);
@@ -2786,8 +2872,8 @@
     const sf = step2(1, s.fixKey, "fix"), st = step2(2, s.translateKey, "translate"), sl = step2(3, listenKey, "listen");
     const rail = el("div", { class: "rail" }, sf.node, st.node, sl.node);
     const stage = el("div", { class: "stage" }, eyebrow, t1, t2, line, line2, play, rail);
-    stage.style.top = `${Math.round(Math.max(-40, Math.min(80, (root.clientHeight - 620) / 2)))}px`;
-    root.append(stage);
+    stage.style.top = `${Math.round(Math.max(-40, Math.min(80, (mainCol.clientHeight - 620) / 2)))}px`;
+    mainCol.append(stage);
     for (const k of cells) {
       k.wa = k.a.getBoundingClientRect().width;
       k.wb = k.b.getBoundingClientRect().width;
@@ -2911,9 +2997,9 @@
       const p = T(0.1 + d);
       node.style.transform = t >= TRAVEL ? `translate(${(to.x - from.x) * p}px, ${(to.y - from.y) * p}px)` : "";
     }
-    const fade = 1 - prog(t, TRAVEL, TRAVEL + 0.25);
-    m.eyebrow.style.opacity = String(fade);
-    for (const s of m.smalls) s.style.opacity = String(fade);
+    const fade2 = 1 - prog(t, TRAVEL, TRAVEL + 0.25);
+    m.eyebrow.style.opacity = String(fade2);
+    for (const s of m.smalls) s.style.opacity = String(fade2);
     h.rows.forEach((row2, i) => {
       const p = spring(prog(t, TRAVEL + 0.22 + i * 0.06, TRAVEL + 0.92 + i * 0.06));
       setStyle(row2, clamp(p * 1.3), `translateY(${(1 - p) * 14}px)`);
@@ -2939,7 +3025,7 @@
   function playMoment(markSeen, at) {
     if (!view) return;
     if (moment) finishMoment();
-    if (open) closePage(false);
+    closePage();
     const v = view;
     void document.fonts.ready.then(() => {
       if (moment) return;
@@ -2969,163 +3055,98 @@
     renderHome(true);
     if (m.markSeen) save({ introSeen: true });
   }
-  var PD = 0.45;
   var open;
-  var praf = 0;
-  var animating = false;
-  function sourceOf(name) {
-    return isAction(name) ? home.querySelector(`.act[data-page="${name}"]`) : nav.querySelector(`[data-page="${name}"]`);
+  var visited = [];
+  var samePlace = (a, b) => a?.name === b?.name && a?.sub === b?.sub;
+  var scroller = () => open ? pBody : home;
+  function go(name, sub, flash = "") {
+    if (!view) return;
+    const next = sub ? { name, sub } : { name };
+    if (samePlace(open, next)) return flash ? flashRow(flash) : void 0;
+    visited.push({ place: open && { ...open }, scroll: scroller().scrollTop });
+    if (visited.length > 50) visited.shift();
+    show(next, open?.name === name ? sub ? 1 : -1 : 0);
+    if (flash) flashRow(flash);
   }
-  function measureGrowth(source) {
-    pTitle.style.transform = "";
-    pCap.style.transform = "";
-    pKeys.style.transform = "";
-    const dst = { title: rel(pTitle), cap: rel(pCap), keys: rel(pKeys), tfont: fontOf(pTitle) };
-    const row2 = source.classList.contains("act");
-    const box = rel(source);
-    const title = (row2 ? source.querySelector(".an b") : source.querySelector(".lbl")) ?? source;
-    const cap = row2 ? source.querySelector(".an i") : null;
-    const keys = row2 ? source.querySelector(".keys") : null;
-    return {
-      source,
-      row: row2,
-      src: { ground: { ...box, r: row2 ? 12 : box.h / 2 }, title: rel(title), tfont: fontOf(title), cap: cap ? rel(cap) : null, keys: keys ? rel(keys) : null },
-      dst
-    };
+  function goHome() {
+    if (!open) return;
+    visited.push({ place: { ...open }, scroll: pBody.scrollTop });
+    show(void 0, 0);
   }
-  function renderGrowth(gr, p) {
-    const { src, dst, source } = gr;
-    const q = clamp(p);
-    const W = root.clientWidth;
-    const H = root.clientHeight;
-    const B = top.offsetHeight;
-    const gs = src.ground;
-    const gx = lerp(gs.x, 0, p), gy = lerp(gs.y, B, p), gw = lerp(gs.w, W, p), gh = lerp(gs.h, H - B, p), r = lerp(gs.r, 0, q);
-    const done2 = p >= 1;
-    pGround.style.left = done2 ? "" : `${gx}px`;
-    pGround.style.top = done2 ? "" : `${gy}px`;
-    pGround.style.width = done2 ? "" : `${gw}px`;
-    pGround.style.height = done2 ? "" : `${gh}px`;
-    pGround.style.borderRadius = done2 ? "" : `${r}px`;
-    pg.style.clipPath = done2 ? "" : `inset(${gy}px ${W - gx - gw}px ${H - gy - gh}px ${gx}px round ${r}px)`;
-    pg.style.visibility = p <= 0 ? "hidden" : "";
-    const s0 = src.tfont / dst.tfont;
-    const s = lerp(s0, 1, p);
-    const ty = src.title.y + src.title.h / 2 - (dst.title.y + dst.title.h * s0 / 2);
-    pTitle.style.transform = done2 ? "" : `translate(${(src.title.x - dst.title.x) * (1 - p)}px, ${ty * (1 - p)}px) scale(${s})`;
-    if (src.cap) setStyle(pCap, 1, done2 ? "" : `translate(${(src.cap.x - dst.cap.x) * (1 - p)}px, ${(src.cap.y - dst.cap.y) * (1 - p)}px)`);
-    else setStyle(pCap, clamp((p - 0.45) * 2), done2 ? "" : `translateX(${(1 - q) * -8}px)`);
-    pKeys.style.transform = src.keys && !done2 ? `translate(${(src.keys.x - dst.keys.x) * (1 - p)}px, ${(src.keys.y - dst.keys.y) * (1 - p)}px)` : "";
-    const late = clamp((p - 0.82) / 0.18);
-    setStyle(pBack, late, done2 ? "" : `translateX(${(1 - late) * -10}px)`);
-    setStyle(pLine, late, done2 ? "" : `scaleX(${0.6 + 0.4 * late})`);
-    setStyle(pBody, late, done2 ? "" : `translateY(${(1 - late) * 14}px)`);
-    for (const row2 of home.querySelectorAll(".act")) {
-      if (row2 === source) continue;
-      setStyle(row2, 1 - clamp(q * 1.5), `translateY(${q * 36}px)`);
-    }
-    if (gr.row) source.style.visibility = p > 0 ? "hidden" : "";
-    source.classList.toggle("pressed", p <= 0);
-  }
-  function resetHome() {
-    for (const node of root.querySelectorAll(".act, .nav .pill")) {
-      node.style.transform = "";
-      node.style.opacity = "";
-      node.style.visibility = "";
-      node.classList.remove("pressed");
-    }
-  }
-  function grow(gr, opening, done2) {
-    cancelAnimationFrame(praf);
-    if (FROZEN_PT !== void 0 && opening) return renderGrowth(gr, FROZEN_PT >= PD ? 1 : pspring(FROZEN_PT / PD));
-    animating = true;
-    const t0 = performance.now();
-    const tick = (now) => {
-      const t = (now - t0) / 1e3;
-      const k = t >= PD ? 1 : pspring(t / PD);
-      renderGrowth(gr, opening ? k : 1 - k);
-      if (t < PD) praf = requestAnimationFrame(tick);
-      else {
-        animating = false;
-        done2?.();
-        if (homePending) renderHome();
-      }
-    };
-    praf = requestAnimationFrame(tick);
-  }
-  function openPage(name, animate = !reduced.matches) {
-    if (!view || open?.name === name) return;
-    if (moment) finishMoment();
-    if (open) closePage(false);
-    open = { name };
-    search = "";
-    keyTrouble = void 0;
-    if (name === "transcripts") enterTranscripts();
-    fillHeader();
-    pBody.replaceChildren();
-    renderBody();
-    pBody.scrollTop = 0;
-    root.classList.add("page-open");
-    updateNav();
-    const source = sourceOf(name);
-    const settle = () => pBack.focus({ preventScroll: true });
-    if (!source || !animate) {
-      resetHome();
-      for (const node of [pg, pGround, pTitle, pCap, pKeys, pBack, pLine, pBody]) node.removeAttribute("style");
-      return settle();
-    }
-    const gr = measureGrowth(source);
-    renderGrowth(gr, 0);
-    grow(gr, true, settle);
+  function closePage() {
+    if (open) show(void 0, 0);
   }
   function back() {
-    if (open?.sub) return popSub();
-    if (open?.name === "transcripts" && backToList()) return;
-    closePage();
+    if (open?.name === "transcripts" && !open.sub && backToList()) return;
+    let last = visited.pop();
+    while (last && samePlace(last.place, open)) last = visited.pop();
+    if (!last) return closePage();
+    const from = open;
+    const dir = last.place && from && last.place.name === from.name ? from.sub && !last.place.sub ? -1 : 1 : 0;
+    show(last.place, dir, last.scroll);
+    if (dir === -1 && from?.sub) pBody.querySelector(`[data-sub="${from.sub}"]`)?.focus({ preventScroll: true });
   }
-  function closePage(animate = !reduced.matches) {
-    if (!open) return;
-    const name = open.name;
-    if (open.sub) {
-      open.sub = void 0;
-      fillHeader();
+  function show(place, dir, scroll = 0) {
+    if (!view) return;
+    if (moment) finishMoment();
+    const was = open;
+    if (was?.name === "transcripts" && place?.name !== "transcripts") leaveTranscripts();
+    open = place;
+    keyTrouble = void 0;
+    if (place?.name !== was?.name) search = "";
+    findField.value = place?.name === "search" ? finding : "";
+    if (place?.name === "transcripts" && was?.name !== "transcripts") enterTranscripts();
+    if (place?.name === "programs" && !place.sub) askRunningApps();
+    root.classList.toggle("page-open", !!place);
+    fillHeader();
+    updateNav();
+    if (!place) {
+      renderHome();
+      home.scrollTop = scroll;
+      return fade(home);
     }
-    if (name === "transcripts") leaveTranscripts();
-    const done2 = () => {
-      root.classList.remove("page-open");
-      pg.style.visibility = "";
-      pg.style.clipPath = "";
-      resetHome();
-      open = void 0;
-      updateNav();
-      if (homePending) renderHome();
-    };
-    cancelAnimationFrame(praf);
-    animating = false;
-    const source = sourceOf(name);
-    if (!source || !animate) return done2();
-    const back2 = pg.contains(document.activeElement);
-    grow(measureGrowth(source), false, () => {
-      done2();
-      if (back2) source.focus({ preventScroll: true });
-    });
+    if (dir && was) slideBody(dir);
+    else {
+      bodyPending = false;
+      pBody.replaceChildren(...bodyOf(view));
+      fade(pBody);
+    }
+    pBody.scrollTop = scroll;
+  }
+  function fade(node) {
+    if (reduced.matches) return;
+    node.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 160, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+  }
+  function flashRow(title) {
+    const row2 = [...pBody.querySelectorAll(".row")].find((r) => lineTitle(r) === title);
+    if (!row2) return;
+    row2.scrollIntoView({ block: "center" });
+    row2.classList.add("flash");
+    window.setTimeout(() => row2.classList.remove("flash"), 1600);
   }
   var SUBS = {
-    vocabulary: { title: "Words to spell", body: vocabularyPage },
-    recent: { title: "Recent phrases", cap: () => "kept 30 days on this computer", body: recentPage },
-    translations: { title: "Recent translations", cap: () => "kept 30 days on this computer", body: translationsPage },
     model: { title: "Speech model", body: modelPage, valid: running },
     meet: { title: "Google Meet", cap: () => "the Altype extension for Chrome", body: meetPage },
     speakers: { title: "Who spoke when", cap: () => "the voices told apart", body: speakerRows, valid: installed },
-    layouts: { title: "Layouts", cap: () => "in the order the keys go through them", body: layoutsPage },
     fixing: { title: "Fixing as I type", cap: () => "what is set right as you type", body: fixingPage },
-    programs: { title: "Programs", cap: () => "left out of parts, or with a layout of their own", body: programsPage },
-    program: { title: "Program", cap: () => programOpen, body: programPage, valid: () => !!programOpen },
-    kept: { title: "Kept as typed", body: keptPage },
-    learned: { title: "What Altype learned", cap: () => "on this computer only", body: learnedPage },
-    languages: { title: "Languages you use", body: languagesPage },
-    engine: { title: "Speech engine", body: enginePage },
-    computer: { title: "This computer", body: computerPage }
+    program: { title: () => programOpen, body: programPage, valid: () => !!programOpen },
+    languages: { title: "Languages you use", body: languagesPage }
+  };
+  var subTitle = (id) => {
+    const t = SUBS[id].title;
+    return typeof t === "string" ? t : t();
+  };
+  var CAPS2 = {
+    words: (v) => v.words.length ? `${v.words.length} saved \xB7 from your cards` : "none yet \xB7 from your cards",
+    transcripts: () => transcriptsCap(),
+    translations: () => "kept 30 days on this computer",
+    phrases: () => "dictated lately \xB7 kept 30 days on this computer",
+    vocabulary: () => "for Dictate and Transcribe",
+    kept: () => "never fixed by themselves",
+    learned: () => "on this computer only",
+    programs: () => "left out of parts, or with a layout of their own",
+    layouts: () => "in the order the keys go through them",
+    about: (v) => `Altype ${v.version}`
   };
   var sliding = [];
   function slideBody(dir) {
@@ -3135,7 +3156,7 @@
     const ghost = el("div", { class: "pbody pghost", inert: true, "aria-hidden": "true" });
     const scroll = pBody.scrollTop;
     ghost.append(...pBody.childNodes);
-    pg.append(ghost);
+    mainCol.append(ghost);
     ghost.scrollTop = scroll;
     bodyPending = false;
     pBody.replaceChildren(...bodyOf(view));
@@ -3148,43 +3169,28 @@
     sliding = [out, inn];
   }
   function openSub(id) {
-    if (!view || !open || open.sub === id) return;
-    open.parentScroll = pBody.scrollTop;
-    open.sub = id;
-    keyTrouble = void 0;
-    fillHeader();
-    slideBody(1);
-    pBody.scrollTop = 0;
-    pBack.focus({ preventScroll: true });
-  }
-  function popSub(animate = !reduced.matches) {
-    if (!view || !open?.sub) return;
-    const id = open.sub;
-    open.sub = void 0;
-    keyTrouble = void 0;
-    fillHeader();
-    if (animate) slideBody(-1);
-    else {
-      bodyPending = false;
-      pBody.replaceChildren(...bodyOf(view));
-    }
-    pBody.scrollTop = open.parentScroll ?? 0;
-    const from = pBody.querySelector(`[data-sub="${id}"]`);
-    (from ?? pBack).focus({ preventScroll: true });
+    if (open) go(open.name, id);
   }
   function fillHeader() {
-    if (!view || !open) return;
-    const name = open.name;
+    if (!view) return;
     const v = view;
+    pBack.hidden = !open && visited.length === 0;
+    if (!open) {
+      pTitle.replaceChildren("Home");
+      pCap.textContent = "";
+      pKeys.replaceChildren();
+      return;
+    }
+    const name = open.name;
     if (open.sub) {
       const sub = SUBS[open.sub];
-      pTitle.replaceChildren(el("button", { class: "pcrumb", onclick: () => popSub() }, TITLES[name]), el("span", { class: "psep" }, "\u203A"), sub.title);
+      pTitle.replaceChildren(el("button", { class: "pcrumb", onclick: () => go(name) }, TITLES[name]), el("span", { class: "psep" }, "\u203A"), subTitle(open.sub));
       pCap.textContent = sub.cap?.(v) ?? "";
       pKeys.replaceChildren();
       return;
     }
-    pTitle.textContent = TITLES[name];
-    pCap.textContent = isAction(name) ? actionText(name, v).cap : name === "words" ? v.words.length ? `${v.words.length} saved \xB7 from your cards` : "none yet \xB7 from your cards" : name === "about" ? `Altype ${v.version}` : name === "transcripts" ? transcriptsCap() : "";
+    pTitle.replaceChildren(TITLES[name]);
+    pCap.textContent = isAction(name) ? actionText(name, v).cap : name === "search" ? searchCap(v) : CAPS2[name]?.(v) ?? "";
     const keys = isAction(name) ? keysOf(name, v.settings) : [];
     const next = el("div", {}, ...keys);
     if (next.innerHTML !== pKeys.innerHTML) pKeys.replaceChildren(...next.childNodes);
@@ -3249,17 +3255,137 @@
         return dictatePage(v);
       case "transcribe":
         return transcribePage(v);
-      case "transcripts":
-        return transcriptsBody(v);
       case "keyboard":
         return keyboardPage(v);
       case "words":
         return wordsPage(v);
+      case "transcripts":
+        return transcriptsBody(v);
+      case "translations":
+        return translationsPage(v);
+      case "phrases":
+        return recentPage(v);
+      case "vocabulary":
+        return vocabularyPage(v);
+      case "kept":
+        return keptPage(v);
+      case "learned":
+        return learnedPage(v);
+      case "programs":
+        return programsPage(v);
+      case "layouts":
+        return layoutsPage(v);
       case "settings":
         return settingsPage(v);
+      case "engine":
+        return enginePage(v);
+      case "computer":
+        return computerPage(v);
       case "about":
         return aboutPage(v);
+      case "search":
+        return searchPage(v);
     }
+  }
+  var SEARCHED = [
+    ...ACTIONS.map((name) => ({ name })),
+    { name: "keyboard", sub: "fixing" },
+    { name: "dictate", sub: "model" },
+    { name: "transcribe", sub: "model" },
+    { name: "transcribe", sub: "speakers" },
+    { name: "transcribe", sub: "meet" },
+    { name: "vocabulary" },
+    { name: "kept" },
+    { name: "learned" },
+    { name: "programs" },
+    { name: "layouts" },
+    { name: "settings" },
+    { name: "settings", sub: "languages" },
+    { name: "engine" },
+    { name: "computer" }
+  ];
+  var lineTitle = (row2) => (row2.querySelector(":scope > .l")?.firstChild?.textContent ?? "").trim();
+  function bodyFor(v, place) {
+    const was = open;
+    open = place;
+    try {
+      return bodyOf(v);
+    } catch {
+      return [];
+    } finally {
+      open = was;
+    }
+  }
+  var lineCache;
+  function linesOf(v) {
+    if (lineCache?.view === v) return lineCache.lines;
+    const lines = [];
+    for (const place of SEARCHED) {
+      if (place.sub && SUBS[place.sub].valid?.(v) === false) continue;
+      let section = "";
+      for (const node of bodyFor(v, place)) {
+        if (node.classList.contains("grp")) {
+          section = (node.firstChild?.textContent ?? "").trim();
+          continue;
+        }
+        for (const row2 of node.matches(".row") ? [node] : [...node.querySelectorAll(".row")]) {
+          const title = lineTitle(row2);
+          const note = [...row2.querySelectorAll(":scope > .l > small")].map((s) => s.textContent ?? "").join(" \xB7 ");
+          if (title) lines.push({ place, section, title, note });
+        }
+      }
+    }
+    lineCache = { view: v, lines };
+    return lines;
+  }
+  var found = (v) => {
+    const q = finding.trim().toLowerCase();
+    return q ? linesOf(v).filter((l) => `${l.title} ${l.note}`.toLowerCase().includes(q)) : [];
+  };
+  function searchCap(v) {
+    const n = found(v).length;
+    return finding.trim() ? `${n || "no"} ${n === 1 ? "place" : "places"} for \u201C${finding.trim()}\u201D` : "";
+  }
+  function whereOf(place) {
+    return place.sub ? `${TITLES[place.name]} \u203A ${subTitle(place.sub)}` : TITLES[place.name];
+  }
+  function marked(text, q) {
+    const i = text.toLowerCase().indexOf(q);
+    return i < 0 ? [text] : [text.slice(0, i), el("mark", {}, text.slice(i, i + q.length)), text.slice(i + q.length)];
+  }
+  function searchPage(v) {
+    const q = finding.trim().toLowerCase();
+    const hits = found(v);
+    if (!hits.length) return [aside("search", q ? `Nothing has \u201C${finding.trim()}\u201D. Words, transcripts and translations have searches of their own.` : "Type above: every line of every page is found by its name or its note.")];
+    const out = [];
+    let last = "";
+    for (const hit of hits) {
+      const where2 = whereOf(hit.place);
+      if (where2 !== last) out.push(grp(where2));
+      last = where2;
+      out.push(
+        el(
+          "button",
+          { class: "row navc found", onclick: () => go(hit.place.name, hit.place.sub, hit.title) },
+          el("div", { class: "l" }, el("span", {}, ...marked(hit.title, q)), hit.note ? el("small", {}, ...marked(hit.note, q)) : null),
+          hit.section ? el("span", { class: "v" }, hit.section) : null,
+          lucide("chevron-right", "chev")
+        )
+      );
+    }
+    return out;
+  }
+  function find(text) {
+    finding = text;
+    if (!view) return;
+    if (!text.trim()) {
+      if (open?.name === "search") back();
+      return;
+    }
+    if (open?.name !== "search") return go("search");
+    fillHeader();
+    bodyPending = false;
+    pBody.replaceChildren(...bodyOf(view));
   }
   function tryIt(text, how) {
     return el("div", { class: "try" }, el("p", {}, text), el("small", {}, how));
@@ -3412,13 +3538,32 @@
       ),
       keyRow("selectKey", "Selected text", s.selectKey ? "Altype copies the selection itself" : "one key, if you want one", !v.keysOk.select, "volume-2"),
       keyRow("snipKey", "A piece of the screen", "draw a box over the words", !v.keysOk.snip, "scan"),
+      ...voiceRows(v),
+      grp("The card"),
+      toggleCard("volume-2", "Read aloud when a card opens", s.autoRead, (autoRead) => save({ autoRead })),
+      toggleCard("spell-check", "Dotted line under less common words", s.rareWords, (rareWords) => save({ rareWords })),
+      toggleCard("list", "Listen reads one sentence at a time", s.oneAtATime, (oneAtATime) => save({ oneAtATime })),
+      card(
+        "book-open",
+        "Word meanings on",
+        [],
+        select(
+          s.wordHint,
+          [
+            ["shift", "Click, or Shift + hover"],
+            ["hover", "Click, or hover"],
+            ["off", "Click only"]
+          ],
+          (wordHint) => save({ wordHint })
+        )
+      ),
       grp("In the card"),
       card("play", "Play or stop \xB7 step through sentences", [], el("span", { class: "kg2" }, caps("Space"), caps("\u2190"), caps("\u2192"))),
       card("book-open", "A word: its meanings, its sound, a star to keep it in Words", ["click it"], null),
       card("languages", "A sentence: its translation marked", ["click it \xB7 \u25B6 in the margin reads one paragraph"], null),
       card("x", "Close, and stop the voice", [], caps("Esc")),
       tryIt("The morning was quiet. A small boat drifted along the river, and two children watched the ducks from the bridge.", how)
-    ];
+    ].filter((n) => n !== null);
   }
   var TRY_TRANSLATE = {
     Russian: "\u041A\u043E\u043D\u0435\u0447\u043D\u043E, \u043F\u0440\u0438\u0448\u043B\u044E \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D\u043D\u044B\u0435 \u043C\u0430\u043A\u0435\u0442\u044B \u0434\u043E \u0441\u043E\u0437\u0432\u043E\u043D\u0430.",
@@ -3453,7 +3598,7 @@
       card("globe", pairOf(v), [note], state),
       languagesCard(v),
       grp("History"),
-      navCard("clock", "Recent translations", "kept 30 days on this computer", v.translations.length ? String(v.translations.length) : "none", () => openSub("translations"), "translations"),
+      navCard("clock", "Recent translations", "kept 30 days on this computer", v.translations.length ? String(v.translations.length) : "none", () => go("translations"), "translations"),
       tryIt(text, how)
     ];
   }
@@ -3509,7 +3654,7 @@ ${e.translation}` }, e.translation),
   }
   function vocabularyCard(v) {
     const n = v.settings.vocabulary.length;
-    return navCard("spell-check", "Words to spell", "names and terms, written as you say them", n ? `${n} ${n === 1 ? "word" : "words"}` : "none yet", () => openSub("vocabulary"), "vocabulary");
+    return navCard("spell-check", "Words to spell", "names and terms, written as you say them", n ? `${n} ${n === 1 ? "word" : "words"}` : "none yet", () => go("vocabulary"), "vocabulary");
   }
   function modelCard(v, feature) {
     if (!running(v)) return null;
@@ -3536,7 +3681,7 @@ ${e.translation}` }, e.translation),
       ...kbRows(v),
       grp("Words and phrases"),
       vocabularyCard(v),
-      navCard("clock", "Recent phrases", "what was dictated lately, to copy again", recent.length ? recent[0]?.text ?? "" : "none yet", () => openSub("recent"), "recent"),
+      navCard("clock", "Recent phrases", "what was dictated lately, to copy again", recent.length ? recent[0]?.text ?? "" : "none yet", () => go("phrases"), "phrases"),
       modelCard(v, "dictation"),
       el("p", { class: "privacy" }, lucide("lock", "s"), "Speech is recognized on this computer; nothing is sent anywhere.")
     ].filter((n) => n !== null);
@@ -3725,7 +3870,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       meetCard(v),
       modelCard(v, "transcripts"),
       grp("Library"),
-      navCard("file-text", "Transcripts", "every transcript, searched by its words", null, () => openPage("transcripts"))
+      navCard("file-text", "Transcripts", "every transcript, searched by its words", null, () => go("transcripts"))
     ].filter((n) => n !== null);
   }
   function layoutsPage(v) {
@@ -3818,7 +3963,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           null,
           () => {
             programOpen = a.exe;
-            openSub("program");
+            go("programs", "program");
           },
           `program-${a.exe}`
         )
@@ -3856,7 +4001,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         ["everything works here again"],
         linkBtn("Remove", () => {
           save({ apps: apps().filter((a) => a.exe !== rule.exe) });
-          popSub();
+          back();
         })
       )
     ];
@@ -3872,7 +4017,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       grp("Your words", myWords.length || void 0),
       ...myWords.length ? myWords.map((w) => item("myWords", w, `${name(w.lang)} \xB7 never fixed, and fixed into`)) : [aside("info", "A word in no dictionary that you type right three times becomes yours: Altype leaves it as typed, and fixes it into when it is typed in the wrong layout. Until then only an unreadable fingerprint of it is kept.")],
       grp("Never fixed"),
-      navCard("lock", "Kept as typed", "words never fixed by themselves", String(v.settings.keepWords.length || "none"), () => openSub("kept"), "kept"),
+      navCard("lock", "Kept as typed", "words never fixed by themselves", String(v.settings.keepWords.length || "none"), () => go("kept"), "kept"),
       alwaysFix.length || myWords.length ? card("trash-2", "Forget all", ["what Altype learned goes; Kept as typed stays"], linkBtn("Forget", () => post({ type: "forgetLearned" }))) : null
     ].filter((n) => n !== null);
   }
@@ -3899,7 +4044,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   function askRunningApps() {
     void window.tutorHost.call({ call: "runningApps" }).then((list2) => {
       runningApps = Array.isArray(list2) ? list2.filter((x) => typeof x === "string") : [];
-      if (open?.sub === "programs") renderBody();
+      if (open?.name === "programs" && !open.sub) renderBody();
     }, fault);
   }
   function keyboardPage(v) {
@@ -3928,20 +4073,10 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       toggleCard("keyboard", "Show the layout in the tray", s.trayLayout, (trayLayout) => save({ trayLayout }), "the tray icon becomes a key with the layout on it: en, ru"),
       toggleCard("monitor", "Rest on the full screen", s.quietFullScreen, (quietFullScreen) => save({ quietFullScreen }), "games, presentations, videos: nothing is fixed or switched"),
       grp("Lists"),
-      navCard("keyboard", "Layouts", ownKeys ? `the ones the keys go through \xB7 ${ownKeys} with a key of its own` : "the ones the keys go through, in order", cycleOf(v).map((l) => l.short).join(" \xB7 "), () => openSub("layouts"), "layouts"),
-      navCard(
-        "monitor",
-        "Programs",
-        "left out of parts, or with a layout of their own",
-        count(s.apps.length, "program"),
-        () => {
-          askRunningApps();
-          openSub("programs");
-        },
-        "programs"
-      ),
-      navCard("sparkles", "What Altype learned", s.learn ? "from your typing: words it fixes always, words of yours" : "learning from your typing is off", count(learnedCount, "word"), () => openSub("learned"), "learned"),
-      navCard("lock", "Kept as typed", "words never fixed by themselves", count(s.keepWords.length, "word"), () => openSub("kept"), "kept"),
+      navCard("keyboard", "Layouts", ownKeys ? `the ones the keys go through \xB7 ${ownKeys} with a key of its own` : "the ones the keys go through, in order", cycleOf(v).map((l) => l.short).join(" \xB7 "), () => go("layouts"), "layouts"),
+      navCard("monitor", "Programs", "left out of parts, or with a layout of their own", count(s.apps.length, "program"), () => go("programs"), "programs"),
+      navCard("sparkles", "Learned words", s.learn ? "from your typing: words it fixes always, words of yours" : "learning from your typing is off", count(learnedCount, "word"), () => go("learned"), "learned"),
+      navCard("lock", "Kept as typed", "words never fixed by themselves", count(s.keepWords.length, "word"), () => go("kept"), "kept"),
       v.rivals.length ? warn(`${v.rivals.join(" and ")} ${v.rivals.length > 1 ? "are" : "is"} running: turn off its layout switching, or words get fixed twice.`) : null,
       v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Altype, so nothing is fixed or switched there.`) : null,
       v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
@@ -4064,12 +4199,6 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     }
   }
   var removingSpeech = false;
-  var PART_NAMES = { core: "speech to text", gpu: "graphics card", speakers: "speakers" };
-  function engineCard(v) {
-    const p = v.speech.pack;
-    const value = !installed(v) ? p.status === "installing" ? "downloading\u2026" : "not downloaded" : p.parts.map((part) => PART_NAMES[part]).join(", ");
-    return navCard("cpu", "Speech engine", "for Dictate and Transcribe \xB7 downloads once, then works offline", value, () => openSub("engine"), "engine");
-  }
   function enginePage(v) {
     const sp = v.speech;
     const p = sp.pack;
@@ -4099,7 +4228,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         "Who spoke when",
         sp.speakers.model ? "PyTorch and pyannote \xB7 the voices\u2019 model is here already" : "PyTorch and pyannote \xB7 the voices\u2019 model comes with a free Hugging Face key",
         hasPart(v, "speakers") ? `Installed \xB7 ${DEVICE_NAMES[p.speakersOn ?? "cpu"]}` : `Not installed \xB7 \u2248${size(sp.speakers.sizes[sp.speakers.on].download)}`,
-        () => openSub("speakers"),
+        () => go("transcribe", "speakers"),
         "speakers",
         hasPart(v, "speakers")
       ),
@@ -4152,7 +4281,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   }
   var languageName = (code) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
   function languagesCard(v) {
-    return navCard("globe", "Languages you use", "dictation, translation and the screen\u2019s text are read as one of these", myLanguages(v.settings).map(languageName).join(", "), () => openSub("languages"), "languages");
+    return navCard("globe", "Languages you use", "dictation, translation and the screen\u2019s text are read as one of these", myLanguages(v.settings).map(languageName).join(", "), () => go("settings", "languages"), "languages");
   }
   function languagesPage(v) {
     const s = v.settings;
@@ -4173,28 +4302,14 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       ...s.languages.map((code) => card("globe", languageName(code), [], ib("x", `Remove ${languageName(code)}`, () => save({ languages: mine().filter((c) => c !== code) }))))
     ];
   }
-  function settingsPage(v) {
+  function voiceRows(v) {
     const s = v.settings;
-    const u = v.update;
     const rtf = v.natural.rtf;
-    const windows = v.hostVoices.find((h) => /^en\b/i.test(h.lang));
+    const windows = v.hostVoices.find((h) => /^en/i.test(h.lang));
     const slow = naturalOn(v) && rtf !== void 0 && rtf > 1;
     const voiceNote = !naturalOn(v) ? ["a Windows voice"] : slow ? [`natural \xB7 ${v.natural.size} MB, on this computer`, bad("slower than it speaks on this computer: it pauses between sentences \xB7 a Windows voice is instant")] : [`natural \xB7 ${v.natural.size} MB, on this computer${rtf ? ` \xB7 makes speech ${Math.max(1, Math.round(1 / rtf))}\xD7 faster than it plays` : ""}`];
-    const d = v.speech.device;
-    const computer = `${shortCpu(d.cpu.name)} \xB7 ${d.ramGb} GB`;
     return [
-      grp("Language and voice"),
-      card(
-        "languages",
-        "Your language",
-        ["what Altype translates into and reads from"],
-        select(
-          s.native,
-          v.languages.map((l) => [l.name, `${l.native} \xB7 ${l.name}`]),
-          (native) => save({ native })
-        )
-      ),
-      languagesCard(v),
+      grp("Voice"),
       card("volume-2", "Voice", voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, "").replace(/ Desktop$/, "")}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
       naturalRow(v),
       card(
@@ -4207,25 +4322,25 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           (rate) => save({ rate }),
           true
         )
-      ),
-      grp("The card"),
-      toggleCard("volume-2", "Read aloud when a card opens", s.autoRead, (autoRead) => save({ autoRead })),
-      toggleCard("spell-check", "Dotted line under less common words", s.rareWords, (rareWords) => save({ rareWords })),
-      toggleCard("list", "Listen reads one sentence at a time", s.oneAtATime, (oneAtATime) => save({ oneAtATime })),
+      )
+    ];
+  }
+  function settingsPage(v) {
+    const s = v.settings;
+    const u = v.update;
+    return [
+      grp("Language"),
       card(
-        "book-open",
-        "Word meanings on",
-        [],
+        "languages",
+        "Your language",
+        ["what Altype translates into and reads from"],
         select(
-          s.wordHint,
-          [
-            ["shift", "Click, or Shift + hover"],
-            ["hover", "Click, or hover"],
-            ["off", "Click only"]
-          ],
-          (wordHint) => save({ wordHint })
+          s.native,
+          v.languages.map((l) => [l.name, `${l.native} \xB7 ${l.name}`]),
+          (native) => save({ native })
         )
       ),
+      languagesCard(v),
       grp("Altype"),
       card(
         "monitor",
@@ -4263,10 +4378,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           linkBtn("Import", () => post({ type: "importSettings" })),
           linkBtn("Reset", () => post({ type: "resetSettings" }))
         )
-      ),
-      grp("Speech"),
-      engineCard(v),
-      navCard("monitor", "This computer", "what speech runs on, and the speed test", computer, () => openSub("computer"), "computer")
+      )
     ].filter((n) => n !== null);
   }
   function aboutPage(v) {
@@ -4303,15 +4415,16 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     ];
   }
   function showTab(tab) {
-    if (tab === "home" || tab === "howto") closePage();
-    else if (open?.name === tab && open.sub) popSub(false);
-    else openPage(tab);
+    if (tab !== "home" && tab !== "howto") return go(tab);
+    visited.length = 0;
+    closePage();
+    fillHeader();
   }
   function start2(v) {
     if (!v.settings.setupDone) return;
     const asked = askedTab && askedTab !== "home" && askedTab !== "howto" ? askedTab : void 0;
     if (askedTranscript) return openTranscript(askedTranscript);
-    if (asked) return openPage(asked, false);
+    if (asked) return go(asked);
     if (FROZEN_T !== void 0) return playMoment(false, FROZEN_T);
     if (v.settings.introSeen) return;
     if (reduced.matches) return save({ introSeen: true });
@@ -4337,7 +4450,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     if (m.view.speech.service !== "ready") forgetEngine();
     updateNav();
     if (!m.view.settings.setupDone) {
-      if (open) closePage(false);
+      closePage();
       if (moment) finishMoment();
       root.classList.add("setup");
       home.classList.add("setup");
@@ -4356,10 +4469,8 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       return;
     }
     renderHome();
-    if (open) {
-      fillHeader();
-      renderBody();
-    }
+    fillHeader();
+    renderBody();
     if (first) start2(m.view);
   });
   function renderSetup() {
@@ -4374,6 +4485,11 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       event.preventDefault();
       back();
     }
+    if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f" && !document.querySelector(".recording") && !root.classList.contains("setup")) {
+      event.preventDefault();
+      findField.focus();
+      findField.select();
+    }
   });
   onRedraw(() => {
     fillHeader();
@@ -4382,8 +4498,8 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   setTranscriptHooks({
     view: () => view,
     shown: () => open?.name === "transcripts",
-    show: () => openPage("transcripts"),
-    setup: () => (openPage("transcribe"), openSub("speakers"))
+    show: () => go("transcripts"),
+    setup: () => go("transcribe", "speakers")
   });
   post({ type: "appReady" });
 })();

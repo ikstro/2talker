@@ -662,12 +662,12 @@ function postApp(): void {
 
 function createAppWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 640,
-    height: 620,
-    minWidth: 480,
-    minHeight: 400,
+    width: 960,
+    height: 700,
+    minWidth: 560,
+    minHeight: 440,
     show: false,
-    // The page draws its own bar (the mark, the pills, minimize and close); the edges still resize.
+    // The page draws its own sidebar and bar (the mark, the places, minimize and close); the edges still resize.
     frame: false,
     title: 'Altype',
     icon: path.join(app.getAppPath(), 'media', 'icon.png'),
@@ -711,10 +711,11 @@ function postAppWindow(): void {
   if (appWin && appReady && !appWin.isDestroyed()) appWin.webContents.send('to-view', { type: 'appWindow', maximized: appWin.isMaximized() } satisfies ToView)
 }
 
-/** Shows the app window, on `tab` if one is named. */
+/** Shows the app window, on `tab` if one is named; a window that was closed opens on Home. */
 function openApp(tab?: AppTab): void {
   if (!appWin || appWin.isDestroyed()) appWin = createAppWindow()
   findRivals()
+  if (!tab && !appWin.isVisible()) tab = 'home'
   if (tab) {
     if (appReady) appWin.webContents.send('to-view', { type: 'appTab', tab } satisfies ToView)
     else pendingTab = tab
