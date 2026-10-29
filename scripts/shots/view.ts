@@ -35,7 +35,7 @@ export function appView(over: Partial<AppView['settings']> = {}, fresh = false):
   // A fresh install: nothing downloaded, the engine absent, the setup not done.
   return {
     ...v,
-    settings: { ...v.settings, setupDone: false, introSeen: false, languages: [], vocabulary: [], fixApps: [], keepWords: [], autoFix: false, layoutBadge: false, ...over },
+    settings: { ...v.settings, setupDone: false, introSeen: false, languages: [], vocabulary: [], apps: [], keepWords: [], autoFix: false, layoutBadge: false, ...over },
     natural: { status: 'absent', progress: 0, size: 170, dismissed: false },
     translator: 'absent',
     translatorState: { status: 'absent', progress: 0, size: 84 },
@@ -52,7 +52,11 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
       native: 'Russian',
       languages: ['uk'],
       vocabulary: ['Altype (альтайп, all type)', 'Peshynskyi (пешинский)', 'Paximizer'],
-      fixApps: ['code.exe', 'windowsterminal.exe'],
+      apps: [
+        { exe: 'code.exe', off: ['fix'], layout: '04090409' },
+        { exe: 'windowsterminal.exe', off: ['fix', 'badge'], layout: '' },
+      ],
+      layoutKeys: { '04090409': 'LeftShift*2' },
       keepWords: ['lol'],
       autoFix: true,
       layoutBadge: true,
@@ -72,7 +76,13 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
       { id: 2, word: 'ducks', base: 'duck', senses: [['noun', 'утка']], sentence: 'Two children watched the ducks from the bridge.', addedAt: new Date(now - 86400e3 * 3).toISOString() },
     ],
     update: { status: 'none' },
-    keysOk: { snip: true, select: true, translate: true, text: true },
+    keysOk: { snip: true, select: true, translate: true, text: true, inPlace: true, pause: true, window: true },
+    learned: { alwaysFix: [{ word: 'vs', lang: 'ru' }], myWords: [{ word: 'altype', lang: 'en' }, { word: 'пешинский', lang: 'ru' }] },
+    elevatedApp: 'taskmgr.exe',
+    translations: [
+      { at: new Date(now - 300e3).toISOString(), from: 'ru', to: 'en', text: 'Конечно, пришлю обновлённые макеты до созвона.', translation: 'Of course, I will send the updated layouts before the call.' },
+      { at: new Date(now - 7200e3).toISOString(), from: 'en', to: 'ru', text: 'Nothing happens.', translation: 'Ничего не происходит.' },
+    ],
     translator: 'ready',
     layouts: [
       { id: '04090409', name: 'English (United States)', short: 'EN', lang: 'en' },
@@ -132,8 +142,11 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
 
 export function trayView(over: Partial<TrayView> = {}): TrayView {
   return {
-    keys: { listenCopied: 'Control+C*2', snipListen: 'Control+Alt+S', snipTranslate: 'Control+Alt+T' },
+    keys: { listenCopied: 'Control+C*2', snipListen: 'Control+Alt+S', snipTranslate: 'Control+Alt+T', switch: 'LeftControl' },
     autoFix: true,
+    switchOn: true,
+    layoutBadge: true,
+    trayLayout: false,
     doubleCopy: true,
     paused: false,
     speech: { installed: true, recording: false, noteKey: 'Control+Alt+N' },

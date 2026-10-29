@@ -27,12 +27,24 @@ describe('normalize', () => {
 
   test('the keyboard helper is off at first; its lists keep only what they may hold', () => {
     expect(normalize({})).toMatchObject({ switchKey: '', fixKey: '', autoFix: false, layoutBadge: false, layouts: [], translateKey: '', textKey: 'Control+Alt+T' })
-    expect(normalize({ layouts: ['04090409', 'f0a80422', 'nonsense', 5, '04090409'], fixApps: [' Code.EXE ', ''], keepWords: ['jwt', 'jwt'] })).toMatchObject({
+    expect(normalize({ layouts: ['04090409', 'f0a80422', 'nonsense', 5, '04090409'], keepWords: ['jwt', 'jwt'], layoutKeys: { '04190419': ' RightControl ', bad: 'X', '04090409': '' } })).toMatchObject({
       layouts: ['04090409', 'F0A80422'],
-      fixApps: ['code.exe'],
       keepWords: ['jwt'],
+      layoutKeys: { '04190419': 'RightControl' },
     })
     expect(normalize({ translateKey: ' LeftShift*2 ' }).translateKey).toBe('LeftShift*2')
+  })
+
+  test('programs: the old list of programs left out of fixing becomes rules; a rule keeps known parts and a layout id only', () => {
+    expect(normalize({ fixApps: [' Code.EXE ', ''] }).apps).toEqual([{ exe: 'code.exe', off: ['fix'], layout: '' }])
+    expect(normalize({ fixApps: ['old.exe'], apps: [] }).apps).toEqual([])
+    expect(normalize({ apps: [{ exe: 'Term.exe', off: ['fix', 'nonsense', 'badge'], layout: '04090409' }, { exe: 'term.exe' }, { off: ['fix'] }] }).apps).toEqual([
+      { exe: 'term.exe', off: ['fix', 'badge'], layout: '04090409' },
+    ])
+  })
+
+  test('new keyboard parts start as decided: capitals set right, learning on, quiet on the full screen, the rest off', () => {
+    expect(normalize({})).toMatchObject({ fixTwoCaps: true, fixCapsLock: true, learn: true, quietFullScreen: true, keepCaps: false, fixOnPause: false, fixSound: false, trayLayout: false, switchOn: true, fixKeyOn: true, betaUpdates: false })
   })
 
   test('English is the learned language, never the native one', () => {

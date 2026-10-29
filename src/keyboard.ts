@@ -10,30 +10,42 @@ import { BrowserWindow, screen } from 'electron'
 import koffi from 'koffi'
 
 import { isAccelerator } from './hotkey'
-import type { KbdConfig, KbdIn, KbdOut, KeyAction } from './typist'
+import type { LearnedConfig } from './learning'
+import type { KbdConfig, KbdIn, KbdOut, KeyAction, Learned } from './typist'
 import type { KeyboardLayout } from './protocol'
 import { myLanguages, type Settings } from './settings'
-import { installedLayouts } from './winkbd'
+import { caretOf, foreground, installedLayouts } from './winkbd'
 
 const user32 = koffi.load('user32.dll')
 const PostThreadMessageW = user32.func('bool __stdcall PostThreadMessageW(uint32 tid, uint32 msg, uintptr w, intptr l)')
 const WM_APP_PORT = 0x8000
 
 /** The languages the layout fixer has word lists for (media/layout/<code>.txt). */
-export const FIX_LANGUAGES = ['en', 'ru', 'uk']
+export const FIX_LANGUAGES = ['en', 'ru', 'uk', 'bg', 'mk', 'el', 'he', 'ar', 'fa', 'ka']
 
 const BADGE = { width: 36, height: 22 }
+/** With Caps Lock on, the badge says so too ("EN ⇪"). */
+const BADGE_CAPS_WIDTH = 54
 const BADGE_MS = 900
+/** A word the badge says while Altype works stays up to this long, unless taken down sooner. */
+const SAY_MS = 15_000
+
+type MainAction = Exclude<KeyAction, 'switch' | 'fix' | 'layout'>
 
 export type KeyboardEvents = {
   /** A fix was taken back: keep the word as typed from now on. */
   keep(word: string): void
+  /** The person fixed a word by hand; a word of theirs was typed right again (learning.ts). */
+  fixedByHand(learned: Learned): void
+  tally(hash: string, count: number, word?: Learned): void
   /** The fix key with a selection: convert it into the next of `cycle`. */
   selection(cycle: string[]): void
   /** A key Electron's shortcuts cannot hold, for selecting, snipping or a snip's text, was pressed. */
-  hotkey(action: Exclude<KeyAction, 'switch' | 'fix'>): void
-  /** The program typed in last. */
-  app(exe: string): void
+  hotkey(action: MainAction): void
+  /** The program in front lately; whether it runs as administrator. */
+  app(exe: string, elevated: boolean): void
+  /** The layout in front, and Caps Lock (for the tray's icon). */
+  layout(layout: string, caps: boolean): void
   /** Another program pressed keys by itself. */
   foreignKeys(): void
   failed(message: string): void
@@ -70,37 +82,67 @@ export class KeyboardHelper {
   /**
    * Starts, configures or ends the thread for these settings: the layout keys
    * are always its, the others only when Electron's shortcuts cannot hold them
-   * (a double tap of Ctrl, a side button of the mouse).
+   * (a double tap of Ctrl, a side button of the mouse). Paused, it keeps the
+   * pause key only, when that is its.
    */
-  apply(s: Settings): void {
-    const keys: Partial<Record<KeyAction, string>> = {}
-    if (s.switchKey) keys.switch = s.switchKey
-    if (s.fixKey) keys.fix = s.fixKey
-    for (const [action, key] of [
-      ['select', s.selectKey],
-      ['snip', s.snipKey],
-      ['translate', s.translateKey],
-      ['text', s.textKey],
-      ['dictate', s.dictateKey],
-      ['english', s.englishKey],
-      ['note', s.noteKey],
-      ['again', s.againKey],
-    ] as const) {
-      if (key && !isAccelerator(key)) keys[action] = key
+  apply(s: Settings, learned: LearnedConfig): void {
+    const keys: KbdConfig['keys'] = {}
+    const its = (key: string) => !!key && !isAccelerator(key)
+    if (s.paused) {
+      if (!its(s.pauseKey)) return this.stop()
+      keys.pause = s.pauseKey
+    } else {
+      if (s.switchKey && s.switchOn) keys.switch = s.switchKey
+      if (s.fixKey && s.fixKeyOn) keys.fix = s.fixKey
+      for (const [action, key] of [
+        ['select', s.selectKey],
+        ['snip', s.snipKey],
+        ['translate', s.translateKey],
+        ['text', s.textKey],
+        ['inPlace', s.inPlaceKey],
+        ['dictate', s.dictateKey],
+        ['english', s.englishKey],
+        ['note', s.noteKey],
+        ['again', s.againKey],
+        ['pause', s.pauseKey],
+        ['window', s.windowKey],
+      ] as const) {
+        if (its(key)) keys[action] = key
+      }
     }
-    if (Object.keys(keys).length === 0 && !s.autoFix && !s.layoutBadge) return this.stop()
+    const on = !s.paused
+    const layoutKeys = on && s.switchOn ? s.layoutKeys : {}
+    const apps = Object.fromEntries(s.apps.map(a => [a.exe, { off: a.off, layout: a.layout }]))
+    const watched = on && (s.autoFix || s.layoutBadge || s.trayLayout || Object.keys(layoutKeys).length > 0 || s.apps.some(a => a.layout))
+    if (Object.keys(keys).length === 0 && !watched) return this.stop()
     const config: KbdConfig = {
       keys,
-      autoFix: s.autoFix,
-      badge: s.layoutBadge,
+      layoutKeys,
+      autoFix: on && s.autoFix,
+      fixTwoCaps: s.fixTwoCaps,
+      fixCapsLock: s.fixCapsLock,
+      keepCaps: s.keepCaps,
+      fixOnPause: s.fixOnPause,
+      fixSound: s.fixSound,
+      clickFile: path.join(path.dirname(this.wordsDir), 'fix.wav'),
+      badge: on && s.layoutBadge,
+      trayLayout: on && s.trayLayout,
       cycle: s.layouts,
       languages: myLanguages(s),
-      fixApps: s.fixApps,
+      apps: on ? apps : {},
       keepWords: s.keepWords,
+      learn: on && s.learn,
+      ...learned,
+      quietFullScreen: s.quietFullScreen,
       words: Object.fromEntries(FIX_LANGUAGES.map(code => [code, path.join(this.wordsDir, `${code}.txt`)])),
     }
     if (!this.worker) this.start()
     this.post({ type: 'config', config })
+  }
+
+  /** The main process converted the selection and selected it again: the fix key goes on with it. */
+  selected(): void {
+    this.post({ type: 'selected' })
   }
 
   /** Switches the window in front to a layout. */
@@ -153,10 +195,17 @@ export class KeyboardHelper {
         PostThreadMessageW(this.tid, WM_APP_PORT, 0, 0)
         return
       case 'layout':
-        this.showBadge(message.layout, message.caret)
+        if (message.badge) this.showBadge(message.layout, message.caps, message.caret)
+        this.events.layout(message.layout, message.caps)
         return
       case 'keep':
         this.events.keep(message.word)
+        return
+      case 'fixedByHand':
+        this.events.fixedByHand({ word: message.word, lang: message.lang })
+        return
+      case 'tally':
+        this.events.tally(message.hash, message.count, message.word)
         return
       case 'selection':
         this.events.selection(message.cycle)
@@ -165,7 +214,7 @@ export class KeyboardHelper {
         this.events.hotkey(message.action)
         return
       case 'app':
-        this.events.app(message.exe)
+        this.events.app(message.exe, message.elevated)
         return
       case 'foreignKeys':
         this.events.foreignKeys()
@@ -178,24 +227,40 @@ export class KeyboardHelper {
 
   // ---------------------------------------------------------------- the badge
 
-  private shortOf(layout: string): string {
+  shortOf(layout: string): string {
     if (!this.shorts.has(layout)) for (const l of keyboardLayouts()) this.shorts.set(l.id, l.short)
     return this.shorts.get(layout) ?? '?'
   }
 
-  /** Shows the layout's short name by the text cursor (physical pixels), or by the pointer when the program has no system cursor. */
-  private showBadge(layout: string, caret: { x: number; y: number; h: number } | undefined): void {
+  /** A word in the badge by the text cursor while Altype works there (Translate in place); empty hides it. */
+  say(text: string): void {
+    if (!text) {
+      if (this.badgeTimer) clearTimeout(this.badgeTimer)
+      if (this.badge && !this.badge.isDestroyed()) this.badge.hide()
+      return
+    }
+    const front = foreground()
+    this.showBadgeText(text, { width: BADGE.width, height: BADGE.height }, front.tid ? caretOf(front.tid) : undefined, SAY_MS)
+  }
+
+  /** Shows the layout's short name (and Caps Lock, when on) by the text cursor (physical pixels), or by the pointer when the program has no system cursor. */
+  private showBadge(layout: string, caps: boolean, caret: { x: number; y: number; h: number } | undefined): void {
+    const size = { width: caps ? BADGE_CAPS_WIDTH : BADGE.width, height: BADGE.height }
+    this.showBadgeText(`${this.shortOf(layout)}${caps ? ' ⇪' : ''}`, size, caret, BADGE_MS)
+  }
+
+  private showBadgeText(text: string, size: { width: number; height: number }, caret: { x: number; y: number; h: number } | undefined, ms: number): void {
     const win = this.badgeWindow()
     const at = caret ? screen.screenToDipPoint({ x: caret.x, y: caret.y + caret.h }) : screen.getCursorScreenPoint()
     const offset = caret ? { x: 0, y: 4 } : { x: 14, y: 20 }
     const area = screen.getDisplayNearestPoint(at).workArea
-    const x = Math.round(Math.min(Math.max(area.x, at.x + offset.x), area.x + area.width - BADGE.width))
-    const y = Math.round(Math.min(Math.max(area.y, at.y + offset.y), area.y + area.height - BADGE.height))
-    win.setBounds({ x, y, ...BADGE })
-    void win.webContents.executeJavaScript(`document.getElementById('badge').textContent = ${JSON.stringify(this.shortOf(layout))}`).catch(() => undefined)
+    const x = Math.round(Math.min(Math.max(area.x, at.x + offset.x), area.x + area.width - size.width))
+    const y = Math.round(Math.min(Math.max(area.y, at.y + offset.y), area.y + area.height - size.height))
+    win.setBounds({ x, y, ...size })
+    void win.webContents.executeJavaScript(`document.getElementById('badge').textContent = ${JSON.stringify(text)}`).catch(() => undefined)
     win.showInactive()
     if (this.badgeTimer) clearTimeout(this.badgeTimer)
-    this.badgeTimer = setTimeout(() => win.hide(), BADGE_MS)
+    this.badgeTimer = setTimeout(() => win.hide(), ms)
   }
 
   private badgeWindow(): BrowserWindow {

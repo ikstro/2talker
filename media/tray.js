@@ -1,5 +1,21 @@
 "use strict";
 (() => {
+  // src/hotkey.ts
+  function hotkeyLabel(hotkey) {
+    const name = (mod) => mod === "Control" ? "Ctrl" : mod === "Super" ? "Win" : mod;
+    return hotkey.split("+").map((part) => {
+      const [key, times] = part.split("*");
+      const side = /^(Left|Right)(Control|Shift|Alt|Super)$/.exec(key ?? "");
+      if (side) return `${side[1]} ${name(side[2])}${times === "2" ? " twice" : ""}`;
+      if (part === "CapsLock") return "Caps Lock";
+      if (part === "ScrollLock") return "Scroll Lock";
+      if (part === "MouseBack") return "Mouse Back";
+      if (part === "MouseForward") return "Mouse Forward";
+      if (part === "CommandOrControl" || part === "CmdOrCtrl") return "Ctrl";
+      return name(part);
+    }).join("+");
+  }
+
   // src/webview/dom.ts
   function el(tag, attrs = {}, ...children) {
     const node = document.createElement(tag);
@@ -21,22 +37,6 @@
   }
   function dwmFlag() {
     document.documentElement.classList.toggle("dwm", new URLSearchParams(location.search).get("frame") === "dwm");
-  }
-
-  // src/hotkey.ts
-  function hotkeyLabel(hotkey) {
-    const name = (mod) => mod === "Control" ? "Ctrl" : mod === "Super" ? "Win" : mod;
-    return hotkey.split("+").map((part) => {
-      const [key, times] = part.split("*");
-      const side = /^(Left|Right)(Control|Shift|Alt|Super)$/.exec(key ?? "");
-      if (side) return `${side[1]} ${name(side[2])}${times === "2" ? " twice" : ""}`;
-      if (part === "CapsLock") return "Caps Lock";
-      if (part === "ScrollLock") return "Scroll Lock";
-      if (part === "MouseBack") return "Mouse Back";
-      if (part === "MouseForward") return "Mouse Forward";
-      if (part === "CommandOrControl" || part === "CmdOrCtrl") return "Ctrl";
-      return name(part);
-    }).join("+");
   }
 
   // src/webview/keycaps.ts
@@ -178,6 +178,7 @@
         { class: "sec" },
         command("listenCopied", "volume-2", "Listen to the copied text", "listenCopied", v.keys.listenCopied),
         command("translateCopied", "languages", "Translate the copied text", "translateCopied"),
+        command("typeToTranslate", "type", "Type to translate\u2026", "typeToTranslate"),
         command("listenScreen", "scan", "Listen to a screen snip", "listenScreen", v.keys.snipListen),
         command("translateScreen", "scan", "Translate a screen snip", "translateScreen", v.keys.snipTranslate)
       ),
@@ -190,11 +191,14 @@
       el(
         "section",
         { class: "sec sw" },
-        el("div", { class: "grp" }, "Quick settings"),
-        toggle("autoFix", "keyboard", "Fix the layout as I type", v.autoFix),
-        toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy),
-        toggle("paused", "pause", "Pause Altype", v.paused)
+        el("div", { class: "grp" }, "Keyboard"),
+        toggle("autoFix", "spell-check", "Fix the layout as I type", v.autoFix),
+        v.keys.switch ? toggle("switchOn", "keyboard", `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
+        toggle("layoutBadge", "type", "Show the layout by the cursor", v.layoutBadge),
+        toggle("trayLayout", "keyboard", "Show the layout in the tray", v.trayLayout)
       ),
+      el("section", { class: "sec sw" }, el("div", { class: "grp" }, "Listen"), toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)),
+      el("section", { class: "sec sw" }, toggle("paused", "pause", "Pause Altype", v.paused)),
       el("section", { class: "sec" }, command("settings", "settings", "Settings", "settings"), command("quit", "power", "Quit", "quit"))
     );
     root.replaceChildren(panel);

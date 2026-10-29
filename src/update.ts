@@ -1,6 +1,8 @@
 // Updates from the GitHub releases of ikstro/altype (electron-builder.yml
 // names them): checked when the app starts and every few hours, downloaded
 // quietly, installed when the app quits. A run from source never updates.
+// Test versions (a prerelease, a tag like v1.2.0-beta.1) come only to those
+// who asked for them in Settings.
 
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
@@ -20,8 +22,12 @@ export class Updater {
   status: UpdateStatus = { status: app.isPackaged ? 'idle' : 'dev' }
   private timer: NodeJS.Timeout | undefined
 
-  constructor(private readonly events: UpdaterEvents) {
+  constructor(
+    private readonly events: UpdaterEvents,
+    beta = false,
+  ) {
     if (!app.isPackaged) return
+    if (beta) this.beta(true)
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.logger = null
@@ -45,6 +51,24 @@ export class Updater {
   check(): void {
     if (!app.isPackaged || this.status.status === 'ready' || this.status.status === 'downloading') return
     autoUpdater.checkForUpdates().catch(error => this.set(updateFailure(error)))
+  }
+
+  /** Test versions wanted, or not any more (a test version installed stays until a release passes it). */
+  setBeta(on: boolean): void {
+    if (!app.isPackaged) return
+    this.beta(on)
+    this.check()
+  }
+
+  /**
+   * The beta channel reads beta.yml, which every release has too (electron-builder.yml:
+   * generateUpdatesFilesForAllChannels), so a release still comes; back to latest, a test
+   * version gives way to the release before it.
+   */
+  private beta(on: boolean): void {
+    if (on) autoUpdater.channel = 'beta'
+    else if (autoUpdater.channel) autoUpdater.channel = 'latest'
+    autoUpdater.allowPrerelease = on
   }
 
   dispose(): void {

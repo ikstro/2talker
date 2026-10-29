@@ -1,6 +1,8 @@
 # A tag v<version> (matching package.json) builds the Windows installer and
 # publishes it as a GitHub release with latest.yml, which installed copies
-# read to update themselves (src/update.ts).
+# read to update themselves (src/update.ts). A tag with a dash (v1.2.0-beta.1)
+# is a test version: published as a prerelease with beta.yml, which only
+# copies with test versions on in Settings read.
 name: Release
 
 on:
@@ -38,7 +40,7 @@ jobs:
       - run: npm run dist -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: gh release edit "$env:TAG" --draft=false
+      - run: if ($env:TAG.Contains('-')) { gh release edit "$env:TAG" --draft=false --prerelease } else { gh release edit "$env:TAG" --draft=false }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}

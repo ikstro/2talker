@@ -16,7 +16,8 @@ import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
 import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
 import { LANGUAGES } from '../languages'
-import { myLanguages, RATES, type ThemeMode } from '../settings'
+import { myLanguages, RATES, type AppRule, type ThemeMode } from '../settings'
+import type { AppPart } from '../typist'
 import { parseEntry } from '../vocabulary'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
@@ -63,7 +64,12 @@ let askedTab: AppTab | undefined
 let askedTranscript = ''
 let search = ''
 /** Why the last key was not taken, shown under its row until another change. */
-let keyTrouble: { name: KeyName; text: string } | undefined
+/** Why the last key recorded was not kept: by the setting's name, or a layout's id. */
+let keyTrouble: { name: string; text: string } | undefined
+/** The program whose page is open (Keyboard › Programs › one of them). */
+let programOpen = ''
+/** The programs with a window open now, asked when the Programs page opens. */
+let runningApps: string[] = []
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)')
 // #t= and #pt= freeze the moment and a page's growth at a time (seconds), for
@@ -694,7 +700,22 @@ type Growth = {
 }
 
 /** A page of a page: a list or a long part of an action's page, opened from a card with a chevron. */
-type SubId = 'vocabulary' | 'recent' | 'model' | 'meet' | 'speakers' | 'layouts' | 'programs' | 'kept' | 'languages' | 'engine' | 'computer'
+type SubId =
+  | 'vocabulary'
+  | 'recent'
+  | 'translations'
+  | 'model'
+  | 'meet'
+  | 'speakers'
+  | 'layouts'
+  | 'fixing'
+  | 'programs'
+  | 'program'
+  | 'kept'
+  | 'learned'
+  | 'languages'
+  | 'engine'
+  | 'computer'
 
 /** The open page: its name, the second-level page on it, and where the first was scrolled to before it. */
 let open: { name: Page; sub?: SubId; parentScroll?: number } | undefined
@@ -867,12 +888,16 @@ type Sub = { title: string; cap?: (v: AppView) => string; body: (v: AppView) => 
 const SUBS: Record<SubId, Sub> = {
   vocabulary: { title: 'Words to spell', body: vocabularyPage },
   recent: { title: 'Recent phrases', cap: () => 'kept 30 days on this computer', body: recentPage },
+  translations: { title: 'Recent translations', cap: () => 'kept 30 days on this computer', body: translationsPage },
   model: { title: 'Speech model', body: modelPage, valid: running },
   meet: { title: 'Google Meet', cap: () => 'the Altype extension for Chrome', body: meetPage },
   speakers: { title: 'Who spoke when', cap: () => 'the voices told apart', body: speakerRows, valid: installed },
   layouts: { title: 'Layouts', cap: () => 'in the order the keys go through them', body: layoutsPage },
-  programs: { title: 'Programs left out', body: programsPage },
+  fixing: { title: 'Fixing as I type', cap: () => 'what is set right as you type', body: fixingPage },
+  programs: { title: 'Programs', cap: () => 'left out of parts, or with a layout of their own', body: programsPage },
+  program: { title: 'Program', cap: () => programOpen, body: programPage, valid: () => !!programOpen },
   kept: { title: 'Kept as typed', body: keptPage },
+  learned: { title: 'What Altype learned', cap: () => 'on this computer only', body: learnedPage },
   languages: { title: 'Languages you use', body: languagesPage },
   engine: { title: 'Speech engine', body: enginePage },
   computer: { title: 'This computer', body: computerPage },
@@ -1050,41 +1075,89 @@ function tryIt(text: string, how: string): HTMLElement {
 
 // ---------------------------------------------------------------- keys on pages
 
-type KeyName = 'selectKey' | 'snipKey' | 'translateKey' | 'textKey' | 'switchKey' | 'fixKey' | 'dictateKey' | 'englishKey' | 'noteKey' | 'againKey'
+type KeyName = 'selectKey' | 'snipKey' | 'translateKey' | 'textKey' | 'inPlaceKey' | 'switchKey' | 'fixKey' | 'dictateKey' | 'englishKey' | 'noteKey' | 'againKey' | 'pauseKey' | 'windowKey'
 
 const KEY_USE: Record<KeyName, string> = {
   selectKey: 'listening to the selection',
   snipKey: 'listening to a piece of the screen',
   translateKey: 'translating the selection',
   textKey: 'translating a piece of the screen',
+  inPlaceKey: 'translating in place',
   switchKey: 'switching the layout',
   fixKey: 'fixing the layout',
   dictateKey: 'dictating',
   englishKey: 'dictating in English',
   noteKey: 'dictating a note',
   againKey: 'typing the last phrase again',
+  pauseKey: 'pausing Altype',
+  windowKey: 'opening Altype',
+}
+
+/** What else a key is for already, besides `self` (a setting's name, or a layout's id for its own key). */
+function keyTakenBy(key: string, self: string): string | undefined {
+  const s = view?.settings
+  if (!s) return undefined
+  const other = (Object.keys(KEY_USE) as KeyName[]).find(n => n !== self && s[n] === key)
+  if (other) return KEY_USE[other]
+  const layout = Object.entries(s.layoutKeys).find(([id, k]) => id !== self && k === key)?.[0]
+  return layout ? `going to ${view?.layouts.find(l => l.id === layout)?.name ?? 'a layout'}` : undefined
 }
 
 /** Saves a key unless another use has it already. */
 function saveKey(name: KeyName, key: string): void {
-  const s = view?.settings
-  const other = s && (Object.keys(KEY_USE) as KeyName[]).find(n => n !== name && s[n] === key)
+  const other = keyTakenBy(key, name)
   if (other) {
-    keyTrouble = { name, text: `${hotkeyLabel(key)} is already for ${KEY_USE[other]}.` }
+    keyTrouble = { name, text: `${hotkeyLabel(key)} is already for ${other}.` }
     return renderBody()
   }
   keyTrouble = undefined
   save({ [name]: key })
 }
 
+/** A key of an action, from the settings (see keyRecorder). */
+function keyRow(name: KeyName, label: string, note: string, taken = false, iconName?: LucideName, extra?: HTMLElement | null): HTMLElement {
+  return keyRecorder(name, view?.settings[name] ?? '', key => saveKey(name, key), label, note, taken, iconName, extra)
+}
+
+/** A layout's own key, which goes to that layout at once. */
+function layoutKeyRow(l: KeyboardLayout, label: string, note: (string | HTMLElement)[]): HTMLElement {
+  const keys = () => view?.settings.layoutKeys ?? {}
+  const set = (key: string) => {
+    const next = { ...keys() }
+    if (key) next[l.id] = key
+    else delete next[l.id]
+    save({ layoutKeys: next })
+  }
+  const saveIt = (key: string) => {
+    const other = key ? keyTakenBy(key, l.id) : undefined
+    if (other) {
+      keyTrouble = { name: l.id, text: `${hotkeyLabel(key)} is already for ${other}.` }
+      return renderBody()
+    }
+    keyTrouble = undefined
+    set(key)
+  }
+  return keyRecorder(l.id, keys()[l.id] ?? '', saveIt, label, note, false, 'keyboard')
+}
+
 /**
- * A key of an action, recorded from a press: Change (or a tap on the keys)
- * listens for keys with modifiers, a modifier tapped alone or twice (it waits
- * a moment for a second tap), modifiers pressed together, Pause or Caps Lock
- * alone, the mouse's side buttons. Esc gives up; × clears the key.
+ * A key recorded from a press: Change (or a tap on the keys) listens for keys
+ * with modifiers, a modifier tapped alone or twice (it waits a moment for a
+ * second tap), modifiers pressed together, Pause or Caps Lock alone, the
+ * mouse's side buttons. Esc gives up; × clears the key. `id` names it for the
+ * trouble line under it; `extra` sits after its controls (a switch).
  */
-function keyRow(name: KeyName, label: string, note: string, taken = false, iconName?: LucideName): HTMLElement {
-  const current = view?.settings[name] ?? ''
+function keyRecorder(
+  id: string,
+  current: string,
+  saveKeyAs: (key: string) => void,
+  label: string,
+  note: string | (string | HTMLElement)[],
+  taken = false,
+  iconName?: LucideName,
+  extra?: HTMLElement | null,
+): HTMLElement {
+  const name = id
   const recorder = new HotkeyRecorder()
   let waiting: number | undefined
   const field = el('button', {
@@ -1097,7 +1170,7 @@ function keyRow(name: KeyName, label: string, note: string, taken = false, iconN
   const done = (key: string) => {
     window.clearTimeout(waiting)
     field.blur()
-    saveKey(name, key)
+    saveKeyAs(key)
   }
   const recorded = (r: Recorded | undefined) => {
     window.clearTimeout(waiting)
@@ -1152,17 +1225,18 @@ function keyRow(name: KeyName, label: string, note: string, taken = false, iconN
           'aria-label': `Clear ${label}`,
           onclick: () => {
             keyTrouble = undefined
-            save({ [name]: '' })
+            saveKeyAs('')
           },
         },
         lucide('x', 's'),
       )
     : null
   const trouble = keyTrouble?.name === name ? keyTrouble.text : ''
+  const notes = typeof note === 'string' ? [note] : note
   const node = row(
     label,
-    [note, taken && current ? bad('Taken by another program; choose another.') : null, trouble ? bad(trouble) : null],
-    el('span', { class: 'kchg' }, field, clear, linkBtn(current ? 'Change' : 'Set', () => field.click())),
+    [...notes, taken && current ? bad('Taken by another program; choose another.') : null, trouble ? bad(trouble) : null],
+    el('span', { class: 'kchg' }, field, clear, linkBtn(current ? 'Change' : 'Set', () => field.click()), extra ?? null),
   )
   if (iconName) node.prepend(lucide(iconName))
   return node
@@ -1223,12 +1297,38 @@ function translatePage(v: AppView): HTMLElement[] {
   return [
     grp('Keys'),
     keyRow('translateKey', 'Selected text', s.translateKey ? usage(s.translateKey) : 'one key: Left Ctrl twice, for example', !v.keysOk.translate, 'languages'),
+    keyRow('inPlaceKey', 'Translate in place', 'the selection becomes its translation, no card', !v.keysOk.inPlace, 'wand-sparkles'),
     keyRow('textKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.text, 'scan'),
     fixedKey('Paste the translation over the selection', 'Enter'),
     grp('Languages'),
     card('globe', pairOf(v), [note], state),
     languagesCard(v),
+    grp('History'),
+    navCard('clock', 'Recent translations', 'kept 30 days on this computer', v.translations.length ? String(v.translations.length) : 'none', () => openSub('translations'), 'translations'),
     tryIt(text, how),
+  ]
+}
+
+/** The texts translated lately (translationlog.ts), each to copy; Altype forgets them after 30 days by itself. */
+function translationsPage(v: AppView): HTMLElement[] {
+  const list = v.translations
+  return [
+    grp('Translations', list.length || undefined, list.length ? linkBtn('Clear', () => post({ type: 'clearTranslations' })) : null),
+    ...(list.length
+      ? list.map(e =>
+          el(
+            'div',
+            { class: 'row phrase' },
+            el(
+              'div',
+              { class: 'l' },
+              el('span', { class: 'said', title: `${e.text}\n\n${e.translation}` }, e.translation),
+              el('small', {}, `${e.text.length > 80 ? `${e.text.slice(0, 80)}…` : e.text} · ${whenSaid(e.at, Date.now())}`),
+            ),
+            linkBtn('Copy', () => copyText(e.translation)),
+          ),
+        )
+      : [aside('info', 'Nothing yet. Translations are kept here 30 days, 200 at most.')]),
   ]
 }
 
@@ -1574,30 +1674,138 @@ function layoutsPage(v: AppView): HTMLElement[] {
         )
       : null,
     aside('info', own ? 'Your own order. Leave every layout out to go back to the languages you use.' : 'The order comes from the languages you use (Settings); move one or leave one out to set your own.'),
+    grp('A key of its own'),
+    ...cycle.map(l => layoutKeyRow(l, l.name, ['goes straight to it'])),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
-/** Programs where words are never fixed by themselves. */
+/** What fixing as one types also sets right, and how. */
+function fixingPage(v: AppView): HTMLElement[] {
+  const s = v.settings
+  return [
+    grp('Capitals'),
+    toggleCard('type', 'Two capitals at the start', s.fixTwoCaps, fixTwoCaps => save({ fixTwoCaps }), 'ПРивет → Привет · IDs and URLs stay'),
+    toggleCard('type', 'A word typed with Caps Lock left on', s.fixCapsLock, fixCapsLock => save({ fixCapsLock }), 'пРИВЕТ → Привет, and Caps Lock goes off'),
+    toggleCard('lock', 'Leave words in capitals as typed', s.keepCaps, keepCaps => save({ keepCaps }), 'abbreviations: nothing typed in capitals is fixed'),
+    grp('When'),
+    toggleCard('clock', 'Also after a pause', s.fixOnPause, fixOnPause => save({ fixOnPause }), 'a word that is clearly wrong is fixed a second after the last key'),
+    toggleCard('volume-2', 'A quiet click when a word is fixed', s.fixSound, fixSound => save({ fixSound })),
+    aside('info', 'Short words go with the word after them: z rfr → я как. The first word after you switch the layout yourself is left as you typed it.'),
+  ]
+}
+
+/** The programs with parts of the keyboard helper left out, or a layout of their own: one card each, opening its page. */
 function programsPage(v: AppView): HTMLElement[] {
   const s = v.settings
-  const apps = () => view?.settings.fixApps ?? s.fixApps
-  const add = (exe: string) => save({ fixApps: [...apps(), exe] })
-  const suggest = v.lastApp && !s.fixApps.includes(v.lastApp) ? v.lastApp : ''
-  return listPage({
-    label: 'Add a program',
-    placeholder: 'program.exe',
-    note: 'The name of its .exe. Words typed there are never fixed by themselves; the fix key still works.',
-    items: s.fixApps,
-    count: 'Programs',
-    empty: 'None yet. Add a program above, or the one in front a moment ago.',
-    normalize: text => {
-      const name = text.trim().toLowerCase()
-      return name ? (/\.exe$/.test(name) ? name : `${name}.exe`) : ''
-    },
-    add,
-    remove: exe => save({ fixApps: apps().filter(a => a !== exe) }),
-    extra: suggest ? card('plus', `Add ${suggest}`, ['the program in front a moment ago'], btn('Add', () => add(suggest))) : null,
-  })
+  const apps = () => view?.settings.apps ?? s.apps
+  const add = (exe: string) => {
+    if (!apps().some(a => a.exe === exe)) save({ apps: [...apps(), { exe, off: ['fix'], layout: '' }] })
+  }
+  const known = new Set(s.apps.map(a => a.exe))
+  const running = runningApps.filter(exe => !known.has(exe))
+  const suggest = v.lastApp && !known.has(v.lastApp) ? v.lastApp : ''
+  const addTyped = (field: HTMLInputElement) => {
+    const name = field.value.trim().toLowerCase()
+    field.value = ''
+    if (name) add(/\.exe$/.test(name) ? name : `${name}.exe`)
+  }
+  const field = liveField('add', 'program.exe', 'Add a program', (key, f) => (key === 'Enter' ? addTyped(f) : ((f.value = ''), f.blur())))
+  return [
+    grp('Add a program'),
+    el(
+      'div',
+      { class: 'row add' },
+      el('div', { class: 'fields' }, field, btn([lucide('plus', 's'), 'Add'], () => addTyped(field), 'primary')),
+      el('small', {}, 'The name of its .exe. It starts with fixing as you type left out; open it to choose more.'),
+    ),
+    suggest ? card('plus', `Add ${suggest}`, ['the program in front a moment ago'], btn('Add', () => add(suggest))) : null,
+    running.length
+      ? card(
+          'plus',
+          'Add a running program',
+          ['one with a window open now'],
+          select<string>('', [['', 'Pick a program'], ...running.map((exe): [string, string] => [exe, exe])], exe => exe && add(exe)),
+        )
+      : null,
+    grp('Programs', s.apps.length || undefined),
+    ...(s.apps.length
+      ? s.apps.map(a =>
+          navCard(
+            'monitor',
+            a.exe,
+            programNote(v, a),
+            null,
+            () => {
+              programOpen = a.exe
+              openSub('program')
+            },
+            `program-${a.exe}`,
+          ),
+        )
+      : [aside('info', 'None yet. Add a program above: Altype leaves out what you choose there, or switches to its own layout when it comes to the front.')]),
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
+const APP_PART_NAMES: Record<AppPart, string> = { fix: 'fixing as you type', switch: 'the switch keys', badge: 'the badge', keys: 'every key of Altype' }
+
+/** What a program's rule does, in a few words. */
+function programNote(v: AppView, a: AppRule): string {
+  const off = a.off.length ? `left out: ${a.off.map(p => APP_PART_NAMES[p]).join(', ')}` : ''
+  const layout = a.layout ? `starts in ${v.layouts.find(l => l.id === a.layout)?.name ?? a.layout}` : ''
+  return [off, layout].filter(Boolean).join(' · ') || 'nothing left out'
+}
+
+/** One program: the parts left out there, its own layout, or out of the list. */
+function programPage(v: AppView): HTMLElement[] {
+  const rule = v.settings.apps.find(a => a.exe === programOpen)
+  if (!rule) return [aside('info', 'This program is no longer in the list.')]
+  const apps = () => view?.settings.apps ?? v.settings.apps
+  const change = (next: Partial<AppRule>) => save({ apps: apps().map(a => (a.exe === rule.exe ? { ...a, ...next } : a)) })
+  const part = (p: AppPart, iconName: LucideName, label: string, note: string) =>
+    toggleCard(iconName, label, !rule.off.includes(p), on => change({ off: on ? rule.off.filter(x => x !== p) : [...rule.off, p] }), note)
+  return [
+    grp('Here, Altype'),
+    part('fix', 'spell-check', 'Fixes words as you type', 'off: words stay as typed; the fix key still works'),
+    part('switch', 'keyboard', 'Switches the layout by its keys', 'the switch key and the layouts\' own keys'),
+    part('badge', 'type', 'Shows the layout by the cursor', 'the badge'),
+    part('keys', 'circle-alert', 'Hears its keys at all', 'off: none of Altype\'s keys works here, but the pause key'),
+    grp('Layout'),
+    card(
+      'globe',
+      'Starts in',
+      ['each time the program comes to the front'],
+      select<string>(rule.layout, [['', 'As it was'], ...v.layouts.map((l): [string, string] => [l.id, l.name])], layout => change({ layout })),
+    ),
+    card(
+      'trash-2',
+      'Out of the list',
+      ['everything works here again'],
+      linkBtn('Remove', () => {
+        save({ apps: apps().filter(a => a.exe !== rule.exe) })
+        popSub()
+      }),
+    ),
+  ]
+}
+
+/** What Altype learned from the person's typing: words it fixes always, words of theirs; each can go, or everything. */
+function learnedPage(v: AppView): HTMLElement[] {
+  const { alwaysFix, myWords } = v.learned
+  const name = (code: string) => languageName(code)
+  const item = (list: 'alwaysFix' | 'myWords', w: { word: string; lang: string }, note: string) =>
+    card(list === 'alwaysFix' ? 'wand-sparkles' : 'book-open', w.word, [note], ib('x', `Forget ${w.word}`, () => post({ type: 'unlearn', list, word: w.word })))
+  return [
+    toggleCard('sparkles', 'Learn from my typing', v.settings.learn, learn => save({ learn }), 'never in a password field, a program left out of fixing, or on the full screen'),
+    grp('Fixed always', alwaysFix.length || undefined),
+    ...(alwaysFix.length ? alwaysFix.map(w => item('alwaysFix', w, `into ${name(w.lang)}`)) : [aside('info', 'A word you fix by hand twice (the fix key, or erased and typed again in the other layout) is fixed by itself from then on.')]),
+    grp('Your words', myWords.length || undefined),
+    ...(myWords.length ? myWords.map(w => item('myWords', w, `${name(w.lang)} · never fixed, and fixed into`)) : [aside('info', 'A word in no dictionary that you type right three times becomes yours: Altype leaves it as typed, and fixes it into when it is typed in the wrong layout. Until then only an unreadable fingerprint of it is kept.')]),
+    grp('Never fixed'),
+    navCard('lock', 'Kept as typed', 'words never fixed by themselves', String(v.settings.keepWords.length || 'none'), () => openSub('kept'), 'kept'),
+    alwaysFix.length || myWords.length
+      ? card('trash-2', 'Forget all', ['what Altype learned goes; Kept as typed stays'], linkBtn('Forget', () => post({ type: 'forgetLearned' })))
+      : null,
+  ].filter((n): n is HTMLElement => n !== null)
 }
 
 /** Words never fixed by themselves: Backspace after a fix adds one, and so can the person, before the fix ever happens. */
@@ -1628,26 +1836,59 @@ function othersLine(v: AppView): HTMLElement | null {
   return text ? aside('info', text) : null
 }
 
+/** The programs with a window open now, asked of main for the Programs page; it is drawn again with them. */
+function askRunningApps(): void {
+  void window.tutorHost.call({ call: 'runningApps' }).then(list => {
+    runningApps = Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []
+    if (open?.sub === 'programs') renderBody()
+  }, fault)
+}
+
 function keyboardPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const sample = sampleOf(s.native)
   const [typed = '', fixed = ''] = [sample.typed.split(' ')[0], sample.fixed.split(' ')[0]]
   const count = (n: number, one: string) => (n ? `${n} ${n === 1 ? one : one + 's'}` : 'none')
+  const ownKeys = Object.keys(s.layoutKeys).length
+  const learnedCount = v.learned.alwaysFix.length + v.learned.myWords.length
+  const onOff = (on: boolean, key: 'switchOn' | 'fixKeyOn', label: string, has: boolean) => (has ? el('span', { class: 'tgwrap' }, toggleKnob(on, next => save({ [key]: next }), label)) : null)
   return [
     grp('Keys'),
-    keyRow('switchKey', 'Switch the layout', s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below', false, 'keyboard'),
-    keyRow('fixKey', 'Fix what was typed wrong', 'the last word; again for the next layout; or the selection', false, 'rotate-cw'),
+    keyRow(
+      'switchKey',
+      'Switch the layout',
+      s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below',
+      false,
+      'keyboard',
+      onOff(s.switchOn, 'switchOn', 'Switching by keys', !!s.switchKey || ownKeys > 0),
+    ),
+    keyRow('fixKey', 'Fix what was typed wrong', 'the words at the end typed in the wrong layout; again: the next layout; or the selection', false, 'rotate-cw', onOff(s.fixKeyOn, 'fixKeyOn', 'The fix key', !!s.fixKey)),
     grp('As you type'),
     toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} on the space · Backspace takes it back`),
-    toggleCard('type', 'Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge }), 'a small badge whenever the layout changes'),
+    s.autoFix ? navCard('type', 'Fixing as I type', 'capitals, short words, a pause, a click', null, () => openSub('fixing'), 'fixing') : null,
+    toggleCard('type', 'Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge }), 'a small badge whenever the layout or Caps Lock changes'),
+    toggleCard('keyboard', 'Show the layout in the tray', s.trayLayout, trayLayout => save({ trayLayout }), 'the tray icon becomes a key with the layout on it: en, ru'),
+    toggleCard('monitor', 'Rest on the full screen', s.quietFullScreen, quietFullScreen => save({ quietFullScreen }), 'games, presentations, videos: nothing is fixed or switched'),
     grp('Lists'),
-    navCard('keyboard', 'Layouts', 'the ones the keys go through, in order', cycleOf(v).map(l => l.short).join(' · '), () => openSub('layouts'), 'layouts'),
-    navCard('monitor', 'Programs left out', 'where words are never fixed by themselves', count(s.fixApps.length, 'program'), () => openSub('programs'), 'programs'),
+    navCard('keyboard', 'Layouts', ownKeys ? `the ones the keys go through · ${ownKeys} with a key of its own` : 'the ones the keys go through, in order', cycleOf(v).map(l => l.short).join(' · '), () => openSub('layouts'), 'layouts'),
+    navCard(
+      'monitor',
+      'Programs',
+      'left out of parts, or with a layout of their own',
+      count(s.apps.length, 'program'),
+      () => {
+        askRunningApps()
+        openSub('programs')
+      },
+      'programs',
+    ),
+    navCard('sparkles', 'What Altype learned', s.learn ? 'from your typing: words it fixes always, words of yours' : 'learning from your typing is off', count(learnedCount, 'word'), () => openSub('learned'), 'learned'),
     navCard('lock', 'Kept as typed', 'words never fixed by themselves', count(s.keepWords.length, 'word'), () => openSub('kept'), 'kept'),
     v.rivals.length ? warn(`${v.rivals.join(' and ')} ${v.rivals.length > 1 ? 'are' : 'is'} running: turn off its layout switching, or words get fixed twice.`) : null,
+    v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Altype, so nothing is fixed or switched there.`) : null,
     v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
     othersLine(v),
-    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Altype looks only at the keys of what you are typing, keeps nothing and sends nothing anywhere.'),
+    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Altype looks only at the keys of what you are typing and sends nothing anywhere. It keeps only the words it learned, on this computer.'),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -1984,11 +2225,26 @@ function settingsPage(v: AppView): HTMLElement[] {
     ),
     toggleCard('power', 'Start with Windows', s.startWithWindows, startWithWindows => save({ startWithWindows })),
     toggleCard('pause', 'Pause Altype', s.paused, paused => save({ paused }), 'every key and reaction off until it is turned back on · also in the tray'),
+    keyRow('pauseKey', 'Pause or resume by a key', 'works while paused too', !v.keysOk.pause, 'pause'),
+    keyRow('windowKey', 'Open Altype by a key', 'this window, from anywhere', !v.keysOk.window, 'house'),
     card(
       'rotate-cw',
       `Version ${v.version}`,
       [u.status === 'failed' ? bad(updateText(u)) : updateText(u)],
       linkBtn('Check for updates', () => post({ type: 'checkUpdates' }), u.status === 'dev' || u.status === 'checking' || u.status === 'downloading'),
+    ),
+    toggleCard('sparkles', 'Test versions', s.betaUpdates, betaUpdates => save({ betaUpdates }), 'new things before a release; a release still comes'),
+    card(
+      'file-text',
+      'Settings file',
+      ['keep your settings, take them to another computer, or start over'],
+      el(
+        'span',
+        { class: 'kchg' },
+        linkBtn('Export', () => post({ type: 'exportSettings' })),
+        linkBtn('Import', () => post({ type: 'importSettings' })),
+        linkBtn('Reset', () => post({ type: 'resetSettings' })),
+      ),
     ),
     grp('Speech'),
     engineCard(v),

@@ -11,6 +11,8 @@ import { keyId, tableOf, type KeyTable } from './layoutfix'
 
 const user32 = koffi.load('user32.dll')
 const kernel32 = koffi.load('kernel32.dll')
+const advapi32 = koffi.load('advapi32.dll')
+const shell32 = koffi.load('shell32.dll')
 
 const POINT = koffi.struct('KbdPoint', { x: 'int32', y: 'int32' })
 const RECT = koffi.struct('KbdRect', { left: 'int32', top: 'int32', right: 'int32', bottom: 'int32' })
@@ -49,9 +51,34 @@ const SendInput = user32.func('uint32 __stdcall SendInput(uint32 n, KbdInput *in
 const OpenProcess = kernel32.func('intptr __stdcall OpenProcess(uint32 access, bool inherit, uint32 pid)')
 const QueryFullProcessImageNameW = kernel32.func('bool __stdcall QueryFullProcessImageNameW(intptr process, uint32 flags, void *name, _Inout_ uint32 *size)')
 const CloseHandle = kernel32.func('bool __stdcall CloseHandle(intptr handle)')
+const OpenProcessToken = advapi32.func('bool __stdcall OpenProcessToken(intptr process, uint32 access, _Out_ intptr *token)')
+const GetTokenInformation = advapi32.func('bool __stdcall GetTokenInformation(intptr token, int cls, _Out_ uint32 *info, uint32 size, _Out_ uint32 *returned)')
+const SHQueryUserNotificationState = shell32.func('int32 __stdcall SHQueryUserNotificationState(_Out_ int32 *state)')
+const EnumWindowsProc = koffi.proto('bool __stdcall KbdEnumWindowsProc(intptr hwnd, intptr param)')
+const EnumWindows = user32.func('bool __stdcall EnumWindows(KbdEnumWindowsProc *proc, intptr param)')
+const IsWindowVisible = user32.func('bool __stdcall IsWindowVisible(intptr hwnd)')
+const GetWindowTextLengthW = user32.func('int __stdcall GetWindowTextLengthW(intptr hwnd)')
+const GetWindow = user32.func('intptr __stdcall GetWindow(intptr hwnd, uint32 cmd)')
+const GetWindowLongPtrW = user32.func('intptr __stdcall GetWindowLongPtrW(intptr hwnd, int index)')
+const GetClassNameW = user32.func('int __stdcall GetClassNameW(intptr hwnd, void *name, int n)')
+const SetWindowPos = user32.func('bool __stdcall SetWindowPos(intptr hwnd, intptr after, int x, int y, int cx, int cy, uint32 flags)')
+const HWND_TOPMOST = -1
+const SWP_NOSIZE = 0x1
+const SWP_NOMOVE = 0x2
+const SWP_NOACTIVATE = 0x10
+const GW_HWNDPREV = 3
+const GW_OWNER = 4
+const GWL_EXSTYLE = -20
+const WS_EX_TOPMOST = 0x8
+const WS_EX_TRANSPARENT = 0x20
+const DWMWA_CLOAKED = 14
 
 const WM_INPUTLANGCHANGEREQUEST = 0x0050
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+const TOKEN_QUERY = 0x0008
+const TOKEN_ELEVATION = 20
+/** SHQueryUserNotificationState: a program on the full screen, a Direct3D one, presentation mode. */
+const FULL_SCREEN_STATES = new Set([2, 3, 4])
 const INPUT_KEYBOARD = 1
 const KEYEVENTF_KEYUP = 0x0002
 const KEYEVENTF_UNICODE = 0x0004
@@ -172,6 +199,64 @@ export function windowRect(hwnd: bigint): { x: number; y: number; width: number;
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
 
+type GetAttribute = (hwnd: bigint | number, attr: number, value: number[], size: number) => number
+let getAttribute: GetAttribute | undefined
+function dwmAttribute(): GetAttribute {
+  return (getAttribute ??= koffi.load('dwmapi.dll').func('int32 __stdcall DwmGetWindowAttribute(intptr hwnd, uint32 attr, _Out_ uint32 *value, uint32 size)'))
+}
+
+/** Why Windows hides a window it calls visible (another virtual desktop, a suspended app): 0 when it does not. */
+function cloakOf(hwnd: bigint | number): number {
+  const value = [0]
+  return dwmAttribute()(hwnd, DWMWA_CLOAKED, value, 4) === 0 ? (value[0] ?? 0) : 0
+}
+
+function exStyleOf(hwnd: bigint | number): number {
+  return Number(GetWindowLongPtrW(hwnd, GWL_EXSTYLE))
+}
+
+/** What Windows itself makes of a window Electron says is shown. */
+export type Sight = {
+  topmost: boolean
+  /** DWM's cloak: 1 the app, 2 the shell (another virtual desktop), 4 its owner's; 0 not hidden. */
+  cloaked: number
+  /** The windows over it that Windows draws, nearest first: "exe (class, on top, click-through)". */
+  above: string[]
+}
+
+/** Whether Windows really shows a window: on top or not, cloaked or not, and what lies over it. */
+export function sightOf(hwnd: bigint): Sight {
+  const own = windowRect(hwnd)
+  const above: string[] = []
+  // Up the z-order from the window itself, so only those above it are seen; a few hundred at most.
+  let next = hwnd as bigint | number
+  for (let i = 0; own && i < 2000 && above.length < 3; i++) {
+    next = GetWindow(next, GW_HWNDPREV) as bigint | number
+    if (!next) break
+    if (!IsWindowVisible(next) || cloakOf(next)) continue
+    const rect = windowRect(BigInt(next))
+    if (!rect || rect.x >= own.x + own.width || own.x >= rect.x + rect.width || rect.y >= own.y + own.height || own.y >= rect.y + rect.height) continue
+    const pid = [0]
+    GetWindowThreadProcessId(next, pid)
+    const name = Buffer.alloc(512)
+    const length = GetClassNameW(next, name, 256) as number
+    const style = exStyleOf(next)
+    const notes = [name.toString('utf16le', 0, length * 2), style & WS_EX_TOPMOST ? 'on top' : '', style & WS_EX_TRANSPARENT ? 'click-through' : ''].filter(Boolean)
+    above.push(`${exeOf(pid[0] ?? 0) || `pid ${pid[0]}`} (${notes.join(', ')})`)
+  }
+  return { topmost: (exStyleOf(hwnd) & WS_EX_TOPMOST) !== 0, cloaked: cloakOf(hwnd), above }
+}
+
+/**
+ * A window above every other, those kept on top too, the focus left where it
+ * is. Windows sometimes leaves a window kept on top under ordinary ones, its
+ * flag still set (2026-10-29, the dictation badge under VS Code): this puts it
+ * back, as Electron's setAlwaysOnTop is not known to when it thinks it is there.
+ */
+export function putOnTop(hwnd: bigint): boolean {
+  return !!SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+}
+
 const exes = new Map<number, string>()
 
 /** A process's program, as its .exe name in lower case; empty when Windows does not say. */
@@ -189,6 +274,58 @@ export function exeOf(pid: number): string {
   if (exes.size > 500) exes.clear()
   exes.set(pid, exe)
   return exe
+}
+
+const elevations = new Map<number, boolean>()
+
+/**
+ * Whether a process runs as administrator: Windows keeps its keys from the
+ * hooks of a program that does not. A process whose token cannot even be read
+ * counts as one.
+ */
+export function elevated(pid: number): boolean {
+  const known = elevations.get(pid)
+  if (known !== undefined) return known
+  let answer = false
+  const handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+  if (handle) {
+    const token = [0]
+    if (OpenProcessToken(handle, TOKEN_QUERY, token)) {
+      const info = [0]
+      const size = [0]
+      answer = !!GetTokenInformation(token[0], TOKEN_ELEVATION, info, 4, size) && info[0] !== 0
+      CloseHandle(token[0])
+    } else answer = true
+    CloseHandle(handle)
+  }
+  if (elevations.size > 500) elevations.clear()
+  elevations.set(pid, answer)
+  return answer
+}
+
+/** The programs with a window open now (visible, titled, owned by none), by .exe name, in order. */
+export function windowedApps(): string[] {
+  const pids = new Set<number>()
+  const visit = koffi.register((hwnd: number | bigint) => {
+    if (IsWindowVisible(hwnd) && (GetWindowTextLengthW(hwnd) as number) > 0 && !GetWindow(hwnd, GW_OWNER)) {
+      const pid = [0]
+      GetWindowThreadProcessId(hwnd, pid)
+      if (pid[0]) pids.add(pid[0])
+    }
+    return true
+  }, koffi.pointer(EnumWindowsProc))
+  try {
+    EnumWindows(visit, 0)
+  } finally {
+    koffi.unregister(visit)
+  }
+  return [...new Set([...pids].map(exeOf).filter(Boolean))].sort()
+}
+
+/** Whether a program fills the screen now: a game, a video or a presentation on the full screen. */
+export function fullScreenNow(): boolean {
+  const state = [0]
+  return (SHQueryUserNotificationState(state) as number) >= 0 && FULL_SCREEN_STATES.has(state[0] ?? 0)
 }
 
 /**

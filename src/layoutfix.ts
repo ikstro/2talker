@@ -2,8 +2,9 @@
 // without Windows: the keys pressed are kept, not the letters, so a word can
 // be read in every layout ("ghbdtn" in the Russian one is "привет"). A word
 // is fixed by itself only when it is no word as typed and a frequent word in
-// another layout; the fix key turns the last word into the layout that makes
-// the best word of it.
+// another layout (or a learned one), short words before it going along when
+// they were meant there; the fix key turns the words at the end that were
+// meant in another layout into the one that makes the best word of the last.
 
 /** One key with or without Shift: `${vk}:${0|1}`. */
 export type KeyId = string
@@ -64,6 +65,21 @@ export function lexiconOf(words: readonly string[]): Lexicon {
   return { rank, trigrams }
 }
 
+/** Where the person's own words (learned from their typing) stand among a language's: known, neither rare nor among the commonest. */
+export const MY_WORD_RANK = 5000
+
+/** A language's words with the person's own added (a copy; the list read from disk stays as it is). */
+export function withWords(lexicon: Lexicon, words: readonly string[]): Lexicon {
+  if (words.length === 0) return lexicon
+  const rank = new Map(lexicon.rank)
+  const trigrams = new Set(lexicon.trigrams)
+  for (const word of words) {
+    if (!rank.has(word)) rank.set(word, MY_WORD_RANK)
+    for (const t of trigramsOf(word)) trigrams.add(t)
+  }
+  return { rank, trigrams }
+}
+
 function trigramsOf(word: string): string[] {
   const marked = `^${word}$`
   const out: string[] = []
@@ -100,23 +116,96 @@ function trusted(word: string, rank: number): boolean {
   return true
 }
 
+function lettersOf(text: string): number {
+  return [...text].filter(c => /\p{L}/u.test(c)).length
+}
+
 /**
  * The reading to fix a just-typed word into, if it is clearly typed in the
  * wrong layout: not a word as typed (nor a kept one), and a word, or at least
  * a word-shaped run of letters, in another layout. A piece with digits, an @
- * or a link, or a capital inside (iPhone), is left alone.
+ * or a link, or a capital inside (iPhone), is left alone. A word as typed is
+ * fixed only when keys that are signs in its layout are letters of a much
+ * commoner word in another (";t" → "же"; "it." stays). A word the person
+ * fixed by hand often enough (`always`: the word as typed → the language it
+ * goes into) is fixed whatever it is; a capital inside is left alone unless
+ * another layout makes a word the person taught of it (`mine`, "lang\nword":
+ * "ыКПИ" → "sRGB").
  */
-export function chooseFix(typed: Reading, others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>, keep: ReadonlySet<string>): Reading | undefined {
+export function chooseFix(
+  typed: Reading,
+  others: readonly Reading[],
+  lexicons: Readonly<Record<string, Lexicon>>,
+  keep: ReadonlySet<string>,
+  always: ReadonlyMap<string, string> = new Map(),
+  mine: ReadonlySet<string> = new Set(),
+): Reading | undefined {
   const t = typed.text
-  if (/\d|@|:\/\/|^www\./i.test(t) || /\p{Ll}\p{Lu}/u.test(t)) return undefined
+  if (/\d|@|:\/\/|^www\./i.test(t)) return undefined
+  if (/\p{Ll}\p{Lu}/u.test(t)) {
+    if (keep.has(t.toLowerCase())) return undefined
+    return others.find(o => {
+      const core = coreOf(o.text)
+      return !!core && mine.has(`${o.lang}\n${core}`)
+    })
+  }
   const own = lexicons[typed.lang]
   if (!own) return undefined
   const core = coreOf(t)
-  if (core !== undefined && (core.length < 2 || own.rank.has(core) || keep.has(core))) return undefined
-  if (keep.has(t.toLowerCase())) return undefined
-  const letters = [...t].filter(c => /\p{L}/u.test(c)).length
-  if (letters < 2) return undefined
+  const word = core ?? t.toLowerCase()
+  if (keep.has(word) || keep.has(t.toLowerCase())) return undefined
+  const learned = always.get(word)
+  if (learned) return others.find(o => o.lang === learned && coreOf(o.text))
+  const rank = core === undefined ? undefined : own.rank.get(core)
+  if (rank !== undefined) {
+    const letters = lettersOf(t)
+    return others.find(o => lettersOf(o.text) > letters && meantThere(typed, o, lexicons) && trustedReading(o, lexicons))
+  }
   return bestReading(others, lexicons, core === undefined ? 0 : plausibility(core, own))
+}
+
+function trustedReading(reading: Reading, lexicons: Readonly<Record<string, Lexicon>>): boolean {
+  const word = coreOf(reading.text)
+  const rank = word === undefined ? undefined : lexicons[reading.lang]?.rank.get(word)
+  return word !== undefined && word.length >= 2 && rank !== undefined && trusted(word, rank)
+}
+
+/** How common a word as typed must at least be, by its length, for a much commoner word in another layout to win over it. */
+const RARE = [0, 500, 1000, 2000]
+
+/**
+ * Whether a piece typed in one layout was meant in another: it reads as a
+ * word there, and as typed it is none, or a much rarer one ("vs" → "мы",
+ * "z" → "я"). A word common as typed stays ("в Telegram", "it."). A kept word
+ * is never meant elsewhere.
+ */
+export function meantThere(typed: Reading, there: Reading, lexicons: Readonly<Record<string, Lexicon>>, keep: ReadonlySet<string> = new Set()): boolean {
+  if (/\d|@|:\/\//.test(typed.text) || typed.layout === there.layout) return false
+  const wanted = coreOf(there.text)
+  const thereRank = wanted === undefined ? undefined : lexicons[there.lang]?.rank.get(wanted)
+  if (thereRank === undefined) return false
+  const core = coreOf(typed.text)
+  if (core !== undefined && keep.has(core)) return false
+  const rank = core === undefined ? undefined : lexicons[typed.lang]?.rank.get(core)
+  if (rank === undefined) return true
+  return rank >= (RARE[Math.min(core?.length ?? 3, 3)] ?? 0) && rank >= 10 * thereRank
+}
+
+/**
+ * The words before a fixed word that go with it (the fix key's whole piece,
+ * or a short word typed just before a word fixed by itself): walking back
+ * from the last, each word read in the layout the last goes into, while it
+ * was meant there. `words` are each word's readings as typed and there, in
+ * order; the answer is how many of the last ones go, the last always.
+ */
+export function wordsMeant(words: readonly { typed: Reading; there: Reading }[], lexicons: Readonly<Record<string, Lexicon>>, keep: ReadonlySet<string> = new Set(), most = 3): number {
+  let n = words.length > 0 ? 1 : 0
+  for (let i = words.length - 2; i >= 0; i--) {
+    const w = words[i] as { typed: Reading; there: Reading }
+    if ((coreOf(w.typed.text)?.length ?? 99) > most || !meantThere(w.typed, w.there, lexicons, keep)) break
+    n++
+  }
+  return n
 }
 
 /**
@@ -151,6 +240,26 @@ function bestReading(others: readonly Reading[], lexicons: Readonly<Record<strin
     if (score !== undefined && (!best || score < best.score)) best = { reading: other, score }
   }
   return best?.reading
+}
+
+// ---------------------------------------------------------------- stray capitals
+
+/**
+ * A word's keys typed with a stray capital, and the keys as meant: two
+ * capitals at the start ("ПРивет", `two`, from four letters), or Caps Lock
+ * left on with Shift held for the first letter ("пРИВЕТ", `caps`, from three;
+ * Caps Lock then goes off). `letter` says which keys type a letter.
+ */
+export function caseSlip(strokes: readonly Stroke[], letter: (s: Stroke) => boolean): { kind: 'two' | 'caps'; strokes: Stroke[] } | undefined {
+  if (strokes.length === 0 || !strokes.every(letter)) return undefined
+  const [first, second, ...rest] = strokes as [Stroke, Stroke, ...Stroke[]]
+  if (strokes.length >= 3 && strokes.every(s => s.caps) && first.shift && [second, ...rest].every(s => !s.shift)) {
+    return { kind: 'caps', strokes: strokes.map(s => ({ ...s, caps: false })) }
+  }
+  if (strokes.length >= 4 && strokes.every(s => !s.caps) && first.shift && second.shift && rest.every(s => !s.shift)) {
+    return { kind: 'two', strokes: strokes.map((s, i) => (i === 1 ? { ...s, shift: false } : s)) }
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------- selected text

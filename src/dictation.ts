@@ -21,10 +21,13 @@ import { badgeOffset, placeBadge, type Rect } from './placement'
 import type { DictationMode, ToHost, ToView } from './protocol'
 import type { Settings } from './settings'
 import type { SpeechHost } from './speechhost'
-import { foreground, windowRect } from './winkbd'
+import { handleOf } from './winclip'
+import { foreground, putOnTop, sightOf, windowRect, type Sight } from './winkbd'
 
 /** The badge is as wide as this; as tall as its page, from one line of words to about six (then they scroll). */
 const BADGE = { width: 360, min: 64, max: 180 }
+/** How soon after it shows, then how often while it is up, the badge asks whether Windows shows it too. */
+const LOOK_MS = { first: 500, every: 2000 }
 const NOTE_WAIT_MS = 5 * 60_000
 /** The most languages the engine weighs a phrase against. */
 const MOST_EXPECTED = 8
@@ -59,6 +62,11 @@ export type DictationOptions = {
   moved: (offset: Settings['dictationBadge']) => void
 }
 
+/** What keeps the person from seeing a badge Windows calls shown; empty when nothing does. */
+function troubleOf(sight: Sight): string {
+  return [sight.topmost ? '' : 'not on top', sight.cloaked ? `cloaked ${sight.cloaked}` : '', sight.above.length ? `under ${sight.above.join(', ')}` : ''].filter(Boolean).join('; ')
+}
+
 type Transcript = { title: string; note?: string; noteError?: string }
 type Row = { status: string; error: string }
 
@@ -72,6 +80,11 @@ export class Dictation {
   private opening = false
   /** The height the badge's page asked for: its bottom edge stays where it is when it changes. */
   private height = BADGE.min
+  private looking: NodeJS.Timeout | undefined
+  /** What Windows was last found doing to the badge, as logged; empty while it shows it on top. */
+  private trouble = ''
+  /** Windows cloaked the badge: a new one is made before the next phrase. */
+  private stale = false
 
   constructor(private readonly o: DictationOptions) {}
 
@@ -106,12 +119,18 @@ export class Dictation {
       }
     }
     if (this.state !== 'recording') return
+    if (this.stale) this.renew()
     const badge = this.window()
     this.height = BADGE.min
     const place = placeBadge(this.o.offset(), { width: BADGE.width, height: this.height }, area)
     badge.setBounds(place)
     badge.showInactive()
-    log(`badge: shown at ${JSON.stringify(badge.getBounds())} (asked ${JSON.stringify(place)}, area ${JSON.stringify(area)}, offset ${JSON.stringify(this.o.offset())}), visible ${badge.isVisible()}, session ${session ? 'yes' : 'no'}`)
+    // Shown again, a window keeps its old place in Windows' stack, and Windows may have put it under ordinary windows meanwhile.
+    const before = this.sight(badge)
+    this.raise(badge)
+    const was = before ? troubleOf(before) : ''
+    log(`badge: shown at ${JSON.stringify(badge.getBounds())} (asked ${JSON.stringify(place)}, area ${JSON.stringify(area)}, offset ${JSON.stringify(this.o.offset())}), visible ${badge.isVisible()}, session ${session ? 'yes' : 'no'}${was ? `; was ${was}, raised` : ''}`)
+    this.look(LOOK_MS.first)
     this.send({ type: 'dictation', command: 'start', mode, key, ...(session ? { session } : {}), expected })
     globalShortcut.register('Escape', () => this.cancel())
   }
@@ -183,7 +202,8 @@ export class Dictation {
     }
     this.badge?.hide()
     this.over()
-    await this.o.paste(text)
+    // A space after it, so the next phrase or word goes on without one typed by hand.
+    await this.o.paste(`${text} `)
     this.o.log.add(mode === 'english' ? { mode, text, heard } : { mode: 'type', text })
     this.o.logged()
   }
@@ -193,7 +213,7 @@ export class Dictation {
     if (this.state !== 'idle' || this.opening) return
     const last = this.o.log.last()
     if (!last) return this.o.balloon('Altype', 'Nothing dictated yet')
-    this.o.paste(last.text).catch(error => console.warn('Altype: could not type the phrase again', error))
+    this.o.paste(`${last.text} `).catch(error => console.warn('Altype: could not type the phrase again', error))
   }
 
   clearLog(): void {
@@ -283,16 +303,76 @@ export class Dictation {
     // 'moved' comes once, when a drag by the person ends (never for setBounds).
     b.on('moved', () => this.dropped())
     b.on('closed', () => {
+      // A badge made again (renew) is not this one.
+      if (this.badge !== b) return
       this.badge = undefined
       this.badgeReady = false
     })
-    b.on('hide', () => log(`badge: hidden, state ${this.state}`))
+    b.on('hide', () => {
+      clearTimeout(this.looking)
+      log(`badge: hidden, state ${this.state}`)
+    })
+    b.on('unresponsive', () => log('badge: the page does not answer'))
+    b.webContents.on('render-process-gone', (_event, details) => log(`badge: the page's process is gone: ${details.reason}`))
     b.webContents.on('did-fail-load', (_event, code, description) => log(`badge: the page did not load: ${code} ${description}`))
     b.webContents.on('console-message', m => log(`badge page: ${m.message} (${m.sourceId}:${m.lineNumber})`))
     void b.loadFile(this.o.page, WIN11 ? { query: { frame: 'dwm' } } : undefined)
     log(`badge: window made, page ${this.o.page}`)
     this.badge = b
     return b
+  }
+
+  /** On top of every window, those kept on top too, the focus left where it is. */
+  private raise(b: BrowserWindow): void {
+    try {
+      putOnTop(handleOf(b))
+    } catch (error) {
+      console.warn('Altype: Windows did not put the badge on top', error)
+    }
+  }
+
+  /** Windows' own view of the badge; undefined when it does not say. */
+  private sight(b: BrowserWindow): Sight | undefined {
+    try {
+      return sightOf(handleOf(b))
+    } catch (error) {
+      console.warn('Altype: could not ask Windows about the badge', error)
+      return undefined
+    }
+  }
+
+  /**
+   * Electron may call the badge shown while the person sees nothing (2026-10-29:
+   * every phrase logged "visible"; caught live, the badge lay under VS Code and
+   * Chrome, its "on top" flag still set). So, while it is up, Windows' own
+   * view: is it still on top, is it cloaked, does a window lie over it. A
+   * change goes into the log once; off top or under a window it is raised at
+   * once; a cloaked badge (another virtual desktop) records this phrase still,
+   * so it is made again before the next one.
+   */
+  private look(after: number): void {
+    clearTimeout(this.looking)
+    this.looking = setTimeout(() => {
+      const b = this.badge
+      if (!b || b.isDestroyed() || !b.isVisible()) return
+      const sight = this.sight(b)
+      if (!sight) return
+      const trouble = troubleOf(sight)
+      if (trouble !== this.trouble) log(trouble ? `badge: Windows has it ${trouble}` : 'badge: Windows has it on top again')
+      this.trouble = trouble
+      if (sight.cloaked) this.stale = true
+      if (trouble) this.raise(b)
+      this.look(LOOK_MS.every)
+    }, after)
+  }
+
+  /** A new badge in place of one Windows cloaked: made now, it is on the desktop in use. */
+  private renew(): void {
+    this.stale = false
+    this.badge?.destroy()
+    this.badge = undefined
+    this.badgeReady = false
+    log('badge: made again, as Windows cloaked the last one')
   }
 
   /** The theme changed: the badge's ground and edge in its colors. */
@@ -341,6 +421,7 @@ export class Dictation {
   }
 
   dispose(): void {
+    clearTimeout(this.looking)
     this.badge?.destroy()
   }
 }

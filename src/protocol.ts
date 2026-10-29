@@ -9,7 +9,9 @@ import type { Settings } from './settings'
 import type { SpeechPackState, SpeechPart } from './speechpack'
 import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
+import type { TranslationEntry } from './translationlog'
 import type { TranslatorState } from './translator'
+import type { Learned } from './typist'
 import type { SavedWord } from './words'
 
 /** The word dictionary for the person's language: here, none for the language, coming, failed, or not downloaded yet. */
@@ -58,7 +60,8 @@ export type CardState =
    * those the translator has); `canPaste`: it was selected in a window the
    * translation can be pasted into, over the selection.
    */
-  | { status: 'text'; text: string; from: string; to: string; languages: string[]; result: TextResult; canPaste?: boolean }
+  /** `mine`: the languages the person uses, put first in From and To. */
+  | { status: 'text'; text: string; from: string; to: string; languages: string[]; mine?: string[]; result: TextResult; canPaste?: boolean }
   /** The snipped piece of the screen holds no text. */
   | { status: 'empty' }
   /** Windows has no text recognition installed for any language the card could use. */
@@ -155,7 +158,13 @@ export type AppView = {
   words: SavedWord[]
   update: UpdateStatus
   /** Each shortcut is registered (false: another program holds it). */
-  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean }
+  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean; inPlace: boolean; pause: boolean; window: boolean }
+  /** What Altype learned from the person's typing (learning.ts): words fixed always, words of theirs. */
+  learned: { alwaysFix: Learned[]; myWords: Learned[] }
+  /** A program that runs as administrator was in front lately: its keys never reach Altype. */
+  elevatedApp?: string
+  /** The texts translated lately, newest first (the last 10). */
+  translations: TranslationEntry[]
   /** The translator between English and the person's language: here, downloading, or to be downloaded on the first translation. */
   translator: 'absent' | 'downloading' | 'ready' | 'failed' | 'unsupported'
   /** The keyboard layouts Windows has, in its order. */
@@ -182,9 +191,12 @@ export type AppView = {
 /** What the tray's panel shows, sent whole whenever any of it changes. */
 export type TrayView = {
   /** The keys of its commands, hotkey.ts notation ("Control+C*2" for Ctrl+C twice); empty when there is none. */
-  keys: { listenCopied: string; snipListen: string; snipTranslate: string }
-  /** The quick settings' switches: fixing as one types, Ctrl+C twice, Altype paused. */
+  keys: { listenCopied: string; snipListen: string; snipTranslate: string; switch: string }
+  /** The quick settings' switches: fixing as one types, the switch key, the badge, the layout in the tray's icon, Ctrl+C twice, Altype paused. */
   autoFix: boolean
+  switchOn: boolean
+  layoutBadge: boolean
+  trayLayout: boolean
   doubleCopy: boolean
   paused: boolean
   /** The speech engine is installed: a note can be started from here; one is being recorded now. */
@@ -195,7 +207,7 @@ export type TrayView = {
 }
 
 /** What the tray's panel can do; each puts the panel away first. */
-export type TrayCommand = 'listenCopied' | 'translateCopied' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'open' | 'quit'
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -314,8 +326,16 @@ export type ToHost =
   | { type: 'restartSpeech' }
   | { type: 'showInFolder'; path: string }
   | { type: 'openPath'; path: string }
-  /** Forget the phrases dictated lately. */
+  /** Forget the phrases dictated lately; the texts translated lately. */
   | { type: 'clearDictation' }
+  | { type: 'clearTranslations' }
+  /** What Altype learned from the person's typing: one word out of a list, or everything. */
+  | { type: 'unlearn'; list: 'alwaysFix' | 'myWords'; word: string }
+  | { type: 'forgetLearned' }
+  /** The settings saved as a file, read from one (the person picks it), or all back to how they came. */
+  | { type: 'exportSettings' }
+  | { type: 'importSettings' }
+  | { type: 'resetSettings' }
   // The dictation badge.
   | { type: 'dictationReady' }
   /** A phrase to type: the whole recording, as webm (an engine without sessions). */
@@ -339,6 +359,8 @@ export type HostCall =
   | { call: 'copy'; text: string }
   /** Open a page of Chrome's own (the extensions, their keys, one extension's card), which a link cannot: answers chrome.ts `ChromeOpened` (typed, opened, missing, refused). */
   | { call: 'openChrome'; url: string }
+  /** The programs with a window open now, by .exe name, for the Programs page: answers string[]. */
+  | { call: 'runningApps' }
 
 /** What every page has as `window.tutorHost` (preload.ts). */
 export type TutorHost = {

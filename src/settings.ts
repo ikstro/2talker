@@ -5,6 +5,12 @@
 import { findLanguage, LANGUAGES } from './languages'
 import type { WordHintMode } from './protocol'
 import type { Prefer } from './speechplan'
+import type { AppPart } from './typist'
+
+/** A program by its .exe name (lower case): the parts of the keyboard helper left out there, and the layout it starts in ('' for none). */
+export type AppRule = { exe: string; off: AppPart[]; layout: string }
+
+export const APP_PARTS: readonly AppPart[] = ['fix', 'switch', 'badge', 'keys']
 
 export const TARGET = 'English'
 
@@ -49,20 +55,44 @@ export type Settings = {
   /** translate the selection, or a piece of the screen. */
   translateKey: string
   textKey: string
-  /** The keyboard: a key (hotkey.ts) that switches the layout to the next of `layouts`; empty for none. */
+  /** Translate the selection in place: the translation pasted over it, no card. */
+  inPlaceKey: string
+  /** The keyboard: a key (hotkey.ts) that switches the layout to the next of `layouts`; empty for none. `switchOn` turns it and the layouts' own keys off without forgetting them. */
   switchKey: string
+  switchOn: boolean
   /** The layouts that key goes through, in order, as Windows names them ("04090409"); empty: all of them. */
   layouts: string[]
+  /** A key of each layout's own (layout id → key), going to it at once. */
+  layoutKeys: Record<string, string>
   /** A word typed in the wrong layout is typed again in the right one, and the layout switched. */
   autoFix: boolean
-  /** A key that types the last word again in the layout that makes a word of it (again: the next layout), or converts the selection; empty for none. */
+  /** Fixing as one types also sets right two capitals at a word's start ("ПРивет") and a word typed with Caps Lock left on ("пРИВЕТ"). */
+  fixTwoCaps: boolean
+  fixCapsLock: boolean
+  /** Words in capitals are left as typed. */
+  keepCaps: boolean
+  /** A word is fixed after a second without a key too, not only when it ends. */
+  fixOnPause: boolean
+  /** A quiet click when a word is fixed by itself. */
+  fixSound: boolean
+  /** Altype learns from the person's typing (learning.ts): words fixed by hand, words of theirs. */
+  learn: boolean
+  /** A key that types the words at the end, typed in the wrong layout, again in the right one (again: the next layout), or converts the selection; empty for none. `fixKeyOn` turns it off without forgetting it. */
   fixKey: string
-  /** Programs (their .exe names, lower case) where words are never fixed by themselves. */
-  fixApps: string[]
+  fixKeyOn: boolean
+  /** Programs with parts of the keyboard helper left out, or a layout of their own. */
+  apps: AppRule[]
   /** Words, as typed (lower case), never fixed by themselves: the ones a fix was taken back from, or added by hand. */
   keepWords: string[]
-  /** A badge with the layout by the text cursor whenever the layout changes. */
+  /** A badge with the layout by the text cursor whenever the layout (or Caps Lock) changes. */
   layoutBadge: boolean
+  /** The tray icon shows the layout in front, as a keycap ("en"). */
+  trayLayout: boolean
+  /** Nothing of the keyboard helper while a program fills the screen (a game, a presentation, a video). */
+  quietFullScreen: boolean
+  /** A key that pauses Altype and resumes it; a key that opens its window. Empty for none. */
+  pauseKey: string
+  windowKey: string
   /**
    * Dictate's keys (hotkey.ts notation; empty for none): type what is said where the
    * cursor is, type it in English, or keep it as a note in the knowledge base. They
@@ -99,6 +129,8 @@ export type Settings = {
   speechTestDeclinedAt: number
   /** Start Altype when Windows starts. */
   startWithWindows: boolean
+  /** Updates include the test versions published before a release. */
+  betaUpdates: boolean
   /** The offer of the natural voice was closed. */
   naturalDismissed: boolean
   /** The Home's opening moment (one line through fix, translate, listen) has played once; Replay plays it again. */
@@ -130,13 +162,27 @@ export const DEFAULTS: Settings = {
   snipKey: 'Control+Alt+S',
   translateKey: '',
   textKey: 'Control+Alt+T',
+  inPlaceKey: '',
   switchKey: '',
+  switchOn: true,
   layouts: [],
+  layoutKeys: {},
   autoFix: false,
+  fixTwoCaps: true,
+  fixCapsLock: true,
+  keepCaps: false,
+  fixOnPause: false,
+  fixSound: false,
+  learn: true,
   fixKey: '',
-  fixApps: [],
+  fixKeyOn: true,
+  apps: [],
   keepWords: [],
   layoutBadge: false,
+  trayLayout: false,
+  quietFullScreen: true,
+  pauseKey: '',
+  windowKey: '',
   dictateKey: 'Control+Alt+D',
   englishKey: '',
   noteKey: 'Control+Alt+N',
@@ -151,6 +197,7 @@ export const DEFAULTS: Settings = {
   speechTestDeclinedKey: '',
   speechTestDeclinedAt: 0,
   startWithWindows: true,
+  betaUpdates: false,
   naturalDismissed: false,
   introSeen: false,
   paused: false,
@@ -181,6 +228,37 @@ export function myLanguages(s: Pick<Settings, 'native' | 'languages'>): string[]
   return [...new Set([findLanguage(s.native)?.code ?? '', 'en', ...s.languages].filter(Boolean))]
 }
 
+/**
+ * The programs' rules, whatever the file held: one per program, known parts
+ * only. A file from before (`fixApps`, programs where words were never fixed)
+ * becomes rules that leave fixing out.
+ */
+function appRules(raw: unknown, old: unknown): AppRule[] {
+  const items = Array.isArray(raw) ? raw : Array.isArray(old) ? old.map(exe => ({ exe, off: ['fix'], layout: '' })) : []
+  const seen = new Set<string>()
+  const out: AppRule[] = []
+  for (const item of items) {
+    const r = (item && typeof item === 'object' ? item : {}) as { exe?: unknown; off?: unknown; layout?: unknown }
+    const exe = typeof r.exe === 'string' ? r.exe.trim().toLowerCase() : ''
+    if (!exe || seen.has(exe)) continue
+    seen.add(exe)
+    const off = Array.isArray(r.off) ? APP_PARTS.filter(p => (r.off as unknown[]).includes(p)) : []
+    const layout = typeof r.layout === 'string' && /^[0-9A-F]{8}$/i.test(r.layout) ? r.layout.toUpperCase() : ''
+    out.push({ exe, off, layout })
+  }
+  return out
+}
+
+/** Each layout's own key, by layout id; empty keys dropped. */
+function layoutKeys(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, string> = {}
+  for (const [id, key] of Object.entries(raw as Record<string, unknown>)) {
+    if (/^[0-9A-F]{8}$/i.test(id) && typeof key === 'string' && key.trim()) out[id.toUpperCase()] = key.trim()
+  }
+  return out
+}
+
 /** The badge's offset as numbers, whatever the file held; a screen is never wider than this. */
 function badgeOffset(v: unknown): Settings['dictationBadge'] {
   const r = (v && typeof v === 'object' ? v : {}) as { dx?: unknown; dy?: unknown }
@@ -189,7 +267,7 @@ function badgeOffset(v: unknown): Settings['dictationBadge'] {
 }
 
 export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings, unknown>>
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'fixApps', unknown>>
   const flag = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d)
   const key = (v: unknown, d: string) => (typeof v === 'string' ? v.trim() : d)
   const within = (v: unknown, range: { min: number; max: number }, d: number) =>
@@ -217,14 +295,28 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     snipKey: key(r.snipKey, DEFAULTS.snipKey),
     translateKey: key(r.translateKey, DEFAULTS.translateKey),
     textKey: key(r.textKey, DEFAULTS.textKey),
+    inPlaceKey: key(r.inPlaceKey, DEFAULTS.inPlaceKey),
     switchKey: key(r.switchKey, DEFAULTS.switchKey),
+    switchOn: flag(r.switchOn, DEFAULTS.switchOn),
     layouts: strings(r.layouts, s => s.trim().toUpperCase()).filter(s => /^[0-9A-F]{8}$/.test(s)),
+    layoutKeys: layoutKeys(r.layoutKeys),
     autoFix: flag(r.autoFix, DEFAULTS.autoFix),
+    fixTwoCaps: flag(r.fixTwoCaps, DEFAULTS.fixTwoCaps),
+    fixCapsLock: flag(r.fixCapsLock, DEFAULTS.fixCapsLock),
+    keepCaps: flag(r.keepCaps, DEFAULTS.keepCaps),
+    fixOnPause: flag(r.fixOnPause, DEFAULTS.fixOnPause),
+    fixSound: flag(r.fixSound, DEFAULTS.fixSound),
+    learn: flag(r.learn, DEFAULTS.learn),
     fixKey: key(r.fixKey, DEFAULTS.fixKey),
-    fixApps: strings(r.fixApps, s => s.trim().toLowerCase()),
+    fixKeyOn: flag(r.fixKeyOn, DEFAULTS.fixKeyOn),
+    apps: appRules(r.apps, r.fixApps),
     // Lower case, as the keyboard thread compares them; the Set in `strings` drops the same word twice.
     keepWords: strings(r.keepWords, s => s.trim().toLowerCase()),
     layoutBadge: flag(r.layoutBadge, DEFAULTS.layoutBadge),
+    trayLayout: flag(r.trayLayout, DEFAULTS.trayLayout),
+    quietFullScreen: flag(r.quietFullScreen, DEFAULTS.quietFullScreen),
+    pauseKey: key(r.pauseKey, DEFAULTS.pauseKey),
+    windowKey: key(r.windowKey, DEFAULTS.windowKey),
     dictateKey: key(r.dictateKey, DEFAULTS.dictateKey),
     englishKey: key(r.englishKey, DEFAULTS.englishKey),
     noteKey: key(r.noteKey, DEFAULTS.noteKey),
@@ -240,6 +332,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     speechTestDeclinedKey: key(r.speechTestDeclinedKey, DEFAULTS.speechTestDeclinedKey),
     speechTestDeclinedAt: typeof r.speechTestDeclinedAt === 'number' && Number.isFinite(r.speechTestDeclinedAt) ? r.speechTestDeclinedAt : 0,
     startWithWindows: flag(r.startWithWindows, DEFAULTS.startWithWindows),
+    betaUpdates: flag(r.betaUpdates, DEFAULTS.betaUpdates),
     naturalDismissed: flag(r.naturalDismissed, DEFAULTS.naturalDismissed),
     introSeen: flag(r.introSeen, DEFAULTS.introSeen),
     paused: flag(r.paused, DEFAULTS.paused),

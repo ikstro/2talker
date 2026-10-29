@@ -96,6 +96,28 @@ export function pressEnter(): void {
   keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
 }
 
+const VK_LEFT = 0x25
+/** Shift+Left as many times as `chars`: the text just pasted, before the cursor, selected again. */
+export async function pressSelectBack(chars: number, maxWaitMs = 1500): Promise<void> {
+  await letGo(MODIFIERS, maxWaitMs)
+  keybd_event(VK_SHIFT, 0, 0, MAIN_KEYS)
+  for (let i = 0; i < chars; i++) {
+    keybd_event(VK_LEFT, 0, 0, MAIN_KEYS)
+    keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
+  }
+  keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
+}
+
+const GetForegroundWindow = user32.func('intptr_t __stdcall GetForegroundWindow()')
+
+/** Resolves once `hwnd` is the window in front (Windows brings it there a moment after being asked), or after `maxWaitMs` regardless. */
+export async function inFront(hwnd: bigint, maxWaitMs = 500): Promise<void> {
+  const until = Date.now() + maxWaitMs
+  while (BigInt(GetForegroundWindow() as number | bigint) !== hwnd && Date.now() < until) {
+    await new Promise(resolve => setTimeout(resolve, 15))
+  }
+}
+
 const AllowSetForegroundWindow = user32.func('bool __stdcall AllowSetForegroundWindow(uint32_t pid)')
 const ASFW_ANY = 0xffffffff
 

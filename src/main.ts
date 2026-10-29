@@ -21,6 +21,8 @@
 //   settings.json   see settings.ts
 //   words.json      the word notebook (words.ts)
 //   dictation.json  the phrases dictated lately, 30 days at most (dictationlog.ts)
+//   translations.json  the texts translated lately, 30 days at most (translationlog.ts)
+//   learning.json   what the layout fixer learned from the person's typing (learning.ts)
 //   voice\          the natural voice, downloaded on request
 //   dict\           word dictionaries for languages other than Russian
 //   models\         the translator's models, one folder per language pair
@@ -47,6 +49,7 @@ import { KeyboardHelper, keyboardLayouts } from './keyboard'
 import { loadVoiceSpeed, nextVoiceSpeed, saveVoiceSpeed, type VoiceSpeed } from './device'
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
+import { LearnStore } from './learning'
 import { lookup, type Dictionary } from './lemma'
 import { log, logTo } from './log'
 import { systemVoiceName, type NaturalState } from './natural'
@@ -56,18 +59,20 @@ import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
 import type { AppTab, AppView, CardKind, CardState, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, translationHtml } from './render'
-import { CARD_WIDTH, myLanguages, normalize, TARGET, type Settings } from './settings'
+import { CARD_WIDTH, DEFAULTS, myLanguages, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
 import { SPEECH_PORT } from './speechservice'
 import { NaturalSpeaker } from './synth'
 import { englishReady, languageOf, splitText, targetFor, translateLines, translatePlain, type LanguageWords } from './translate'
+import { TranslationLog } from './translationlog'
 import type { Translator } from './translator'
 import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
-import { allowForeground, ctrlHeld, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, watchClipboard } from './winclip'
-import { exeOf, focusWindow, foreground, installedLayouts, layoutTable } from './winkbd'
+import { focus, focusedElement, release } from './uia'
+import { allowForeground, ctrlHeld, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard } from './winclip'
+import { exeOf, focusWindow, foreground, installedLayouts, layoutTable, windowedApps } from './winkbd'
 import { ankiTsv, WordStore, wordsText } from './words'
 
 const CARD_MIN = 96
@@ -83,6 +88,8 @@ const SETTLE_MS = 60
 const SELECT_WAIT_MS = 600
 /** How long after Altype's own write to the clipboard a change is still taken for that write. */
 const OWN_CLIPBOARD_MS = 300
+/** A selection converted into another layout is selected again up to this long. */
+const RESELECT_MOST = 400
 /** Layout switchers that would fix words a second time, by their .exe name. */
 const RIVALS: Record<string, string> = { 'everylang.exe': 'EveryLang', 'punto.exe': 'Punto Switcher' }
 /** Other programs that watch the keyboard, by their .exe name: no harm, named on the Keyboard page. */
@@ -104,7 +111,28 @@ const TRAY_REOPEN_MS = 300
 /** Ctrl+C pressed twice, as a card's header draws the key that called it. */
 const DOUBLE_COPY = 'Control+C*2'
 /** The settings that are keys of actions. */
-const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'switchKey', 'fixKey']
+const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'inPlaceKey', 'switchKey', 'fixKey', 'pauseKey', 'windowKey']
+/** The settings the keyboard thread is given (besides the keys). */
+const KEYBOARD_SETTINGS: readonly (keyof Settings)[] = [
+  'layouts',
+  'languages',
+  'switchOn',
+  'layoutKeys',
+  'autoFix',
+  'fixTwoCaps',
+  'fixCapsLock',
+  'keepCaps',
+  'fixOnPause',
+  'fixSound',
+  'learn',
+  'fixKeyOn',
+  'apps',
+  'keepWords',
+  'layoutBadge',
+  'trayLayout',
+  'quietFullScreen',
+  'paused',
+]
 /** The links the About tab may open. */
 const LINKS = new Set([
   'https://ikstro.com',
@@ -167,7 +195,7 @@ const copies = new DoubleCopy()
 let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
-let keysOk = { snip: true, select: true, translate: true, text: true }
+let keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, pause: true, window: true }
 let speechKeysOk = { dictate: true, note: true, english: true, again: true }
 let speech: SpeechHost
 let dictation: Dictation
@@ -176,6 +204,12 @@ let balloonClick: (() => void) | undefined
 let keyboard: KeyboardHelper
 let keyboardTrouble: string | undefined
 let lastApp: string | undefined
+/** A program run as administrator was in front lately: Windows keeps its keys from Altype's hooks. */
+let elevatedApp: string | undefined
+/** The layout in front and Caps Lock, for the tray's icon (when it shows the layout). */
+let frontLayout: { layout: string; caps: boolean } | undefined
+let learned: LearnStore
+let translationLog: TranslationLog
 let rivals: string[] = []
 let keyboardApps: string[] = []
 let foreignKeys = false
@@ -189,9 +223,14 @@ let trayHiddenAt = 0
  * the pointer to listen to or translate; the window it was selected in, and
  * the clipboard as it was, to put back.
  */
-let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; saved: Record<string, Blob>[]; via?: string } | undefined
-/** The translator open on a selection: the window to paste its translation into. */
-let pasteTarget: { id: number; window: bigint } | undefined
+let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; field: unknown; saved: Record<string, Blob>[]; via?: string } | undefined
+/**
+ * The translator open on a selection: the window to paste its translation
+ * into, and the field the selection was in (UI Automation's element), to give
+ * the keyboard back to: VS Code's chat, brought back to the front, does not
+ * take it back by itself.
+ */
+let pasteTarget: { id: number; window: bigint; field: unknown } | undefined
 /** The card's bounds when its edge began to be dragged; the content's height, which the card follows otherwise. */
 let resizeFrom: Rectangle | undefined
 let contentHeight = 160
@@ -239,7 +278,9 @@ function saveSettings(patch: Partial<Settings>): void {
   if ('startWithWindows' in patch) applyLoginItem()
   // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
   if ([...ACTION_KEYS, ...DICTATION_KEYS, 'paused'].some(k => k in patch)) registerShortcuts()
-  if ([...ACTION_KEYS, ...DICTATION_KEYS, 'layouts', 'languages', 'autoFix', 'fixApps', 'keepWords', 'layoutBadge', 'paused'].some(k => k in patch)) applyKeyboard()
+  if ([...ACTION_KEYS, ...DICTATION_KEYS, ...KEYBOARD_SETTINGS].some(k => k in patch)) applyKeyboard()
+  if ('betaUpdates' in patch) updater?.setBeta(settings.betaUpdates)
+  if ('trayLayout' in patch && !settings.trayLayout) frontLayout = undefined
   // Paused while a phrase is recorded: the phrase is dropped, as Esc would.
   if (patch.paused && settings.paused) dictation?.cancel()
   if ('theme' in patch) applyTheme()
@@ -440,6 +481,49 @@ async function exportWords(): Promise<void> {
   if (filePath) fs.writeFileSync(filePath, ankiTsv(words.list()) + '\n', 'utf8')
 }
 
+/** The settings saved as a file, to keep or to take to another computer. */
+async function exportSettings(): Promise<void> {
+  const options: Electron.SaveDialogOptions = {
+    title: 'Save the settings',
+    defaultPath: path.join(app.getPath('documents'), 'Altype settings.json'),
+    filters: [{ name: 'Altype settings', extensions: ['json'] }],
+  }
+  const { filePath } = appWin ? await dialog.showSaveDialog(appWin, options) : await dialog.showSaveDialog(options)
+  if (filePath) fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + '\n', 'utf8')
+}
+
+/** Settings read from a file the person picks: what it holds replaces them, the rest as it was; this computer's place for the dictation badge stays. */
+async function importSettings(): Promise<void> {
+  const options: Electron.OpenDialogOptions = { title: 'Open saved settings', defaultPath: app.getPath('documents'), filters: [{ name: 'Altype settings', extensions: ['json'] }], properties: ['openFile'] }
+  const { canceled, filePaths } = appWin ? await dialog.showOpenDialog(appWin, options) : await dialog.showOpenDialog(options)
+  const file = filePaths[0]
+  if (canceled || !file) return
+  try {
+    const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
+    if (!read || typeof read !== 'object' || Array.isArray(read)) throw new Error('it holds no settings')
+    const next = normalize({ ...settings, ...read, dictationBadge: settings.dictationBadge, setupDone: true }, settings.native)
+    saveSettings(next)
+  } catch (error) {
+    void dialog.showMessageBox({ type: 'warning', title: 'Altype', message: 'These settings could not be read', detail: messageOf(error) })
+  }
+}
+
+/** All settings back to how they came, after a question; the person's language, the setup done and what Altype learned stay. */
+async function resetSettings(): Promise<void> {
+  const options: Electron.MessageBoxOptions = {
+    type: 'question',
+    title: 'Altype',
+    message: 'Reset all settings?',
+    detail: 'Keys, switches and lists go back to how they came. Your language, words, transcripts and what Altype learned from your typing stay.',
+    buttons: ['Reset', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+  }
+  const { response } = appWin ? await dialog.showMessageBox(appWin, options) : await dialog.showMessageBox(options)
+  if (response !== 0) return
+  saveSettings({ ...DEFAULTS, native: settings.native, languages: settings.languages, setupDone: true, introSeen: true })
+}
+
 // ---------------------------------------------------------------- the card
 
 function createCard(): BrowserWindow {
@@ -507,8 +591,8 @@ function post(message: ToView): void {
   if (card && cardReady && !card.isDestroyed()) card.webContents.send('to-view', message)
 }
 
-/** What a text is picked for: the card that reads its English aloud, or the translator. */
-type Purpose = 'listen' | 'translate'
+/** What a text is picked for: the card that reads its English aloud, the translator, or its translation pasted over it. */
+type Purpose = 'listen' | 'translate' | 'inPlace'
 
 let languageWordsRead: LanguageWords | undefined
 /** The words that tell a text's language, read once. */
@@ -561,6 +645,9 @@ function appView(): AppView {
     layouts: keyboardLayouts(),
     ...(keyboardTrouble ? { keyboardTrouble } : {}),
     ...(lastApp ? { lastApp } : {}),
+    ...(elevatedApp ? { elevatedApp } : {}),
+    learned: { alwaysFix: [...learned.alwaysFix], myWords: [...learned.myWords] },
+    translations: translationLog.list(10),
     rivals,
     keyboardApps,
     foreignKeys,
@@ -681,6 +768,9 @@ function setState(id: number, state: CardState): void {
 }
 
 function hideCard(): void {
+  // A translation the translator holds as it closes is kept for the Translate page.
+  const state = shown?.state
+  if (state?.status === 'text' && state.result.status === 'ready' && card?.isVisible()) logTranslation(state.text, state.result.text, state.result.from, state.result.to)
   stopSpeaking()
   // The card plays the natural voice's audio, and its own voices, itself: they stop there.
   post({ type: 'stop' })
@@ -745,6 +835,29 @@ function onMessage(message: ToHost): void {
   switch (message.type) {
     case 'clearDictation':
       dictation.clearLog()
+      return
+    case 'clearTranslations':
+      translationLog.clear()
+      postApp()
+      return
+    case 'unlearn':
+      learned.remove(message.list, message.word)
+      applyKeyboard()
+      postApp()
+      return
+    case 'forgetLearned':
+      learned.forget()
+      applyKeyboard()
+      postApp()
+      return
+    case 'exportSettings':
+      exportSettings().catch(error => console.warn('Altype: could not save the settings file', error))
+      return
+    case 'importSettings':
+      importSettings().catch(error => console.warn('Altype: could not read the settings file', error))
+      return
+    case 'resetSettings':
+      resetSettings().catch(error => console.warn('Altype: could not reset the settings', error))
       return
     case 'installSpeech':
       speech.install(message.parts, message.models).then(
@@ -991,36 +1104,107 @@ async function readScreenshot(png: Buffer, via?: string): Promise<void> {
 /** The translator's state of a text: from the language it seems to be in, into the person's own (from theirs, into English). */
 function textState(text: string): Extract<CardState, { status: 'text' }> {
   const from = languageOf(text, settings.native, languageWords(), myLanguages(settings))
-  return { status: 'text', text, from, to: targetFor(from, settings.native), languages: ['en', ...NATIVES], result: { status: 'none' } }
+  return { status: 'text', text, from, to: targetFor(from, settings.native), languages: ['en', ...NATIVES], mine: myLanguages(settings), result: { status: 'none' } }
 }
 
-/** Opens the translator by the pointer with a picked text, translating it at once; `window`: where it was selected, to paste back into. */
-function translateWindow(text: string, at: Point, window?: bigint, via?: string): void {
+/** The field with the keyboard now (UI Automation), held to give the keyboard back to; undefined when Windows does not say. */
+function focusedField(): unknown {
+  try {
+    return focusedElement()
+  } catch (error) {
+    console.warn('Altype: could not ask which field has the keyboard', error)
+    return undefined
+  }
+}
+
+function releaseField(field: unknown): void {
+  if (!field) return
+  try {
+    release(field)
+  } catch {
+    // Its program may be gone.
+  }
+}
+
+/** Opens the translator by the pointer with a picked text, translating it at once; `window`: where it was selected, to paste back into, `field` the field in it. */
+function translateWindow(text: string, at: Point, window?: bigint, via?: string, field?: unknown): void {
   const state = { ...textState(text), canPaste: !!window }
   const id = openCard('translate', state, at, via)
-  pasteTarget = window ? { id, window } : undefined
-  void translateTextCard(id, text, state.from, state.to)
+  releaseField(pasteTarget?.field)
+  pasteTarget = window ? { id, window, field } : undefined
+  if (!window) releaseField(field)
+  if (text) void translateTextCard(id, text, state.from, state.to)
 }
 
 /**
  * Paste: once Enter (pressed for it) is let go, the window the text was
  * selected in comes to the front (while the card still is, as Windows
- * allows), the card goes away, and the translation is pasted over the
- * selection through the clipboard, which is put back after.
+ * allows), the field the selection was in gets the keyboard back, the card
+ * goes away, and the translation is pasted over the selection through the
+ * clipboard, which is put back after.
  */
 async function pasteTranslation(id: number, text: string): Promise<void> {
   const target = pasteTarget
   if (!target || target.id !== id || !text) return
   pasteTarget = undefined
+  const state = shown?.state
+  if (state?.status === 'text') logTranslation(state.text, text, state.from, state.to)
   await keysLetGo()
   focusWindow(target.window)
   hideCard()
+  await pasteInto(target.window, target.field, text)
+}
+
+/** The text pasted where the keyboard is in `window`, once it is in front, into `field` when known; the clipboard put back after. */
+async function pasteInto(window: bigint, field: unknown, text: string): Promise<void> {
+  await inFront(window)
+  if (field) {
+    try {
+      // A web page in a window (VS Code's chat) takes the keyboard back a moment after.
+      if (focus(field)) await new Promise(resolve => setTimeout(resolve, 80))
+    } catch (error) {
+      console.warn('Altype: could not give the keyboard back to the field', error)
+    }
+    releaseField(field)
+  }
   const saved = await saveClipboard()
   await ownClipboard(async () => {
     await clipboard.writeText(text)
     await pressPaste()
   })
   setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+}
+
+/**
+ * Translate in place: the selection's translation pasted over it, no card,
+ * the direction as the translator's (the person's language into English, any
+ * other into theirs). A badge by the cursor says it is working. The translator
+ * for the pair not downloaded yet, or the window left meanwhile: the card
+ * opens instead, so nothing is lost.
+ */
+async function translateInPlace(text: string, at: Point, window: bigint, via?: string): Promise<void> {
+  const { from, to } = textState(text)
+  const missing = [from, to].some(code => code !== 'en' && translator.state(code).status !== 'ready')
+  if (missing) return translateWindow(text, at, window, via)
+  keyboard.say('…')
+  try {
+    const out = await translatePlain(text.slice(0, MAX_TEXT_CHARS), from, to, translator.translate)
+    keyboard.say('')
+    if (!out.trim()) return
+    logTranslation(text, out, from, to)
+    if (foreground().hwnd !== window) return translateWindow(text, at, window, via)
+    await keysLetGo()
+    await pasteInto(window, undefined, out)
+  } catch (error) {
+    keyboard.say('')
+    tray?.displayBalloon({ title: 'Altype', content: `Could not translate: ${messageOf(error)}` })
+  }
+}
+
+/** A translation kept for the Translate page's recent ones. */
+function logTranslation(text: string, translation: string, from: string, to: string): void {
+  translationLog.add({ text, translation, from, to })
+  postApp()
 }
 
 /** Reads a snipped picture with Windows OCR and translates the text in the translator, where it can be fixed and copied. */
@@ -1072,9 +1256,11 @@ function snip(purpose: Purpose = 'listen', via?: string): void {
   void shell.openExternal('ms-screenclip:')
 }
 
-/** Shows a picked text by the pointer: the card to listen to, or the translator; `window`: where it was selected. */
-function showText(text: string, purpose: Purpose, at: Point, window?: bigint, via?: string): void {
-  if (purpose === 'translate') translateWindow(text, at, window, via)
+/** Shows a picked text by the pointer: the card to listen to, or the translator; `window`: where it was selected (`field`, the field in it), or pastes its translation over it. */
+function showText(text: string, purpose: Purpose, at: Point, window?: bigint, via?: string, field?: unknown): void {
+  if (purpose === 'translate') return translateWindow(text, at, window, via, field)
+  releaseField(field)
+  if (purpose === 'inPlace' && window) void translateInPlace(text, at, window, via)
   else translateText(text, 'selection', at, via)
 }
 
@@ -1088,12 +1274,16 @@ async function useClipboard(purpose: Purpose): Promise<void> {
 async function useSelection(purpose: Purpose, via?: string): Promise<void> {
   const at = screen.getCursorScreenPoint()
   const window = foreground().hwnd
+  // The translator's Paste gives the keyboard back to this field.
+  const field = purpose === 'translate' ? focusedField() : undefined
   const saved = await saveClipboard()
   await pressCopy()
   const since = Date.now()
-  copyWanted = { since, at, purpose, window, saved, ...(via ? { via } : {}) }
+  releaseField(copyWanted?.field)
+  copyWanted = { since, at, purpose, window, field, saved, ...(via ? { via } : {}) }
   setTimeout(() => {
     if (copyWanted?.since !== since) return
+    releaseField(copyWanted.field)
     copyWanted = undefined
     void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error))
     tray?.displayBalloon({ title: 'Altype', content: 'Nothing was copied. Select a text, then press the shortcut.' })
@@ -1128,12 +1318,13 @@ function onClipboardChange(): void {
     return
   }
   if (copyWanted && now - copyWanted.since < SELECT_WAIT_MS) {
-    const { at, purpose, window, saved, via } = copyWanted
+    const { at, purpose, window, field, saved, via } = copyWanted
     copyWanted = undefined
     afterSettling(async () => {
       const text = (await clipboard.readText()).trim()
       await restoreClipboard(saved)
-      if (text) showText(text, purpose, at, window, via)
+      if (text) showText(text, purpose, at, window, via, field)
+      else releaseField(field)
     })
     return
   }
@@ -1151,14 +1342,13 @@ function selection(purpose: Purpose, via?: string): void {
   useSelection(purpose, via).catch(error => console.warn('Altype: could not copy the selection', error))
 }
 
+/** The pause key: Altype paused, or back. */
+function togglePause(): void {
+  saveSettings({ paused: !settings.paused })
+}
+
 function registerShortcuts(): void {
   globalShortcut.unregisterAll()
-  // Paused: no key at all, and none is "taken".
-  if (settings.paused) {
-    keysOk = { snip: true, select: true, translate: true, text: true }
-    speechKeysOk = { dictate: true, english: true, note: true, again: true }
-    return
-  }
   // A key Electron cannot hold (a double tap of Ctrl, a mouse button) is the keyboard thread's: applyKeyboard().
   const register = (accelerator: string, run: () => void): boolean => {
     if (!accelerator || !isAccelerator(accelerator)) return true
@@ -1168,11 +1358,20 @@ function registerShortcuts(): void {
       return false
     }
   }
+  // Paused: no key but the pause key, and none is "taken".
+  if (settings.paused) {
+    keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, pause: register(settings.pauseKey, togglePause), window: true }
+    speechKeysOk = { dictate: true, english: true, note: true, again: true }
+    return
+  }
   keysOk = {
     snip: register(settings.snipKey, () => snip('listen', settings.snipKey)),
     select: register(settings.selectKey, () => selection('listen', settings.selectKey)),
     translate: register(settings.translateKey, () => selection('translate', settings.translateKey)),
     text: register(settings.textKey, () => snip('translate', settings.textKey)),
+    inPlace: register(settings.inPlaceKey, () => selection('inPlace', settings.inPlaceKey)),
+    pause: register(settings.pauseKey, togglePause),
+    window: register(settings.windowKey, () => openApp()),
   }
   // Dictate's keys mean nothing before the engine is there; then each starts and stops a phrase.
   const dictate = (mode: DictationMode, key: string) => (speech?.installed ? register(key, () => dictation.press(mode, key)) : true)
@@ -1187,6 +1386,9 @@ function registerShortcuts(): void {
     !keysOk.select && settings.selectKey,
     !keysOk.translate && settings.translateKey,
     !keysOk.text && settings.textKey,
+    !keysOk.inPlace && settings.inPlaceKey,
+    !keysOk.pause && settings.pauseKey,
+    !keysOk.window && settings.windowKey,
     !speechKeysOk.dictate && settings.dictateKey,
     !speechKeysOk.english && settings.englishKey,
     !speechKeysOk.note && settings.noteKey,
@@ -1206,16 +1408,8 @@ function registerShortcuts(): void {
 function applyKeyboard(): void {
   keyboardTrouble = undefined
   try {
-    // Paused: no key and no fixing, so the helper ends its thread.
-    const none = { selectKey: '', snipKey: '', translateKey: '', textKey: '', switchKey: '', fixKey: '', dictateKey: '', englishKey: '', noteKey: '', againKey: '' }
-    // Dictate's keys work only once the engine is installed, here as with Electron's shortcuts.
-    keyboard.apply(
-      settings.paused
-        ? { ...settings, ...none, autoFix: false, layoutBadge: false }
-        : speech?.installed
-          ? settings
-          : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '' },
-    )
+    // Dictate's keys work only once the engine is installed, here as with Electron's shortcuts; paused, the helper keeps the pause key alone.
+    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '' }, learned.forThread())
   } catch (error) {
     keyboardTrouble = messageOf(error)
   }
@@ -1266,7 +1460,8 @@ function restoreClipboard(saved: Record<string, Blob>[]): Promise<void> {
 /**
  * The fix key with a selection: Altype copies it, types it again in the
  * next layout of `cycle` (the one after the layout it was typed in), pastes
- * it over the selection, switches the layout and puts the clipboard back.
+ * it over the selection, selects it again (a second press goes on to the
+ * next layout), switches the layout and puts the clipboard back.
  */
 async function convertSelection(cycle: string[]): Promise<void> {
   const saved = await saveClipboard()
@@ -1293,9 +1488,18 @@ async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
   const fromTable = from ? tableFor(from) : undefined
   const toTable = to ? tableFor(to) : undefined
   if (!fromTable || !toTable || !to || from === to) return 'now'
-  await clipboard.writeText(convertText(text, fromTable, toTable))
+  const converted = convertText(text, fromTable, toTable)
+  await clipboard.writeText(converted)
   await pressPaste()
   keyboard.switchTo(to)
+  // Selected again, unless it is long or runs over lines (Shift+Left walks a line end differently in each program).
+  const chars = [...converted].length
+  if (chars <= RESELECT_MOST && !/[\r\n]/.test(converted)) {
+    await new Promise(resolve => setTimeout(resolve, 60))
+    await pressSelectBack(chars)
+    // After the thread has seen those keys (another program's to it), it is told the selection is back.
+    setTimeout(() => keyboard.selected(), 150)
+  }
   return 'later'
 }
 
@@ -1329,8 +1533,11 @@ function keyLabel(hotkey: string): string {
 /** What the tray's panel shows. */
 function trayView(): TrayView {
   return {
-    keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', snipListen: settings.snipKey, snipTranslate: settings.textKey },
+    keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', snipListen: settings.snipKey, snipTranslate: settings.textKey, switch: settings.switchKey },
     autoFix: settings.autoFix,
+    switchOn: settings.switchOn,
+    layoutBadge: settings.layoutBadge,
+    trayLayout: settings.trayLayout,
     doubleCopy: settings.doubleCopy,
     paused: settings.paused,
     speech: { installed: speech?.installed ?? false, recording: dictation?.state === 'recording', noteKey: settings.noteKey },
@@ -1342,8 +1549,62 @@ function trayView(): TrayView {
 function refreshTray(): void {
   if (!tray) return
   tray.setToolTip(tooltip())
-  tray.setImage(trayIcon(settings.paused))
+  void refreshTrayIcon()
   if (trayPanel && trayReady && !trayPanel.isDestroyed()) trayPanel.webContents.send('to-view', { type: 'tray', view: trayView() } satisfies ToView)
+}
+
+/** The tray's icon: the mark, faded while paused, or the layout in front on its keycap when the person wants that. */
+async function refreshTrayIcon(): Promise<void> {
+  const front = settings.trayLayout && !settings.paused ? frontLayout : undefined
+  const icon = front ? await layoutIcon(keyboard.shortOf(front.layout).toLowerCase(), front.caps) : undefined
+  tray?.setImage(icon ?? trayIcon(settings.paused))
+}
+
+/**
+ * Runs in the tray panel's page: the mark's keycap (scripts/icons.mjs's
+ * colours) with a layout's short name on it ("en"; underlined with Caps Lock
+ * on), `size` pixels, as a PNG data URL.
+ */
+function drawLayoutCap(size: number, text: string, caps: boolean): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const g = canvas.getContext('2d') as CanvasRenderingContext2D
+  const s = size / 16
+  const box = (x: number, y: number, w: number, h: number, r: number, fill: string) => {
+    g.beginPath()
+    g.roundRect(x * s, y * s, w * s, h * s, r * s)
+    g.fillStyle = fill
+    g.fill()
+  }
+  box(0, 0, 16, 16, 3.5, '#1c2128')
+  box(1, 1, 14, 14, 2.5, '#768390')
+  box(1, 1, 14, 12.5, 2.5, '#cdd9e5')
+  g.fillStyle = '#1c2128'
+  g.font = `800 ${size >= 32 ? 15 : 8}px "JetBrains Mono", monospace`
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.fillText(text.slice(0, 2), 8 * s, 7.4 * s)
+  if (caps) g.fillRect(4 * s, 11 * s, 8 * s, Math.max(1, s))
+  return canvas.toDataURL('image/png')
+}
+
+const layoutIcons = new Map<string, Electron.NativeImage>()
+async function layoutIcon(short: string, caps: boolean): Promise<Electron.NativeImage | undefined> {
+  const key = `${short}${caps ? '^' : ''}`
+  const known = layoutIcons.get(key)
+  if (known) return known
+  if (!trayPanel || !trayReady || trayPanel.isDestroyed()) return undefined
+  try {
+    const draw = (size: number) => trayPanel?.webContents.executeJavaScript(`(${drawLayoutCap.toString()})(${size}, ${JSON.stringify(short)}, ${caps})`) as Promise<string>
+    const icon = nativeImage.createEmpty()
+    icon.addRepresentation({ scaleFactor: 1, dataURL: await draw(16) })
+    icon.addRepresentation({ scaleFactor: 2, dataURL: await draw(32) })
+    layoutIcons.set(key, icon)
+    return icon
+  } catch (error) {
+    console.warn('Altype: could not draw the layout in the tray', error)
+    return undefined
+  }
 }
 
 function tooltip(): string {
@@ -1453,6 +1714,10 @@ function runTrayCommand(command: TrayCommand): void {
       return
     case 'translateCopied':
       afterSettling(() => useClipboard('translate'))
+      return
+    case 'typeToTranslate':
+      // An empty translator to type into; nothing to paste back into.
+      translateWindow('', screen.getCursorScreenPoint())
       return
     case 'listenScreen':
       snip('listen')
@@ -1613,6 +1878,8 @@ async function hostCall(request: HostCall): Promise<unknown> {
       log(`chrome: ${request.url} ${opened}`)
       return opened
     }
+    case 'runningApps':
+      return windowedApps().filter(exe => exe !== path.win32.basename(process.execPath).toLowerCase())
   }
 }
 
@@ -1637,10 +1904,15 @@ function start(): void {
   setUpSpeech()
   words = new WordStore(path.join(userDir(), 'words.json'))
   dictationLog = new DictationLog(path.join(userDir(), 'dictation.json'))
-  updater = new Updater({
-    change: () => postApp(),
-    ready: version => tray?.displayBalloon({ title: 'Altype', content: `Version ${version} is ready. It installs when Altype quits.` }),
-  })
+  translationLog = new TranslationLog(path.join(userDir(), 'translations.json'))
+  learned = new LearnStore(path.join(userDir(), 'learning.json'))
+  updater = new Updater(
+    {
+      change: () => postApp(),
+      ready: version => tray?.displayBalloon({ title: 'Altype', content: `Version ${version} is ready. It installs when Altype quits.` }),
+    },
+    settings.betaUpdates,
+  )
   translator = createTranslator(path.join(userDir(), 'models'), unpacked('dist', 'mt-worker.js'), {
     loader: unpacked('vendor', 'bergamot', 'bergamot-translator.js'),
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
@@ -1653,21 +1925,47 @@ function start(): void {
   refreshTray()
   registerShortcuts()
   keyboard = new KeyboardHelper(unpacked('dist', 'kbd-worker.js'), path.join(app.getAppPath(), 'media', 'layout'), {
-    keep: word => saveSettings({ keepWords: [...settings.keepWords, word] }),
+    keep: word => {
+      learned.kept(word)
+      saveSettings({ keepWords: [...settings.keepWords, word] })
+    },
+    // A word fixed by hand twice is fixed by itself from then on, and kept as typed no more.
+    fixedByHand: word => {
+      if (!learned.fixedByHand(word)) return
+      if (settings.keepWords.includes(word.word)) saveSettings({ keepWords: settings.keepWords.filter(w => w !== word.word) })
+      else applyKeyboard()
+      postApp()
+    },
+    tally: (hash, count, word) => {
+      if (!learned.tally(hash, count, word)) return
+      applyKeyboard()
+      postApp()
+    },
     selection: cycle => void convertSelection(cycle).catch(error => console.warn('Altype: could not convert the selection', error)),
     hotkey: action => {
+      if (action === 'pause') return togglePause()
+      // Paused, the thread keeps the pause key alone; a key on its way meanwhile does nothing.
+      if (settings.paused) return
       if (action === 'dictate') dictation.press('type', settings.dictateKey)
       else if (action === 'english') dictation.press('english', settings.englishKey)
       else if (action === 'note') dictation.press('note', settings.noteKey)
       else if (action === 'again') dictation.typeAgain()
       else if (action === 'select') selection('listen', settings.selectKey)
       else if (action === 'translate') selection('translate', settings.translateKey)
+      else if (action === 'inPlace') selection('inPlace', settings.inPlaceKey)
       else if (action === 'text') snip('translate', settings.textKey)
+      else if (action === 'window') openApp()
       else snip('listen', settings.snipKey)
     },
-    app: exe => {
+    app: (exe, elevated) => {
       lastApp = exe
+      if (elevated) elevatedApp = exe
       postApp()
+    },
+    layout: (layout, caps) => {
+      if (!settings.trayLayout) return
+      frontLayout = { layout, caps }
+      void refreshTrayIcon()
     },
     foreignKeys: () => {
       foreignKeys = true
@@ -1722,6 +2020,7 @@ if (!theOnlyOne) {
       ['voice', () => natural?.dispose()],
       ['translator', () => translator?.dispose()],
       ['keyboard', () => keyboard?.dispose()],
+      ['learning', () => learned?.flush()],
     ]
     for (const [name, step] of steps) {
       try {

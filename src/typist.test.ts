@@ -5,6 +5,31 @@ import { LEXICONS, strokes, TABLES } from './layouts.fixture'
 import { Typist, type KbdConfig, type KbdOut, type MouseEvent } from './typist'
 import type { Press } from './winkbd'
 
+const KBD_DEFAULTS: KbdConfig = {
+  keys: {},
+  layoutKeys: {},
+  autoFix: false,
+  fixTwoCaps: true,
+  fixCapsLock: true,
+  keepCaps: false,
+  fixOnPause: false,
+  fixSound: false,
+  clickFile: '',
+  badge: false,
+  trayLayout: false,
+  cycle: [],
+  languages: [],
+  apps: {},
+  keepWords: [],
+  learn: false,
+  alwaysFix: [],
+  myWords: [],
+  tally: {},
+  salt: 'test',
+  quietFullScreen: true,
+  words: {},
+}
+
 const VK_BACK = 0x08
 const VK_RETURN = 0x0d
 const VK_PAUSE = 0x13
@@ -27,9 +52,14 @@ class Desk {
   late = 0
   private before = 'en'
   sent: KbdOut[] = []
+  /** The field typed in is a password; a program fills the screen. */
+  password = false
+  fullScreen = false
+  clicks = 0
   /** Run a fix as soon as it is due, as the thread's loop does; false holds it, for keys typed meanwhile. */
   auto = true
   private due = false
+  private asked = false
   private shift = false
   private time = 0
   readonly typist: Typist
@@ -49,6 +79,7 @@ class Desk {
         layout: id => (TABLES[id] ? { lang: id, table: TABLES[id] } : undefined),
         installed: () => ['en', 'ru', 'uk'],
         exeOf: () => this.exe,
+        elevated: () => false,
         ownExe: 'altype.exe',
         switchLayout: (_hwnd, id) => {
           this.layout = id
@@ -57,19 +88,38 @@ class Desk {
         later: () => {
           this.due = true
         },
+        askField: () => {
+          this.asked = true
+        },
+        fullScreen: () => this.fullScreen,
+        click: () => {
+          this.clicks++
+        },
         caretOf: () => undefined,
         capsOf: () => this.caps,
         send: m => this.sent.push(m),
         doubleClickMs: 500,
       },
     )
-    this.typist.configure({ keys: {}, autoFix: false, badge: false, cycle: ['en', 'ru'], languages: [], fixApps: [], keepWords: [], words: {}, ...config }, LEXICONS)
+    this.typist.configure({ ...KBD_DEFAULTS, cycle: ['en', 'ru'], ...config }, LEXICONS)
   }
 
+  /** What the thread's loop does once the hook has answered: the answer about the field, then the fix. */
   flush(): void {
+    if (this.asked) {
+      this.asked = false
+      this.typist.fieldIs(this.password)
+    }
     if (!this.due) return
     this.due = false
     this.typist.typeFix()
+  }
+
+  /** The thread's clock, `ms` later. */
+  tick(ms: number): void {
+    this.time += ms
+    this.typist.tick()
+    if (this.auto) this.flush()
   }
 
   /** One half of a key press by the person. */
@@ -151,7 +201,7 @@ describe('fixing as one types', () => {
     const desk = new Desk({ autoFix: true })
     desk.keys('hello world. ')
     expect(desk.text).toBe('hello world. ')
-    const code = new Desk({ autoFix: true, fixApps: ['code.exe'] })
+    const code = new Desk({ autoFix: true, apps: { 'code.exe': { off: ['fix'], layout: '' } } })
     code.exe = 'code.exe'
     code.keys('ghbdtn ')
     expect(code.text).toBe('ghbdtn ')
@@ -167,6 +217,101 @@ describe('fixing as one types', () => {
     expect(enter.text).toBe('привет\n')
   })
 
+  test('a short word goes with the word fixed after it; a common one stays (в some)', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.keys('z rfr ')
+    expect(desk.text).toBe('я как ')
+    const ru = new Desk({ autoFix: true })
+    ru.layout = 'ru'
+    ru.keys('в ыщьу ', 'ru')
+    expect(ru.text).toBe('в some ')
+  })
+
+  test('two capitals at the start and a word typed with Caps Lock left on are set right', () => {
+    const two = new Desk({ autoFix: true })
+    two.keys('HEllo IDs GHbdtn ')
+    expect(two.text).toBe('Hello IDs Привет ')
+    const caps = new Desk({ autoFix: true })
+    caps.caps = true
+    caps.keys('Ghbdtn ')
+    expect(caps.text).toBe('Привет ')
+    expect(caps.caps).toBe(false)
+    const off = new Desk({ autoFix: true, fixTwoCaps: false })
+    off.keys('HEllo ')
+    expect(off.text).toBe('HEllo ')
+  })
+
+  test('Caps Lock left on: only a word of the lists is set right; sRGB typed with it on stays, and Caps Lock with it', () => {
+    const term = new Desk({ autoFix: true })
+    term.caps = true
+    term.keys('Srgb Ios ')
+    expect(term.text).toBe('sRGB iOS ')
+    expect(term.caps).toBe(true)
+    const word = new Desk({ autoFix: true })
+    word.layout = 'ru'
+    word.caps = true
+    word.keys('Привет ', 'ru')
+    expect(word.text).toBe('Привет ')
+    expect(word.caps).toBe(false)
+  })
+
+  test('Backspace after a stray capital was set right brings the word back as typed, Caps Lock on again', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.layout = 'ru'
+    desk.caps = true
+    desk.keys('Привет ', 'ru')
+    desk.tap(VK_BACK)
+    expect(desk.text).toBe('пРИВЕТ ')
+    expect(desk.caps).toBe(true)
+  })
+
+  test('a word with a capital inside is fixed only into a word the person taught: ыКПИ → sRGB', () => {
+    const taught = new Desk({ autoFix: true, myWords: [{ word: 'srgb', lang: 'en' }] })
+    taught.layout = 'ru'
+    taught.keys('sRGB ')
+    expect(taught.text).toBe('sRGB ')
+    const not = new Desk({ autoFix: true })
+    not.layout = 'ru'
+    not.keys('sRGB ')
+    expect(not.text).toBe('ыКПИ ')
+  })
+
+  test('the first word after the person switched the layout is left as typed', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.layout = 'ru'
+    desk.keys('привет ', 'ru')
+    desk.switchBySystem('en', 0)
+    desk.keys('ghbdtn ghbdtn ')
+    expect(desk.text).toBe('привет ghbdtn привет ')
+  })
+
+  test('nothing is fixed in a password field, nor while a program fills the screen', () => {
+    const secret = new Desk({ autoFix: true })
+    secret.password = true
+    secret.keys('ghbdtn vbh ')
+    expect(secret.text).toBe('ghbdtn vbh ')
+    const game = new Desk({ autoFix: true, keys: { switch: 'LeftControl' } })
+    game.fullScreen = true
+    game.keys('ghbdtn ')
+    game.tap(VK_LCONTROL)
+    expect(game.text).toBe('ghbdtn ')
+    expect(game.layout).toBe('en')
+  })
+
+  test('on a pause, a word that looks like none of its language is fixed; one that may become a word is not', () => {
+    const desk = new Desk({ autoFix: true, fixOnPause: true, fixSound: true })
+    desk.keys('ghbdtn')
+    desk.tick(1100)
+    expect(desk.text).toBe('привет')
+    expect(desk.clicks).toBe(1)
+    desk.keys(' мир ', 'ru')
+    expect(desk.text).toBe('привет мир ')
+    const half = new Desk({ autoFix: true, fixOnPause: true })
+    half.keys('hel')
+    half.tick(1100)
+    expect(half.text).toBe('hel')
+  })
+
   test('keys typed while a fix is on its way come after it', () => {
     const desk = new Desk({ autoFix: true })
     desk.keys('ghbdtn')
@@ -178,12 +323,40 @@ describe('fixing as one types', () => {
 })
 
 describe('the fix key', () => {
-  test('of three words typed wrong, it converts the last only, with the space after it', () => {
+  test('of three words typed wrong, it converts all three, with the space after them', () => {
     const desk = new Desk({ keys: { fix: 'Pause' } })
     desk.keys('ghbdtn vbh lheu ')
     desk.tap(VK_PAUSE)
-    expect(desk.text).toBe('ghbdtn vbh друг ')
+    expect(desk.text).toBe('привет мир друг ')
     expect(desk.layout).toBe('ru')
+  })
+
+  test('a word right as typed before them stays: hello vbh → hello мир', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('hello vbh')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('hello мир')
+  })
+
+  test('it never reaches back over the place the person switched the layout', () => {
+    const desk = new Desk({ keys: { fix: 'Pause', switch: 'LeftControl' } })
+    desk.keys('ghbdtn ')
+    desk.tap(VK_LCONTROL)
+    desk.tap(VK_LCONTROL)
+    desk.keys('vbh')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('ghbdtn мир')
+  })
+
+  test('short words go with the word after them: z rfr → я как, vs ltkftv → мы делаем', () => {
+    const one = new Desk({ keys: { fix: 'Pause' } })
+    one.keys('z rfr')
+    one.tap(VK_PAUSE)
+    expect(one.text).toBe('я как')
+    const two = new Desk({ keys: { fix: 'Pause' } })
+    two.keys('vs ltkftv')
+    two.tap(VK_PAUSE)
+    expect(two.text).toBe('мы делаем')
   })
 
   test('with no layouts chosen, the keys go through those in the languages the person uses', () => {
@@ -265,7 +438,72 @@ describe('the fix key', () => {
   })
 })
 
+describe('learning from the person\'s typing', () => {
+  test('a word fixed by the fix key, typing going on, is reported', () => {
+    const desk = new Desk({ learn: true, keys: { fix: 'Pause' } })
+    desk.keys('lheu')
+    desk.tap(VK_PAUSE)
+    desk.keys(' и', 'ru')
+    expect(desk.sent).toContainEqual({ type: 'fixedByHand', word: 'lheu', lang: 'ru' })
+  })
+
+  test('a word erased and typed again with the same keys in another layout is a fix by hand', () => {
+    const desk = new Desk({ learn: true, autoFix: true })
+    desk.keys('vs ')
+    for (let i = 0; i < 3; i++) desk.tap(VK_BACK)
+    desk.switchBySystem('ru', 0)
+    desk.keys('мы ', 'ru')
+    expect(desk.sent).toContainEqual({ type: 'fixedByHand', word: 'vs', lang: 'ru' })
+  })
+
+  test('a word of the person\'s, typed right three times, is learned, and fixed into after', () => {
+    const desk = new Desk({ learn: true, autoFix: true })
+    desk.keys('altype altype altype x ')
+    const tallies = desk.sent.filter(m => m.type === 'tally')
+    expect(tallies.map(m => m.type === 'tally' && m.count)).toEqual([1, 2, 3])
+    expect(tallies.at(-1)).toMatchObject({ word: { word: 'altype', lang: 'en' } })
+    // The first word after the person switched is theirs as typed; the next one is fixed.
+    desk.switchBySystem('ru', 0)
+    desk.keys('привет фдензу ', 'ru')
+    expect(desk.text).toBe('altype altype altype x привет altype ')
+  })
+
+  test('nothing is learned in a password field', () => {
+    const desk = new Desk({ learn: true, autoFix: true })
+    desk.password = true
+    desk.keys('altype altype altype x ')
+    expect(desk.sent.find(m => m.type === 'tally' && m.word)).toBeUndefined()
+  })
+
+  test('a word learned to fix always is fixed even when it is a word as typed', () => {
+    const desk = new Desk({ autoFix: true, alwaysFix: [{ word: 'vs', lang: 'ru' }] })
+    desk.keys('vs ')
+    expect(desk.text).toBe('мы ')
+  })
+})
+
 describe('the switch key', () => {
+  test('a layout\'s own key goes to that layout, again or not', () => {
+    const desk = new Desk({ layoutKeys: { en: 'LeftControl', ru: 'RightControl' } })
+    desk.tap(0xa3)
+    expect(desk.layout).toBe('ru')
+    desk.wait(600)
+    desk.tap(0xa3)
+    expect(desk.layout).toBe('ru')
+    desk.tap(VK_LCONTROL)
+    expect(desk.layout).toBe('en')
+  })
+
+  test('a program with a layout of its own gets it when it comes in front; one left out of switching ignores the key', () => {
+    const desk = new Desk({ keys: { switch: 'Pause' }, apps: { 'code.exe': { off: ['switch'], layout: 'en' } } })
+    desk.layout = 'ru'
+    desk.exe = 'code.exe'
+    desk.tick(150)
+    expect(desk.layout).toBe('en')
+    desk.tap(VK_PAUSE)
+    expect(desk.layout).toBe('en')
+  })
+
   test('Ctrl tapped alone switches; Ctrl with a key or the wheel does not', () => {
     const desk = new Desk({ keys: { switch: 'LeftControl' } })
     desk.tap(VK_LCONTROL)

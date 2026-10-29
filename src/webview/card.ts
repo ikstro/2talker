@@ -188,6 +188,8 @@ const RETRANSLATE_MS = 700
 let retranslate: number | undefined
 /** Paste was pressed while the translation was still coming: it is pasted once in. */
 let pasteWhenReady = false
+/** The focus was moved by Tab: a button reached so keeps its own Enter; one only clicked stays focused (into the next card too) and Enter still pastes. */
+let focusByTab = false
 const textField = el('textarea', {
   class: 'text-field',
   rows: 2,
@@ -467,10 +469,11 @@ function renderText(c: CardView, s: Extract<CardState, { status: 'text' }>): voi
     state.textId = c.id
     lastOut = undefined
     pasteWhenReady = false
+    focusByTab = false
     window.clearTimeout(retranslate)
     retranslate = undefined
     textField.value = s.text
-    fillLanguages(s.languages, s.from, s.to)
+    fillLanguages(s.languages, s.from, s.to, s.mine ?? [])
     textField.lang = fromSelect.value
     delete textResult.dataset.key
     hover.hide()
@@ -485,15 +488,21 @@ function renderText(c: CardView, s: Extract<CardState, { status: 'text' }>): voi
   updateTextButtons()
 }
 
-/** Both lists by name; a code the list lacks falls back to English. */
-function fillLanguages(codes: string[], from: string, to: string): void {
-  const sorted = [...codes].sort((a, b) => languageName(a).localeCompare(languageName(b)))
-  const fallback = codes.includes('en') ? 'en' : (sorted[0] ?? '')
+/** Both lists: the languages the person uses first (`mine`, in their order), then the others by name; a code the list lacks falls back to English. */
+function fillLanguages(codes: string[], from: string, to: string, mine: string[] = []): void {
+  const first = mine.filter(c => codes.includes(c))
+  const rest = codes.filter(c => !first.includes(c)).sort((a, b) => languageName(a).localeCompare(languageName(b)))
+  const fallback = codes.includes('en') ? 'en' : (rest[0] ?? first[0] ?? '')
+  const option = (c: string) => el('option', { value: c }, languageName(c))
   for (const [select, code] of [
     [fromSelect, from],
     [toSelect, to],
   ] as const) {
-    select.replaceChildren(...sorted.map(c => el('option', { value: c }, languageName(c))))
+    select.replaceChildren(
+      ...(first.length && rest.length
+        ? [el('optgroup', { label: 'Yours' }, ...first.map(option)), el('optgroup', { label: 'All languages' }, ...rest.map(option))]
+        : [...first, ...rest].map(option)),
+    )
     select.value = codes.includes(code) ? code : fallback
     select.dataset.was = select.value
   }
@@ -809,9 +818,10 @@ root.addEventListener('click', event => {
 // Esc puts the card away, and the voice with it. Space plays or stops, the arrows step through the sentences.
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape') return post({ type: 'close' })
-  // Enter in the translator pastes; a button or a list of languages keeps its own Enter, the text field has its own.
+  if (event.key === 'Tab') focusByTab = true
+  // Enter in the translator pastes; the text field has its own, a button reached by Tab keeps its own.
   if (event.key === 'Enter' && !event.shiftKey && canPaste()) {
-    if (event.target instanceof Element && event.target.closest('button, select, textarea')) return
+    if (event.target instanceof Element && (event.target.closest('textarea') || (focusByTab && event.target.closest('button')))) return
     event.preventDefault()
     if (!event.repeat) paste()
     return
@@ -829,6 +839,7 @@ window.addEventListener('keydown', event => {
 })
 
 for (const kind of ['wheel', 'touchmove']) window.addEventListener(kind, () => player.userScrolled(), { passive: true })
+window.addEventListener('pointerdown', () => (focusByTab = false), true)
 
 // ---------------------------------------------------------------- messages
 

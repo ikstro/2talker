@@ -99,10 +99,10 @@ async function appShots(theme: 'dark' | 'light', wide = false): Promise<void> {
   } else if (theme === 'dark') {
     await page('.act[data-page="transcribe"]', 'transcribe', ['vocabulary', 'meet', 'model', 'speakers'])
     await page('.act[data-page="dictate"]', 'dictate', ['recent', 'model'])
-    await page('.act[data-page="keyboard"]', 'keyboard', ['layouts', 'programs', 'kept'])
+    await page('.act[data-page="keyboard"]', 'keyboard', ['layouts', 'fixing', 'programs', 'learned', 'kept'])
     await page('.nav [data-page="settings"]', 'settings', ['languages', 'engine', 'computer'])
     await page('.act[data-page="listen"]', 'listen')
-    await page('.act[data-page="translate"]', 'translate')
+    await page('.act[data-page="translate"]', 'translate', ['translations'])
     await page('.act[data-page="screen"]', 'screen')
     await page('.nav [data-page="words"]', 'words')
     await page('.nav [data-page="about"]', 'about')

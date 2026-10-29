@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import { EN, LEXICONS, RU, strokes, TABLES, UK } from './layouts.fixture'
-import { bestLayout, chooseFix, convertText, coreOf, nextLayout, sourceLayout, typeIn, type KeyTable, type Reading } from './layoutfix'
+import { bestLayout, caseSlip, chooseFix, convertText, coreOf, meantThere, nextLayout, sourceLayout, typeIn, wordsMeant, type KeyTable, type Reading } from './layoutfix'
 
 /** How the keys typed as `text` in `lang` read in each layout of `cycle`. */
 function readings(text: string, lang: string, cycle = ['en', 'ru', 'uk']): { typed: Reading; others: Reading[] } {
@@ -59,12 +59,66 @@ describe('fixing as one types', () => {
     for (const w of ['привет', 'на', 'мир']) expect(fix(w, 'ru', ['en', 'ru'])).toBeUndefined()
   })
 
+  test('keys that are signs here and letters there: ;t → же, ,s → бы; it. stays', () => {
+    expect(fix(';t', 'en', ['en', 'ru'])).toBe('же')
+    expect(fix(',s', 'en', ['en', 'ru'])).toBe('бы')
+    for (const w of ['it.', 'to`', ',the', "f'"]) expect(fix(w, 'en', ['en', 'ru'])).toBeUndefined()
+  })
+
+  test('a word learned to fix always goes into its language, word as typed or not', () => {
+    const { typed, others } = readings('vs', 'en', ['en', 'ru'])
+    expect(chooseFix(typed, others, LEXICONS, new Set())).toBeUndefined()
+    expect(chooseFix(typed, others, LEXICONS, new Set(), new Map([['vs', 'ru']]))?.text).toBe('мы')
+  })
+
   test('not words, but not to touch: names in camel case, digits, mail, links, kept words', () => {
     expect(coreOf('iPhone')).toBe('iphone')
     expect(fix('iPhone', 'en', ['en', 'ru'])).toBeUndefined()
     expect(fix('ghbdtn1', 'en', ['en', 'ru'])).toBeUndefined()
     expect(fix('ghbdtn', 'en', ['en', 'ru'], ['ghbdtn'])).toBeUndefined()
     expect(fix('f', 'en', ['en', 'ru'])).toBeUndefined()
+  })
+})
+
+describe('short words meant in another layout', () => {
+  function meant(text: string, lang: string, there: string): boolean {
+    const { typed, others } = readings(text, lang, ['en', 'ru'])
+    return meantThere(typed, others.find(o => o.lang === there) as Reading, LEXICONS)
+  }
+
+  test('a rare word as typed, a common one there: z → я, vs → мы, lf → да', () => {
+    for (const w of ['z', 'd', 'c', 'vs', 'lf', 'ds']) expect(meant(w, 'en', 'ru')).toBe(true)
+  })
+
+  test('a common word as typed stays: в, с, it, the', () => {
+    for (const w of ['в', 'с', 'я']) expect(meant(w, 'ru', 'en')).toBe(false)
+    for (const w of ['it', 'the', 'a', 'i']) expect(meant(w, 'en', 'ru')).toBe(false)
+  })
+
+  test('walking back from the last word, while each was meant there', () => {
+    const pair = (text: string) => {
+      const { typed, others } = readings(text, 'en', ['en', 'ru'])
+      return { typed, there: others[0] as Reading }
+    }
+    expect(wordsMeant(['hello', 'z', 'rfr'].map(pair), LEXICONS)).toBe(2)
+    expect(wordsMeant(['ghbdtn', 'vbh'].map(pair), LEXICONS, new Set(), Number.POSITIVE_INFINITY)).toBe(2)
+    expect(wordsMeant(['ghbdtn', 'vbh'].map(pair), LEXICONS)).toBe(1)
+  })
+})
+
+describe('stray capitals', () => {
+  const letter = () => true
+  test('two at the start, from four letters', () => {
+    expect(caseSlip(strokes('HEllo', 'en'), letter)?.kind).toBe('two')
+    expect(caseSlip(strokes('IDs', 'en'), letter)).toBeUndefined()
+    expect(caseSlip(strokes('Hello', 'en'), letter)).toBeUndefined()
+  })
+
+  test('Caps Lock left on, Shift held for the first', () => {
+    const typed = strokes('Ghbdtn', 'en').map(s => ({ ...s, caps: true }))
+    const slip = caseSlip(typed, letter)
+    expect(slip?.kind).toBe('caps')
+    expect(typeIn(slip?.strokes ?? [], RU, l => TABLES[l])).toBe('Привет')
   })
 })
 

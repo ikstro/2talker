@@ -14,11 +14,24 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 const COUNT = 50_000
 const COMMON = 200
 const BASE = 'https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018'
-/** A word of the language: its letters, and an apostrophe inside (don't, п'ять). */
+/**
+ * A word of the language: its letters, and an apostrophe inside (don't,
+ * п'ять). The languages whose keyboards are mistaken for the English one, as
+ * far as FrequencyWords has them: the Cyrillic ones, Greek, Hebrew, Arabic and
+ * Persian, Georgian (no Belarusian, Kazakh or Armenian there; its Serbian is
+ * mostly Latin, the Cyrillic words too few to trust).
+ */
 const ALPHABETS = {
   en: /^[a-z]+(?:'[a-z]+)*$/,
   ru: /^[а-яё]+$/,
   uk: /^[а-щьюяєіїґ]+(?:'[а-щьюяєіїґ]+)*$/,
+  bg: /^[абвгдежзийклмнопрстуфхцчшщъьюя]+$/,
+  mk: /^[абвгдѓежзѕијклљмнњопрстќуфхцчџш]+$/,
+  el: /^[αβγδεζηθικλμνξοπρστυφχψωάέήίόύώϊϋΐΰς]+$/,
+  he: /^[א-ת]+$/,
+  ar: /^[ء-غف-ي]+$/,
+  fa: /^[ء-غف-يپچژکگی]+$/,
+  ka: /^[ა-ჺ]+$/,
 }
 /** Languages written in Latin, Cyrillic or Arabic letters, by Altype's code; FrequencyWords calls Norwegian `no`. */
 const SHARED = ['en', 'es', 'de', 'fr', 'it', 'pt', 'pl', 'cs', 'nl', 'sv', 'nb', 'da', 'fi', 'tr', 'ro', 'hu', 'hr', 'sr', 'vi', 'id', 'ru', 'uk', 'bg', 'ar', 'fa']

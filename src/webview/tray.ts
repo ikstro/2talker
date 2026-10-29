@@ -1,11 +1,13 @@
 // The tray's panel, in place of Windows' menu: the way into the app window at
 // the top (the brand, or Open) with Altype's state, Altype's commands for the
-// copied text and for a piece of the screen with their keys, the speech ones
-// once the engine is in, three quick settings, then Settings and Quit. A menu
+// copied text, a text to type and a piece of the screen with their keys, the
+// speech ones once the engine is in, the quick settings in groups (the
+// keyboard, listening, the pause), then Settings and Quit. A menu
 // in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere puts it away
 // (the main process hides it, and after any command). Everything shown comes
 // in one `tray` message, sent again whenever any of it changes.
 
+import { hotkeyLabel } from '../hotkey'
 import type { Settings } from '../settings'
 import type { ToHost, ToView, TrayCommand, TrayView, TutorHost } from '../protocol'
 import { dwmFlag, el } from './dom'
@@ -35,7 +37,7 @@ function command(id: string, icon: LucideName, label: string, run: TrayCommand, 
   )
 }
 
-type Switch = 'autoFix' | 'doubleCopy' | 'paused'
+type Switch = 'autoFix' | 'switchOn' | 'layoutBadge' | 'trayLayout' | 'doubleCopy' | 'paused'
 
 /** One quick setting: saved at once, and the panel stays, as a switch is not a command. */
 function toggle(id: Switch, icon: LucideName, label: string, on: boolean): HTMLElement {
@@ -92,6 +94,7 @@ function render(v: TrayView): void {
       { class: 'sec' },
       command('listenCopied', 'volume-2', 'Listen to the copied text', 'listenCopied', v.keys.listenCopied),
       command('translateCopied', 'languages', 'Translate the copied text', 'translateCopied'),
+      command('typeToTranslate', 'type', 'Type to translate…', 'typeToTranslate'),
       command('listenScreen', 'scan', 'Listen to a screen snip', 'listenScreen', v.keys.snipListen),
       command('translateScreen', 'scan', 'Translate a screen snip', 'translateScreen', v.keys.snipTranslate),
     ),
@@ -106,11 +109,14 @@ function render(v: TrayView): void {
     el(
       'section',
       { class: 'sec sw' },
-      el('div', { class: 'grp' }, 'Quick settings'),
-      toggle('autoFix', 'keyboard', 'Fix the layout as I type', v.autoFix),
-      toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy),
-      toggle('paused', 'pause', 'Pause Altype', v.paused),
+      el('div', { class: 'grp' }, 'Keyboard'),
+      toggle('autoFix', 'spell-check', 'Fix the layout as I type', v.autoFix),
+      v.keys.switch ? toggle('switchOn', 'keyboard', `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
+      toggle('layoutBadge', 'type', 'Show the layout by the cursor', v.layoutBadge),
+      toggle('trayLayout', 'keyboard', 'Show the layout in the tray', v.trayLayout),
     ),
+    el('section', { class: 'sec sw' }, el('div', { class: 'grp' }, 'Listen'), toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy)),
+    el('section', { class: 'sec sw' }, toggle('paused', 'pause', 'Pause Altype', v.paused)),
     el('section', { class: 'sec' }, command('settings', 'settings', 'Settings', 'settings'), command('quit', 'power', 'Quit', 'quit')),
   )
   root.replaceChildren(panel)

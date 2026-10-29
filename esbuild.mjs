@@ -47,6 +47,8 @@ const translator = { ...node, entryPoints: ['src/mt-worker.ts'], outfile: 'dist/
 /** The keyboard helper's thread: Windows' keyboard hooks through koffi. */
 /** @type {import('esbuild').BuildOptions} */
 const keyboard = { ...node, entryPoints: ['src/kbd-worker.ts'], external: ['koffi'], outfile: 'dist/kbd-worker.js' }
+/** Its thread for asking whether the field typed in is a password (UI Automation). */
+const field = { ...keyboard, entryPoints: ['src/field-worker.ts'], outfile: 'dist/field-worker.js' }
 
 /** @type {import('esbuild').BuildOptions} */
 const card = {
@@ -69,7 +71,7 @@ const dictation = { ...card, entryPoints: ['src/webview/dictation.ts'], outfile:
 /** The badge's audio thread: the microphone as 16 kHz samples for the engine (an AudioWorklet, loaded by URL). */
 const pcmWorklet = { ...card, entryPoints: ['src/webview/pcm-worklet.ts'], outfile: 'media/pcm-worklet.js' }
 
-const all = [main, preload, voice, translator, keyboard, card, appWindow, trayPanel, dictation, pcmWorklet]
+const all = [main, preload, voice, translator, keyboard, field, card, appWindow, trayPanel, dictation, pcmWorklet]
 if (watch) {
   const contexts = await Promise.all(all.map(o => context(o)))
   await Promise.all(contexts.map(c => c.watch()))

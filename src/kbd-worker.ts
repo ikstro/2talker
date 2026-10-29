@@ -3,23 +3,29 @@
 // up typing (Windows drops a hook that answers late). What is done with each
 // key is typist.ts's; this file lends it Windows. workerData: the port to the
 // main process, which wakes the loop with a thread message after each message
-// it posts.
+// it posts. Whether the field typed in is a password is asked of a thread of
+// its own (field-worker.ts), as the program in front answers that.
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { receiveMessageOnPort, workerData, type MessagePort } from 'node:worker_threads'
+import { MessageChannel, receiveMessageOnPort, Worker, workerData, type MessagePort } from 'node:worker_threads'
 
 import koffi from 'koffi'
 
 import { lexiconOf, type KeyTable, type Lexicon } from './layoutfix'
-import { MASK_KEYS, Typist, type KbdIn, type KbdOut } from './typist'
-import { capsLockOf, caretOf, exeOf, foreground, installedLayouts, layoutId, layoutOf, layoutTable, MAIN_KEYS, OWN_KEYS, press, REPLAY_KEYS, switchLayout } from './winkbd'
+import { MASK_KEYS, Typist, type KbdConfig, type KbdIn, type KbdOut } from './typist'
+import { capsLockOf, caretOf, elevated, exeOf, foreground, fullScreenNow, installedLayouts, layoutId, layoutOf, layoutTable, MAIN_KEYS, OWN_KEYS, press, REPLAY_KEYS, switchLayout } from './winkbd'
 
 const port = (workerData as { port: MessagePort }).port
 const send = (message: KbdOut) => port.postMessage(message)
 
 const user32 = koffi.load('user32.dll')
 const kernel32 = koffi.load('kernel32.dll')
+const winmm = koffi.load('winmm.dll')
+const PlaySoundW = winmm.func('bool __stdcall PlaySoundW(const char16_t *sound, intptr module, uint32 flags)')
+const SND_ASYNC = 0x0001
+const SND_NODEFAULT = 0x0002
+const SND_FILENAME = 0x00020000
 
 const KBDLLHOOKSTRUCT = koffi.struct('KbdHookInfo', { vkCode: 'uint32', scanCode: 'uint32', flags: 'uint32', time: 'uint32', dwExtraInfo: 'uintptr' })
 const MSLLHOOKSTRUCT = koffi.struct('KbdMouseInfo', { x: 'int32', y: 'int32', mouseData: 'uint32', flags: 'uint32', time: 'uint32', dwExtraInfo: 'uintptr' })
@@ -53,11 +59,27 @@ const WM_MOUSEHWHEEL = 0x020e
 const WM_APP_PORT = 0x8000
 /** A fix decided in the hook is typed once the hook has answered. */
 const WM_APP_FIX = 0x8001
+/** The field thread answered. */
+const WM_APP_FIELD = 0x8002
 const LLKHF_INJECTED = 0x10
-/** How often the layout in front is looked at, for the badge. */
-const BADGE_MS = 150
+/** The thread's clock: the layout in front (for the badge), the program in front, a program on the full screen, a word left standing. */
+const TICK_MS = 150
 
 const tid = GetCurrentThreadId() as number
+
+let config: KbdConfig | undefined
+let fullScreen = false
+
+/** The thread that asks whether the field typed in is a password, started at the first question. */
+let field: { worker: Worker; port: MessagePort } | undefined
+function askField(): void {
+  if (!field) {
+    const { port1, port2 } = new MessageChannel()
+    const worker = new Worker(path.join(__dirname, 'field-worker.js'), { workerData: { port: port2, tid }, transferList: [port2] })
+    field = { worker, port: port1 }
+  }
+  field.port.postMessage('ask')
+}
 
 /** Each layout Windows has: its handle, language and what its keys type, read once. */
 const layouts = new Map<string, { hkl: bigint; lang: string; table: KeyTable }>()
@@ -82,6 +104,7 @@ const typist = new Typist(
       return [...layouts.keys()]
     },
     exeOf,
+    elevated,
     ownExe: path.win32.basename(process.execPath).toLowerCase(),
     switchLayout: (hwnd, id) => {
       const info = layout(id)
@@ -89,6 +112,11 @@ const typist = new Typist(
     },
     press,
     later: () => PostThreadMessageW(tid, WM_APP_FIX, 0, 0),
+    askField,
+    fullScreen: () => fullScreen,
+    click: () => {
+      if (config?.clickFile) PlaySoundW(config.clickFile, 0, SND_FILENAME | SND_ASYNC | SND_NODEFAULT)
+    },
     caretOf,
     capsOf: capsLockOf,
     send,
@@ -111,32 +139,44 @@ function drainPort(): void {
     const message = m.message as KbdIn
     if (message.type === 'quit') running = false
     else if (message.type === 'switchTo') typist.switchTo(message.layout)
+    else if (message.type === 'selected') typist.selected()
     else {
-      const config = message.config
+      const badgeWas = config?.badge || config?.trayLayout
+      config = message.config
       readLayouts()
       typist.configure(config, lexicons)
-      // The word lists of the cycle's languages, for fixing; read once.
+      // The word lists of the cycle's languages, for fixing; read once, then given the person's own words.
+      let read = false
       if (config.autoFix || config.keys.fix) {
         for (const lang of new Set(typist.cycle().map(id => layout(id)?.lang ?? ''))) {
           const file = config.words[lang]
           if (lexicons[lang] || !file) continue
           try {
             lexicons[lang] = lexiconOf(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean))
+            read = true
           } catch (error) {
             send({ type: 'error', message: `the ${lang} word list did not load: ${messageOf(error)}` })
           }
         }
       }
-      if (config.badge && !timer) {
-        timer = Number(SetTimer(0, 0, BADGE_MS, null))
+      if (read) typist.configure(config, lexicons)
+      if ((config.badge || config.trayLayout) && !badgeWas) {
         typist.forgetLayout()
         typist.lookAtLayout()
-      } else if (!config.badge && timer) {
-        KillTimer(0, timer)
-        timer = 0
       }
+      if (!timer) timer = Number(SetTimer(0, 0, TICK_MS, null))
     }
   }
+}
+
+function drainField(): void {
+  if (!field) return
+  for (let m = receiveMessageOnPort(field.port); m; m = receiveMessageOnPort(field.port)) typist.fieldIs((m.message as { secret: boolean }).secret)
+}
+
+function tick(): void {
+  fullScreen = !!config?.quietFullScreen && fullScreenNow()
+  typist.tick()
 }
 
 let failures = 0
@@ -213,9 +253,11 @@ while (running && (GetMessageW(msg, 0, 0, 0) as number) > 0) {
   const message = msg.message as number
   if (message === WM_APP_PORT) guarded(undefined, drainPort)
   else if (message === WM_APP_FIX) guarded(undefined, () => typist.typeFix())
-  else if (message === WM_TIMER) guarded(undefined, () => typist.lookAtLayout())
+  else if (message === WM_APP_FIELD) guarded(undefined, drainField)
+  else if (message === WM_TIMER) guarded(undefined, tick)
 }
 if (timer) KillTimer(0, timer)
+void field?.worker.terminate()
 UnhookWindowsHookEx(keyboardHook)
 UnhookWindowsHookEx(mouseHook)
 koffi.unregister(keyboardProc)
