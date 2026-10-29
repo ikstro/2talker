@@ -58,13 +58,13 @@ import { adoptOldFolders } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
 import type { AppTab, AppView, CardKind, CardState, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
-import { englishHtml, translationHtml } from './render'
+import { englishHtml, textOutHtml, translationHtml } from './render'
 import { CARD_WIDTH, DEFAULTS, myLanguages, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
 import { SPEECH_PORT } from './speechservice'
 import { NaturalSpeaker } from './synth'
-import { englishReady, languageOf, splitText, targetFor, translateLines, translatePlain, type LanguageWords } from './translate'
+import { englishReady, languageOf, plainText, splitText, targetFor, translateLines, translatePairs, translatePlain, type LanguageWords } from './translate'
 import { TranslationLog } from './translationlog'
 import type { Translator } from './translator'
 import { Updater } from './update'
@@ -1241,8 +1241,9 @@ async function translateTextCard(id: number, text: string, from: string, to: str
       })
       if (current()) set({ status: 'translating' })
     }
-    const out = await translatePlain(text.slice(0, MAX_TEXT_CHARS), from, to, translator.translate)
-    if (current()) set({ status: 'ready', text: out, from, to })
+    const lines = await translatePairs(text.slice(0, MAX_TEXT_CHARS), from, to, translator.translate)
+    const sentences = lines.flatMap(line => line.pairs.map(p => p.src))
+    if (current()) set({ status: 'ready', text: plainText(lines), from, to, html: textOutHtml(lines), sentences })
   } catch (error) {
     if (current()) set({ status: 'failed', message: messageOf(error) })
   }

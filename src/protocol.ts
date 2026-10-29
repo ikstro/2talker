@@ -34,7 +34,12 @@ export type TextResult =
   | { status: 'translating' }
   /** The translator for `language` (a code) is downloading, once. */
   | { status: 'downloading'; language: string; progress: number; size: number }
-  | { status: 'ready'; text: string; from: string; to: string }
+  /**
+   * `text`: the translation as plain text (Copy, Paste); `html`: the same,
+   * every sentence a `span.t` (render.ts textOutHtml); `sentences`: the
+   * text's sentences in order, as translated, for the card to find in its field.
+   */
+  | { status: 'ready'; text: string; from: string; to: string; html: string; sentences: string[] }
   | { status: 'failed'; message: string }
 
 /** The card's lower half: the translation, or what keeps it. */

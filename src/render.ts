@@ -1,4 +1,4 @@
-import type { Line, Pair } from './translate'
+import type { Line, Pair, TextLine } from './translate'
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -11,7 +11,7 @@ export function escapeHtml(s: string): string {
  * a span carrying its number across the text, so a sentence and its other
  * side find each other.
  */
-function halfHtml(lines: readonly Line[], sentence: (pair: Pair, i: number) => string): string {
+function halfHtml<P>(lines: readonly { prefix: string; pairs: readonly P[] }[], sentence: (pair: P, i: number) => string): string {
   let i = 0
   return lines
     .filter(line => line.pairs.length > 0)
@@ -21,10 +21,15 @@ function halfHtml(lines: readonly Line[], sentence: (pair: Pair, i: number) => s
 
 /** The card's upper half: the text in English, every sentence a `span.s` the voice reads. */
 export function englishHtml(lines: readonly Line[]): string {
-  return halfHtml(lines, (p, i) => `<span class="s" data-i="${i}" dir="auto">${escapeHtml(p.en)}</span>`)
+  return halfHtml(lines, (p: Pair, i) => `<span class="s" data-i="${i}" dir="auto">${escapeHtml(p.en)}</span>`)
 }
 
 /** The lower half: the other side of every sentence, a `span.t`; a sentence without one stays as it is. */
 export function translationHtml(lines: readonly Line[]): string {
-  return halfHtml(lines, (p, i) => `<span class="t" data-i="${i}" dir="auto">${escapeHtml(p.other ?? p.en)}</span>`)
+  return halfHtml(lines, (p: Pair, i) => `<span class="t" data-i="${i}" dir="auto">${escapeHtml(p.other ?? p.en)}</span>`)
+}
+
+/** The translator's lower half: every sentence's translation a `span.t`, numbered as the text's sentences are. */
+export function textOutHtml(lines: readonly TextLine[]): string {
+  return halfHtml(lines, (p, i) => `<span class="t" data-i="${i}" dir="auto">${escapeHtml(p.out)}</span>`)
 }

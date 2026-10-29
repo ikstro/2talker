@@ -1,11 +1,13 @@
-// The card: one picked text or one snipped piece of the screen, in English
-// on top and translated under it. Listen highlights the spoken sentence and
-// word, from a cursor the arrows move; "one by one" reads a sentence and
-// waits; each paragraph has its own play button in the margin. A click on an
-// English word shows its meanings (Shift+hover too), and a click on a
-// sentence marks its other side. The HTML of both halves arrives rendered
-// from the main process. A text card holds a text read from the screen as it
-// is: the person fixes it, copies it or translates it into any language.
+// The card: two halves, a text on top and its other side under it, each with
+// Copy under it (halves.ts); Listen and Translate differ in their buttons.
+// Listen: the English on top, read aloud, with a remote that highlights the
+// spoken sentence and word from a cursor the arrows move; "one by one" reads
+// a sentence and waits; each paragraph has its own play button in the margin.
+// Translate: the text as it is in a field the person edits, translated into
+// any language, Swap and Paste; ▶ Listen reads its English half when pressed.
+// In either, a click on an English word shows its meanings (Shift+hover too),
+// a dotted line marks the rarer ones, and a click on a sentence marks its
+// other side. The HTML of the halves arrives rendered from the main process.
 
 import { hotkeyLabel } from '../hotkey'
 import { findLanguage, labelCode, langCode, voiceMatches } from '../languages'
@@ -13,7 +15,8 @@ import { chosenNatural } from '../natural'
 import type { CardKind, CardState, CardView, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
 import { dwmFlag, el, html, icon } from './dom'
 import { glyph } from './glyphs'
-import { WordHover } from './hover'
+import { fieldText, halfBar, paint, plainOf, rangeIndexAt, sentenceRanges } from './halves'
+import { caretAt, WordHover } from './hover'
 import { Player } from './player'
 import { markRare } from './rare'
 import { canOpenSpeechSettings, voiceSteps } from './voices'
@@ -109,6 +112,8 @@ const player = new Player(
     audio: () => openAudio(),
     naturalFailed: message => showHint([`The natural voice stopped (${message}). A system voice reads on.`], 10_000),
     entered: index => {
+      // The field's sentence being read, marked where the person typed it.
+      if (state.reading === 'src') return paint('reading', readRanges[index])
       if (state.readFrom < 0) return
       state.cursor = state.readFrom + index
       markCursor()
@@ -167,7 +172,8 @@ const voiceClose = el(
 const voiceBanner = el('div', { class: 'banner voice-banner', hidden: true }, voiceText, voiceButton, voiceClose)
 
 const stateView = el('div', { class: 'empty', hidden: true })
-const body = el('div', { class: 'body' })
+// The English half: its words open the word card.
+const body = el('div', { class: 'body', 'data-words': true })
 const listenButton = el('button', { class: 'listen', 'data-play': 'message', 'data-key': 'card' }, glyph('play'), el('span', { class: 'listen-label' }, 'Listen'))
 const prevButton = el('button', { class: 'icon-btn', title: 'Previous sentence (←)', 'aria-label': 'Previous sentence', onclick: () => step(-1) }, glyph('prev'))
 const nextButton = el('button', { class: 'icon-btn', title: 'Next sentence (→)', 'aria-label': 'Next sentence', onclick: () => step(1) }, glyph('next'))
@@ -175,11 +181,20 @@ const oneButton = el('button', { class: 'chip', 'aria-pressed': 'false', onclick
 // The keyboard is the interface: Space's job, next to the buttons it stands for.
 const spaceLabel = el('span', { class: 'kl' }, 'listen')
 const spaceHint = el('span', { class: 'space-hint', 'aria-hidden': 'true' }, spaceLabel, el('span', { class: 'key' }, 'Space'))
-const note = el('span', { class: 'status-line' })
 const translation = el('div', { class: 'translation' })
-const remote = el('div', { class: 'remote' }, prevButton, listenButton, nextButton, oneButton, spaceHint)
-const article = el('article', { class: 'msg assistant' }, body, el('footer', { class: 'msg-foot' }, remote, note), translation)
-const list = el('main', { class: 'list', hidden: true }, article)
+// The translation's Copy, once there is one.
+const translationBar = halfBar([copyButton(() => plainOf(translation))], [])
+const remote = el('div', { class: 'remote' }, spaceHint, prevButton, listenButton, nextButton, oneButton)
+// What the card has to say of its text (a long one translated in part).
+const note = el('footer', { class: 'card-foot', hidden: true })
+const article = el(
+  'article',
+  { class: 'msg assistant' },
+  body,
+  halfBar([copyButton(() => plainOf(body))], [remote]),
+  el('section', { class: 'lower' }, translation, translationBar),
+)
+const list = el('main', { class: 'list', hidden: true }, article, note)
 
 /** After an edit, the text is translated again once typing pauses this long. */
 const RETRANSLATE_MS = 700
@@ -190,16 +205,28 @@ let retranslate: number | undefined
 let pasteWhenReady = false
 /** The focus was moved by Tab: a button reached so keeps its own Enter; one only clicked stays focused (into the next card too) and Enter still pastes. */
 let focusByTab = false
-const textField = el('textarea', {
+/** The text last sent to be translated: its translation, once in, finds the field's sentences. */
+let sentText = ''
+/** The field's sentences as ranges, numbered as the translation's; none while the text differs from the one translated. */
+let fieldRanges: (Range | undefined)[] | undefined
+/** The ranges of the field's sentences being read aloud, in the reading's order. */
+let readRanges: (Range | undefined)[] = []
+// Plain text only, so the caret stays where it is: the dotted words and the marks are highlights over it.
+const textField = el('div', {
   class: 'text-field',
-  rows: 2,
+  contenteditable: 'plaintext-only',
+  role: 'textbox',
+  'aria-multiline': 'true',
   spellcheck: 'false',
   dir: 'auto',
   'aria-label': 'The text',
+  // An edit: the marks and the word card go, the reading stops, and the text is translated again once typing pauses.
   oninput: () => {
-    fitTextField()
     updateTextButtons()
     pasteWhenReady = false
+    hover.hide()
+    stopTextReading()
+    unmarkField()
     window.clearTimeout(retranslate)
     retranslate = window.setTimeout(() => {
       retranslate = undefined
@@ -216,7 +243,8 @@ const textField = el('textarea', {
     }
   },
 })
-const textCopy = copyButton(() => textField.value)
+const textCopy = copyButton(() => fieldText(textField))
+const textListen = listenText('src')
 const fromSelect = el('select', { 'aria-label': 'From', title: 'The language of the text', onchange: () => pickLanguage('from') })
 const toSelect = el('select', { 'aria-label': 'Into', title: 'The language to translate into', onchange: () => pickLanguage('to') })
 const swapButton = el('button', { class: 'swap-btn', title: 'Swap the languages: the translation becomes the text', onclick: () => swapLanguages() }, icon('arrow-swap'), el('span', {}, 'Swap'))
@@ -229,11 +257,9 @@ const textView = el(
   'main',
   { class: 'text-view', hidden: true },
   textField,
-  el(
-    'div',
-    { class: 'text-bar' },
-    textCopy,
-    el('span', { class: 'text-langs' }, pill(fromSelect), el('span', { class: 'to', 'aria-hidden': 'true' }, '→'), pill(toSelect), swapButton),
+  halfBar(
+    [textCopy, textListen],
+    [el('span', { class: 'text-langs' }, pill(fromSelect), el('span', { class: 'to', 'aria-hidden': 'true' }, '→'), pill(toSelect), swapButton)],
   ),
   textResult,
   textFoot,
@@ -244,10 +270,9 @@ root.append(header, voiceBanner, stateView, list, textView, hint)
 
 const hover = new WordHover({
   host: root,
-  area: list,
+  area: root,
   post,
-  // A text card's words are the person's to fix: no word card.
-  blocked: () => state.card?.state.status === 'text',
+  sentenceAt: range => (fieldRanges ? fieldRanges[rangeIndexAt(fieldRanges, range.startContainer, range.startOffset)]?.toString() : undefined),
   nativeName: () => state.card?.native ?? 'your language',
   mode: () => state.config.wordHint,
   // A word alone, read by the same voice as the text; the text's reading stops for it.
@@ -258,8 +283,15 @@ const hover = new WordHover({
   },
 })
 
+/** The English halves on screen: Listen's upper one; the translator's field (once its sentences are found) and translation, when in English. */
+function englishHalves(): Element[] {
+  if (!list.hidden) return [body]
+  if (textView.hidden) return []
+  return [...(fieldRanges && textField.hasAttribute('data-words') ? [textField] : []), ...textResult.querySelectorAll('.text-out[data-words]')]
+}
+
 function markRareWords(): void {
-  markRare(body, state.common, state.config.rareWords)
+  markRare(englishHalves(), state.common, state.config.rareWords)
 }
 
 // The window is as tall as the card's content, with the page's border above and below; a maximized card fills the screen instead
@@ -268,8 +300,6 @@ function postHeight(): void {
   if (!state.maximized) post({ type: 'height', px: Math.ceil(document.body.getBoundingClientRect().height) + 2 })
 }
 new ResizeObserver(() => postHeight()).observe(document.body)
-// A wider or narrower card wraps the field's lines anew.
-window.addEventListener('resize', () => fitTextField())
 
 // ---------------------------------------------------------------- rendering
 
@@ -285,7 +315,8 @@ function renderVoiceBanner(): void {
     !!n &&
     n.status !== 'unsupported' &&
     targetCode() === 'en' &&
-    state.card?.kind !== 'text' &&
+    // The translator reads only when asked: its offer waits for a Listen.
+    (!translator(state.card) || state.listened) &&
     (n.status === 'ready' ? state.naturalJustReady : n.status === 'downloading' || (state.listened && !n.dismissed))
   voiceBanner.hidden = !shown
   if (!shown || !n) return
@@ -369,6 +400,7 @@ function failed(message: string, retry: () => void = () => post({ type: 'retry' 
 
 /** The lower half; the same translation is left as it is, so a mark on it stays. */
 function renderTranslation(c: CardView, t: TranslationState): void {
+  translationBar.hidden = t.status !== 'ready'
   if (t.status === 'ready') {
     if (translation.dataset.html === t.html) return
     translation.replaceChildren(html(t.html))
@@ -412,6 +444,7 @@ function renderState(): void {
       hover.refresh()
     }
     renderTranslation(c, s.translation)
+    hover.refresh()
     note.textContent = s.note ?? ''
     note.hidden = !s.note
     if (state.shownId !== c.id) window.scrollTo({ top: 0 })
@@ -472,20 +505,43 @@ function renderText(c: CardView, s: Extract<CardState, { status: 'text' }>): voi
     focusByTab = false
     window.clearTimeout(retranslate)
     retranslate = undefined
-    textField.value = s.text
+    setFieldText(s.text)
     fillLanguages(s.languages, s.from, s.to, s.mine ?? [])
-    textField.lang = fromSelect.value
+    syncLanguages()
     delete textResult.dataset.key
     hover.hide()
     window.scrollTo({ top: 0 })
   }
   state.shownId = c.id
   renderTextResult(s.result, !!s.canPaste)
+  hover.refresh()
   textFoot.textContent = s.canPaste ? 'Translated on this computer · Shift+Enter, a new line' : 'Translated on this computer'
   // Said under a translation, or one on its way; not under nothing, or a failure.
   textFoot.hidden = s.result.status === 'none' || s.result.status === 'failed'
-  fitTextField()
   updateTextButtons()
+}
+
+/** The field's text, put in by the card (a new text, or Swap): its marks go with the old one. */
+function setFieldText(text: string): void {
+  textField.textContent = text
+  sentText = text
+  unmarkField()
+}
+
+/** The field's marks (pairs, the sentence read, dotted words), dropped while its text is not the one translated. */
+function unmarkField(): void {
+  fieldRanges = undefined
+  paint('pair')
+  paint('reading')
+  for (const marked of textView.querySelectorAll('.pair')) marked.classList.remove('pair')
+  markRareWords()
+}
+
+/** What the languages decide: the field's language, and whether its words are English ones to click and read. */
+function syncLanguages(): void {
+  textField.lang = fromSelect.value
+  textField.toggleAttribute('data-words', fromSelect.value === 'en')
+  textListen.hidden = fromSelect.value !== 'en'
 }
 
 /** Both lists: the languages the person uses first (`mine`, in their order), then the others by name; a code the list lacks falls back to English. */
@@ -514,7 +570,9 @@ function pickLanguage(side: 'from' | 'to'): void {
   if (other.value === changed.value && changed.dataset.was) other.value = changed.dataset.was
   fromSelect.dataset.was = fromSelect.value
   toSelect.dataset.was = toSelect.value
-  textField.lang = fromSelect.value
+  stopTextReading()
+  syncLanguages()
+  markRareWords()
   const s = state.card?.state
   if (s?.status === 'text' && s.result.status !== 'none') translateText()
 }
@@ -528,32 +586,42 @@ function swapLanguages(): void {
   ;[fromSelect.value, toSelect.value] = [toSelect.value, fromSelect.value]
   fromSelect.dataset.was = fromSelect.value
   toSelect.dataset.was = toSelect.value
-  textField.lang = fromSelect.value
+  stopTextReading()
+  syncLanguages()
   if (s?.status === 'text' && s.result.status === 'ready') {
-    textField.value = s.result.text
-    fitTextField()
+    setFieldText(s.result.text)
     updateTextButtons()
   }
+  markRareWords()
   translateText()
 }
 
 /** The text as it stands in the field, maybe fixed by hand, from and into the languages picked. */
 function translateText(): void {
   const c = state.card
-  if (!c || !textField.value.trim()) return
-  post({ type: 'translateText', id: c.id, text: textField.value, from: fromSelect.value, to: toSelect.value })
+  const text = fieldText(textField)
+  if (!c || !text.trim()) return
+  sentText = text
+  post({ type: 'translateText', id: c.id, text, from: fromSelect.value, to: toSelect.value })
 }
 
-/** The card's last translation: shown faded while a newer one comes, so editing the text does not blank it. */
-let lastOut: { text: string; to: string } | undefined
+/** A translation as the card shows it: its text (to copy and paste), language and sentences. */
+type Out = { text: string; to: string; html: string }
 
-/** The translation with Copy, and Paste when it came from a selection; `ready`: Paste may be pressed. */
-function outBlock(out: { text: string; to: string }, canPaste: boolean, ready: boolean): HTMLElement[] {
+/** The card's last translation: shown faded while a newer one comes, so editing the text does not blank it. */
+let lastOut: Out | undefined
+
+/**
+ * The translation with Copy, ▶ Listen when it is in English, and Paste when
+ * it came from a selection; `ready`: Listen and Paste may be pressed.
+ */
+function outBlock(out: Out, canPaste: boolean, ready: boolean): HTMLElement[] {
   // Its key, Enter, is drawn on it by card.css, so the button's name stays "Paste".
   const pasteButton = el('button', { class: 'paste-btn', title: 'Paste over the selection (Enter)', disabled: !ready, onclick: () => paste() }, 'Paste')
+  const english = out.to === 'en'
   return [
-    el('p', { class: `text-out${ready ? '' : ' stale'}`, lang: out.to, dir: 'auto' }, out.text),
-    el('div', { class: 'text-bar' }, copyButton(() => out.text), canPaste ? el('span', { class: 'grow' }) : null, canPaste ? pasteButton : null),
+    el('div', { class: `text-out${ready ? '' : ' stale'}`, lang: out.to, dir: 'auto', 'data-words': english }, html(out.html)),
+    halfBar([copyButton(() => out.text), english && ready ? listenText('out') : null], canPaste ? [pasteButton] : []),
   ]
 }
 
@@ -563,6 +631,10 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
   if (textResult.dataset.key === key) return
   textResult.dataset.key = key
   textResult.hidden = r.status === 'none'
+  // The translation read aloud is about to be replaced.
+  if (player.key === 'out') player.stop()
+  for (const marked of textView.querySelectorAll('.pair')) marked.classList.remove('pair')
+  paint('pair')
   switch (r.status) {
     case 'none':
       textResult.replaceChildren()
@@ -574,8 +646,10 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
       textResult.replaceChildren(downloading(`${languageName(r.language)} ⇄ English`, r.progress, r.size))
       return
     case 'ready':
-      lastOut = { text: r.text, to: r.to }
+      lastOut = { text: r.text, to: r.to, html: r.html }
       textResult.replaceChildren(...outBlock(lastOut, canPaste, true))
+      // The translation of exactly the text in the field: its sentences are found there, to mark and to read.
+      fieldRanges = retranslate === undefined && fieldText(textField) === sentText ? sentenceRanges(textField, r.sentences) : undefined
       if (pasteWhenReady) {
         pasteWhenReady = false
         paste()
@@ -587,22 +661,11 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
   }
 }
 
-/** The field is as tall as its text, up to a limit (card.css) past which it scrolls; maximized, it fills the rest of the screen at least (card.css). */
-function fitTextField(): void {
-  if (textView.hidden) return
-  const y = window.scrollY
-  // Measured unstretched, so a field that filled the screen can be as short as its text again.
-  textField.style.flexGrow = '0'
-  textField.style.height = 'auto'
-  textField.style.height = `${textField.scrollHeight + textField.offsetHeight - textField.clientHeight}px`
-  textField.style.flexGrow = ''
-  window.scrollTo({ top: y })
-}
-
-/** An empty field has nothing to copy or translate. */
+/** An empty field has nothing to copy, read or translate. */
 function updateTextButtons(): void {
-  const empty = !textField.value.trim()
+  const empty = !fieldText(textField).trim()
   textCopy.disabled = empty
+  textListen.disabled = empty
   swapButton.disabled = empty
 }
 
@@ -632,6 +695,11 @@ function paste(): void {
 
 function copyButton(text: () => string): HTMLButtonElement {
   return el('button', { class: 'quiet-btn', title: 'Copy', onclick: () => copy(text()) }, icon('copy'), el('span', {}, 'Copy'))
+}
+
+/** The translator's ▶ Listen, beside Copy under its English half (`src` the field, `out` the translation); it turns into Stop while reading. */
+function listenText(key: 'src' | 'out'): HTMLButtonElement {
+  return el('button', { class: 'quiet-btn icon-only', 'data-play': 'text', 'data-key': key, title: 'Listen (Space)', 'aria-label': 'Listen' }, glyph('play'))
 }
 
 function copy(text: string): void {
@@ -673,10 +741,43 @@ function read(key: string, els: HTMLElement[], from: number, asked: boolean): vo
   }
   state.readFrom = from
   state.reading = key
-  const after = englishSentences()[from + els.length]
-  if (!hasVoice() || !player.play(key, els, { follow: true, ahead: after ? [after] : [] })) {
+  const after = from >= 0 ? englishSentences()[from + els.length] : undefined
+  // The field's sentences are read from spans of their own, out of sight: the page does not follow them.
+  if (!hasVoice() || !player.play(key, els, { follow: key !== 'src', ahead: after ? [after] : [] })) {
     if (asked) noVoiceHint()
   }
+}
+
+/**
+ * The translator's English half, to read: the translation's sentences, or
+ * the field's, each as a span of its text with its range in the field (the
+ * whole lines, while the field's sentences are not found yet).
+ */
+function textReading(key: 'src' | 'out'): { els: HTMLElement[]; ranges: (Range | undefined)[] } {
+  const latin = (text: string) => /\p{Script=Latin}/u.test(text)
+  if (key === 'out') return { els: [...textResult.querySelectorAll<HTMLElement>('.text-out:not(.stale) span.t')].filter(s => latin(s.textContent ?? '')), ranges: [] }
+  if (!fieldRanges) return { els: fieldText(textField).split('\n').filter(latin).map(line => el('span', {}, line)), ranges: [] }
+  const found = fieldRanges.filter((r): r is Range => !!r && latin(r.toString()))
+  return { els: found.map(r => el('span', {}, r.toString())), ranges: found }
+}
+
+/** ▶ Listen in the translator: its English half from the top; never by itself. */
+function readText(key: 'src' | 'out'): void {
+  const { els, ranges } = textReading(key)
+  readRanges = ranges
+  read(key, els, -1, true)
+}
+
+/** The translator's reading, stopped when its text or languages change. */
+function stopTextReading(): void {
+  if (player.key === 'src' || player.key === 'out') player.stop()
+}
+
+/** Space in the translator: its English half read, or stopped. */
+function toggleTextReading(): void {
+  if (player.key === 'src' || player.key === 'out') return player.stop()
+  if (fromSelect.value === 'en' && fieldText(textField).trim()) readText('src')
+  else if (toSelect.value === 'en' && lastOut) readText('out')
 }
 
 /** Listen: from the cursor to the end, or the cursor's sentence alone, one by one. */
@@ -739,6 +840,7 @@ function updatePlayButtons(): void {
     button.title = playing ? 'Stop' : 'Listen'
   }
   spaceLabel.textContent = player.key === 'card' ? 'stop' : 'listen'
+  if (player.key !== 'src') paint('reading')
 }
 
 // ---------------------------------------------------------------- interaction
@@ -764,9 +866,8 @@ function renderMaximized(): void {
   if (shape && shape.dataset.shape !== (on ? 'restore' : 'maximize')) shape.replaceWith(glyph(on ? 'restore' : 'maximize'))
   if (document.body.classList.contains('maximized') === on) return
   document.body.classList.toggle('maximized', on)
-  // Filling the screen, the field takes the height; back, it is as tall as its text again,
-  // and main hears the content's height at once (the page may have kept its size, so the observer stays still).
-  fitTextField()
+  // Filling the screen, the field takes the height (card.css); back, main hears the content's height at once
+  // (the page may have kept its size, so the observer stays still).
   postHeight()
 }
 
@@ -791,10 +892,24 @@ function noVoiceHint(): void {
   )
 }
 
-/** Marks sentence `i` in both halves, the English and its other side; undefined clears the mark. */
+/** Marks sentence `i` in both halves, the text and its other side (in the field, as a highlight); undefined clears the mark. */
 function markPair(i: string | undefined): void {
-  for (const marked of list.querySelectorAll('.pair')) marked.classList.remove('pair')
-  if (i !== undefined) for (const side of list.querySelectorAll(`[data-i="${i}"]`)) side.classList.add('pair')
+  for (const marked of root.querySelectorAll('.pair')) marked.classList.remove('pair')
+  paint('pair')
+  if (i === undefined) return
+  const view = list.hidden ? textView : list
+  for (const side of view.querySelectorAll(`[data-i="${i}"]`)) side.classList.add('pair')
+  if (!textView.hidden) paint('pair', fieldRanges?.[Number(i)])
+}
+
+/** The number of the sentence clicked: a sentence span's, or the field's sentence under the point. */
+function sentenceClicked(target: HTMLElement, x: number, y: number): string | undefined {
+  const sentence = target.closest<HTMLElement>('span.s, span.t')
+  if (sentence && (list.contains(sentence) || textResult.contains(sentence))) return sentence.dataset.i
+  if (!fieldRanges || !target.closest('.text-field')) return undefined
+  const caret = caretAt(x, y)
+  const i = caret ? rangeIndexAt(fieldRanges, caret.node, caret.offset) : -1
+  return i < 0 ? undefined : String(i)
 }
 
 root.addEventListener('click', event => {
@@ -807,11 +922,11 @@ root.addEventListener('click', event => {
     const key = playButton.dataset.key ?? ''
     if (player.key === key) player.stop()
     else if (playButton.dataset.play === 'paragraph') readParagraph(playButton.closest('p'))
+    else if (key === 'src' || key === 'out') readText(key)
     else listen()
     return
   }
-  const sentence = target.closest<HTMLElement>('span.s, span.t')
-  markPair(sentence && list.contains(sentence) ? sentence.dataset.i : undefined)
+  markPair(sentenceClicked(target, event.clientX, event.clientY))
   hover.showAt(event.clientX, event.clientY)
 })
 
@@ -821,13 +936,19 @@ window.addEventListener('keydown', event => {
   if (event.key === 'Tab') focusByTab = true
   // Enter in the translator pastes; the text field has its own, a button reached by Tab keeps its own.
   if (event.key === 'Enter' && !event.shiftKey && canPaste()) {
-    if (event.target instanceof Element && (event.target.closest('textarea') || (focusByTab && event.target.closest('button')))) return
+    if (event.target instanceof Element && (event.target.closest('.text-field') || (focusByTab && event.target.closest('button')))) return
     event.preventDefault()
     if (!event.repeat) paste()
     return
   }
-  if (list.hidden || event.ctrlKey || event.altKey || event.metaKey) return
-  if (event.target instanceof Element && event.target.closest('button, input, select, textarea')) return
+  if (event.ctrlKey || event.altKey || event.metaKey) return
+  if (event.target instanceof Element && event.target.closest('button, input, select, textarea, [contenteditable]')) return
+  // The translator: Space reads its English half, outside the field.
+  if (!textView.hidden && event.key === ' ') {
+    event.preventDefault()
+    return toggleTextReading()
+  }
+  if (list.hidden) return
   if (event.key === ' ') {
     event.preventDefault()
     if (player.key === 'card') player.stop()

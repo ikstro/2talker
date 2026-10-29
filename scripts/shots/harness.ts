@@ -3,7 +3,9 @@
 // tray panel, the dictation badge with a fake microphone). It never touches the desktop or
 // the installed Altype, so it runs while that one runs.
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { englishHtml, textOutHtml, translationHtml } from '../../src/render'
+import { splitText, translateLines, translatePairs, type Translate } from '../../src/translate'
 import { appView, trayView } from './view'
 
 import { resolve } from 'node:path'
@@ -70,8 +72,104 @@ ipcMain.handle('host-call', async (_e, r: { call: string; method?: string; route
 const heights = new Map<number, number>()
 ipcMain.on('to-host', (e, m: { type: string; px?: number }) => {
   log.push(`to-host ${e.sender.id} ${JSON.stringify(m).slice(0, 160)}`)
-  if ((m.type === 'dictationHeight' || m.type === 'trayHeight') && m.px) heights.set(e.sender.id, m.px)
+  if ((m.type === 'dictationHeight' || m.type === 'trayHeight' || m.type === 'height') && m.px) heights.set(e.sender.id, m.px)
 })
+
+// ---------------------------------------------------------------- the card
+
+/** A translator of a few fixed sentences, both ways, for the card's fixtures. */
+const PHRASES: [string, string][] = [
+  ['The weather was gloomy, so we lingered at the harbour.', 'Погода была пасмурной, поэтому мы задержались в гавани.'],
+  ['Boats drifted past the lighthouse.', 'Лодки проплывали мимо маяка.'],
+  ['Tomorrow we sail north.', 'Завтра мы отплываем на север.'],
+]
+const fake: Translate = async (sentences, from) =>
+  sentences.map(s => PHRASES.find(([en, ru]) => (from === 'en' ? en : ru) === s)?.[from === 'en' ? 1 : 0] ?? s)
+const CONFIG = { voice: '', rate: 1, wordHint: 'shift', rareWords: true, oneAtATime: false }
+const GLOSS = { word: 'harbour', base: 'harbour', entries: [{ form: 'harbour', senses: [['noun', 'гавань, порт'], ['verb', 'укрывать, давать приют']]}] }
+
+/** Clicks the middle of `word` in the element `selector`, as the person would (the word card, a sentence's pair). */
+const clickWord = (w: BrowserWindow, selector: string, word: string) =>
+  js(
+    w,
+    `(() => {
+      const root = document.querySelector(${JSON.stringify(selector)}); if (!root) return 'missing'
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.data.indexOf(${JSON.stringify(word)}); if (i < 0) continue
+        const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + ${word.length})
+        const b = r.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2
+        document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, bubbles: true }))
+        return 'ok'
+      }
+      return 'no word'
+    })()`,
+  )
+
+async function cardShots(theme: 'dark' | 'light'): Promise<void> {
+  nativeTheme.themeSource = theme
+  const w = win('card.html', 440, 400, colors().surface)
+  await new Promise<void>(r => w.webContents.once('did-finish-load', () => r()))
+  await sleep(300)
+  send(w, { type: 'common', words: readFileSync(`${ROOT}/media/common-en.txt`, 'utf8').split(/\r?\n/).filter(Boolean) })
+  const fit = async () => {
+    await sleep(350)
+    const h = heights.get(w.webContents.id)
+    if (h) w.setSize(440, Math.min(700, h))
+    await sleep(350)
+  }
+  const card = (id: number, kind: string, state: unknown) =>
+    send(w, { type: 'card', card: { id, kind, state, target: 'English', native: 'Russian', autoRead: false, via: kind === 'selection' ? 'Control+C*2' : 'RightControl*2' }, config: CONFIG, pinned: false, maximized: false })
+
+  // Listen: the English on top with Copy and the remote, the translation with its Copy.
+  const english = `${PHRASES[0]![0]} ${PHRASES[1]![0]}\n\n${PHRASES[2]![0]}`
+  const lines = await translateLines(splitText(english, 'Russian'), 'Russian', fake)
+  card(1, 'selection', { status: 'done', html: englishHtml(lines), translation: { status: 'ready', html: translationHtml(lines) } })
+  await fit()
+  await shot(w, `card-${theme}-listen`)
+  log.push(`listen word: ${await clickWord(w, '.body', 'harbour')}`)
+  send(w, { type: 'gloss', ...GLOSS, gloss: GLOSS, saved: false })
+  await sleep(300)
+  await shot(w, `card-${theme}-listen-word`)
+
+  // Translate, Russian into English: the English half is the translation, its words dotted and clickable.
+  const translate = async (id: number, text: string, from: string, to: string) => {
+    const pairs = await translatePairs(text, from, to, fake)
+    const result = { status: 'ready', text: pairs.map(l => l.pairs.map(p => p.out).join(' ')).join('\n'), from, to, html: textOutHtml(pairs), sentences: pairs.flatMap(l => l.pairs.map(p => p.src)) }
+    card(id, 'translate', { status: 'text', text, from, to, languages: ['en', 'ru', 'uk', 'de'], mine: ['ru', 'en'], result, canPaste: true })
+    await fit()
+  }
+  await translate(2, `${PHRASES[0]![1]} ${PHRASES[1]![1]}`, 'ru', 'en')
+  await shot(w, `card-${theme}-translate-ru-en`)
+  log.push(`ru-en word: ${await clickWord(w, '.text-out', 'harbour')}`)
+  send(w, { type: 'gloss', ...GLOSS, gloss: GLOSS, saved: true })
+  await sleep(300)
+  await shot(w, `card-${theme}-translate-ru-en-word`)
+
+  // English into Russian: the field is the English half; a click in it marks the sentence's pair and opens the word.
+  await translate(3, `${PHRASES[0]![0]}\n${PHRASES[1]![0]}`, 'en', 'ru')
+  await shot(w, `card-${theme}-translate-en-ru`)
+  log.push(`en-ru word: ${await clickWord(w, '.text-field', 'lighthouse')}`)
+  send(w, { type: 'gloss', word: 'lighthouse', gloss: { word: 'lighthouse', base: 'lighthouse', entries: [{ form: 'lighthouse', senses: [['noun', 'маяк']] }] }, saved: false })
+  await sleep(300)
+  await shot(w, `card-${theme}-translate-en-ru-word`)
+
+  // Typed into: the marks go at once; the new text's translation brings them back, the new words dotted too.
+  log.push(`type: ${await focus(w, '.text-field')}`)
+  await js(w, `(() => { const f = document.querySelector('.text-field'); const s = getSelection(); s.selectAllChildren(f); s.collapseToEnd(); document.execCommand('insertText', false, ' Tomorrow we sail north.'); return 'ok' })()`)
+  await sleep(200)
+  await shot(w, `card-${theme}-translate-typing`)
+  await sleep(900)
+  const typed = String(await js(w, `document.querySelector('.text-field').textContent`))
+  const pairs = await translatePairs(typed, 'en', 'ru', fake)
+  const result = { status: 'ready', text: pairs.map(l => l.pairs.map(p => p.out).join(' ')).join('\n'), from: 'en', to: 'ru', html: textOutHtml(pairs), sentences: pairs.flatMap(l => l.pairs.map(p => p.src)) }
+  card(3, 'translate', { status: 'text', text: '', from: 'en', to: 'ru', languages: ['en', 'ru', 'uk', 'de'], mine: ['ru', 'en'], result, canPaste: true })
+  await fit()
+  log.push(`typed pair: ${await clickWord(w, '.text-field', 'sail')}`)
+  await sleep(300)
+  await shot(w, `card-${theme}-translate-typed`)
+  w.destroy()
+}
 
 async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> {
   nativeTheme.themeSource = theme
@@ -247,15 +345,20 @@ async function badgeShots(theme: 'dark' | 'light'): Promise<void> {
 
 app.whenReady().then(async () => {
   try {
-    await appShots('dark')
-    await appShots('light')
-    await appShots('dark', true)
-    await setupShots('dark')
-    await setupShots('light')
-    await trayShots('dark')
-    await trayShots('light')
-    await badgeShots('dark')
-    await badgeShots('light')
+    await cardShots('dark')
+    await cardShots('light')
+    // SHOTS=card: the card alone.
+    if (process.env.SHOTS !== 'card') {
+      await appShots('dark')
+      await appShots('light')
+      await appShots('dark', true)
+      await setupShots('dark')
+      await setupShots('light')
+      await trayShots('dark')
+      await trayShots('light')
+      await badgeShots('dark')
+      await badgeShots('light')
+    }
   } catch (error) {
     log.push(`ERROR ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   }

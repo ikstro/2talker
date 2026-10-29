@@ -26,7 +26,7 @@ function highlights(): HighlightRegistryLike | undefined {
   return (globalThis as unknown as { CSS?: { highlights?: HighlightRegistryLike } }).CSS?.highlights
 }
 
-function caretAt(x: number, y: number): { node: Node; offset: number } | undefined {
+export function caretAt(x: number, y: number): { node: Node; offset: number } | undefined {
   const doc = document as unknown as {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
     caretRangeFromPoint?: (x: number, y: number) => Range | null
@@ -37,12 +37,12 @@ function caretAt(x: number, y: number): { node: Node; offset: number } | undefin
   return r ? { node: r.startContainer, offset: r.startOffset } : undefined
 }
 
-/** The English word under a point, inside a message's own text (not translations, code or buttons). */
+/** The English word under a point, inside a text in English (`[data-words]`: either half of a card, or its field), not code or buttons. */
 function wordAtPoint(x: number, y: number): Hit | undefined {
   const caret = caretAt(x, y)
   if (!caret || caret.node.nodeType !== Node.TEXT_NODE) return undefined
   const parent = caret.node.parentElement
-  if (!parent?.closest('.body, .user-text') || parent.closest('.tr, pre, code, button, .word-card')) return undefined
+  if (!parent?.closest('[data-words]') || parent.closest('pre, code, button, .word-card')) return undefined
   const text = (caret.node as Text).data
   let start = caret.offset
   if (!WORD.test(text[start] ?? '') && WORD.test(text[start - 1] ?? '')) start -= 1
@@ -66,17 +66,13 @@ export type WordHoverOptions = {
   host: HTMLElement
   area: HTMLElement
   post: (message: ToHost) => void
-  blocked: () => boolean
   nativeName: () => string
   /** When the card shows: while Shift is held, on any hover, or never. */
   mode: () => WordHintMode
   /** Reads a word aloud. */
   speak: (word: string) => void
-}
-
-/** The sentence a word was met in: the `span.s` around it. */
-function sentenceOf(hit: Hit): string {
-  return hit.range.startContainer.parentElement?.closest('span.s')?.textContent?.trim() ?? ''
+  /** The sentence around a word in a text not cut into sentence spans (a field). */
+  sentenceAt?: (range: Range) => string | undefined
 }
 
 export class WordHover {
@@ -118,7 +114,7 @@ export class WordHover {
 
   /** A click at a point: the card for the word there, or none; true when there is a word. */
   showAt(x: number, y: number): boolean {
-    const hit = this.options.blocked() || this.options.mode() === 'off' ? undefined : wordAtPoint(x, y)
+    const hit = this.options.mode() === 'off' ? undefined : wordAtPoint(x, y)
     if (!hit) {
       this.hide()
       return false
@@ -161,6 +157,12 @@ export class WordHover {
     this.render()
   }
 
+  /** The sentence a word was met in: the sentence span around it (`span.s`, `span.t`), or the field's sentence. */
+  private sentenceOf(hit: Hit): string {
+    const span = hit.range.startContainer.parentElement?.closest('span.s, span.t')?.textContent
+    return (span ?? this.options.sentenceAt?.(hit.range) ?? '').trim()
+  }
+
   /** Drops the card when the text it points at was redrawn. */
   refresh(): void {
     if (this.current && !this.current.range.startContainer.isConnected) this.hide()
@@ -186,7 +188,7 @@ export class WordHover {
 
   private probe(point: Point): void {
     const mode = this.options.mode()
-    if (this.options.blocked() || mode === 'off' || (mode === 'shift' && !point.shift)) {
+    if (mode === 'off' || (mode === 'shift' && !point.shift)) {
       if (!this.clicked) this.hide()
       return
     }
@@ -272,7 +274,7 @@ export class WordHover {
 
   private toggleSaved(hit: Hit, saved: boolean): void {
     if (saved) this.options.post({ type: 'unsaveWord', word: hit.word })
-    else this.options.post({ type: 'saveWord', word: hit.word, sentence: sentenceOf(hit) })
+    else this.options.post({ type: 'saveWord', word: hit.word, sentence: this.sentenceOf(hit) })
   }
 
   private note(missing: GlossMissing): string {

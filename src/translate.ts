@@ -143,12 +143,15 @@ export function targetFor(from: string, native: string): string {
   return from === own ? 'en' : own
 }
 
+/** One line of a text translated as it is: its list marker, then each sentence and its translation; no pairs is an empty line. */
+export type TextLine = { prefix: string; pairs: { src: string; out: string }[] }
+
 /**
- * A text translated from one language into another, by codes: through
- * English when neither is English, as the translator only goes to and from
- * it. Lines, list markers and empty lines are kept.
+ * A text translated from one language into another, by codes, sentence by
+ * sentence: through English when neither is English, as the translator only
+ * goes to and from it. Lines, list markers and empty lines are kept.
  */
-export async function translatePlain(text: string, from: string, to: string, translate: Translate): Promise<string> {
+export async function translatePairs(text: string, from: string, to: string, translate: Translate): Promise<TextLine[]> {
   const lines = unwrapLines(text.replace(/\r\n?/g, '\n').split('\n')).map(lineUnits)
   const all = lines.flatMap(l => l.sentences)
   let done: (string | undefined)[] = all
@@ -157,10 +160,15 @@ export async function translatePlain(text: string, from: string, to: string, tra
     done = to === 'en' ? english : await translate(english as string[], 'en', to)
   }
   let i = 0
-  const next = () => {
-    const out = done[i]?.trim() || all[i] || ''
-    i++
-    return out
-  }
-  return lines.map(line => line.prefix + line.sentences.map(next).join(' ')).join('\n')
+  const next = (src: string) => ({ src, out: done[i++]?.trim() || src })
+  return lines.map(line => ({ prefix: line.prefix, pairs: line.sentences.map(next) }))
+}
+
+/** A translated text as plain text: every line its marker and its sentences' translations. */
+export function plainText(lines: readonly TextLine[]): string {
+  return lines.map(line => line.prefix + line.pairs.map(p => p.out).join(' ')).join('\n')
+}
+
+export async function translatePlain(text: string, from: string, to: string, translate: Translate): Promise<string> {
+  return plainText(await translatePairs(text, from, to, translate))
 }

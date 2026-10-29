@@ -22,33 +22,48 @@ export function isRare(word: string, atStart: boolean, common: ReadonlySet<strin
   return !baseForms(word).some(form => common.has(form))
 }
 
-/** The ranges of the rare words in a text node, `text` being its data. */
-export function rareSpans(text: string, common: ReadonlySet<string>): [number, number][] {
+/** A sentence's end before a word in a field's text: the word starts the next one. */
+const SENTENCE_END = /(?:[.!?…]["'”’»)\]]*\s+|\n\s*)$/
+
+/**
+ * The ranges of the rare words in a text node, `text` being its data: one
+ * sentence, or (`field`) a field's whole text, where a word after a
+ * sentence's end starts one too.
+ */
+export function rareSpans(text: string, common: ReadonlySet<string>, field = false): [number, number][] {
   const spans: [number, number][] = []
   for (const m of text.matchAll(WORD)) {
-    const atStart = /^\s*$/.test(text.slice(0, m.index))
+    const atStart = /^\s*$/.test(text.slice(0, m.index)) || (field && SENTENCE_END.test(text.slice(Math.max(0, m.index - 12), m.index)))
     if (isRare(m[0], atStart, common)) spans.push([m.index, m.index + m[0].length])
   }
   return spans
 }
 
-/** Marks the rare words of every sentence (`span.s`) under `container`, or clears the marks. */
-export function markRare(container: Element, common: ReadonlySet<string>, on: boolean): void {
+/**
+ * Marks the rare words under each of `containers`, the English halves of a
+ * card: in their sentences (`span.s`, `span.t`), or, in a field not cut into
+ * sentences, in its text. Clears the marks first; `on` false leaves none.
+ */
+export function markRare(containers: readonly Element[], common: ReadonlySet<string>, on: boolean): void {
   const reg = registry()
   const HighlightCtor = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight
   if (!reg || !HighlightCtor) return
   reg.delete(HIGHLIGHT)
   if (!on || common.size === 0) return
   const ranges: Range[] = []
-  for (const sentence of container.querySelectorAll('span.s')) {
-    const walker = document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT)
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const text = (node as Text).data
-      for (const [start, end] of rareSpans(text, common)) {
-        const range = document.createRange()
-        range.setStart(node, start)
-        range.setEnd(node, end)
-        ranges.push(range)
+  for (const container of containers) {
+    const sentences = [...container.querySelectorAll('span.s, span.t')]
+    const field = sentences.length === 0
+    for (const part of field ? [container] : sentences) {
+      const walker = document.createTreeWalker(part, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = (node as Text).data
+        for (const [start, end] of rareSpans(text, common, field)) {
+          const range = document.createRange()
+          range.setStart(node, start)
+          range.setEnd(node, end)
+          ranges.push(range)
+        }
       }
     }
   }

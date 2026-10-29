@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 
 import { englishHtml, translationHtml } from './render'
-import { directionOf, englishReady, languageOf, pairText, splitText, targetFor, translateLines, translatePlain, type LanguageWords, type Translate } from './translate'
+import { directionOf, englishReady, languageOf, pairText, plainText, splitText, targetFor, translateLines, translatePairs, translatePlain, type LanguageWords, type Translate } from './translate'
 
 /** A translator that marks what it was asked: "[ru>en] text". */
 const fake: Translate = async (sentences, from, to) => sentences.map(s => `[${from}>${to}] ${s}`)
@@ -136,6 +136,94 @@ describe('a text as it is', () => {
     expect(targetFor('de', 'Russian')).toBe('ru')
   })
 
+  test('the target is the person\'s own language for any language but their own, and English for their own', () => {
+    expect(targetFor('uk', 'Russian')).toBe('ru')
+    expect(targetFor('ja', 'German')).toBe('de')
+    expect(targetFor('de', 'German')).toBe('en')
+    expect(targetFor('en', 'Ukrainian')).toBe('uk')
+    expect(targetFor('uk', 'Ukrainian')).toBe('en')
+  })
+
+  test('і ї є ґ are Ukrainian, whoever the person is', () => {
+    for (const text of ['їжак', 'єдність', 'ґанок', 'Привіт друзі', 'Мій дім']) expect([text, languageOf(text, 'Russian', words)]).toEqual([text, 'uk'])
+    expect(languageOf('їжак', 'Bulgarian', words, ['bg', 'en'])).toBe('uk')
+  })
+
+  test('ы э ё are Russian, even for a Ukrainian or Bulgarian', () => {
+    for (const text of ['Это ёж', 'сыр', 'эхо']) expect([text, languageOf(text, 'Ukrainian', words)]).toEqual([text, 'ru'])
+    expect(languageOf('сыр', 'Bulgarian', words, ['bg', 'en'])).toBe('ru')
+  })
+
+  test('ђ ћ џ љ њ are Serbian', () => {
+    for (const text of ['ђак', 'ћао свима', 'џем', 'љубав', 'њихов дом']) expect([text, languageOf(text, 'Russian', words)]).toEqual([text, 'sr'])
+  })
+
+  test('қ ғ ү ұ һ ә ө are Kazakh, ahead of і and ы', () => {
+    for (const text of ['қала', 'тағам', 'күн', 'ұлы', 'ақша һәм', 'әке', 'өмір']) expect([text, languageOf(text, 'Russian', words)]).toEqual([text, 'kk'])
+    expect(languageOf('Қазақстан — біздің ыстық үй', 'Russian', words)).toBe('kk')
+  })
+
+  test.fails('ң is Kazakh too, but its letters list leaves it out', () => {
+    expect(languageOf('аңшы', 'Russian', words)).toBe('kk')
+  })
+
+  test('پ چ ژ گ are Persian, even for an Arabic speaker', () => {
+    for (const text of ['پدر', 'چای', 'ژاله', 'گل سرخ']) expect([text, languageOf(text, 'Arabic', words)]).toEqual([text, 'fa'])
+    expect(languageOf('أنا لا أعرف ماذا تريد', 'Persian', words)).toBe('ar')
+  })
+
+  test('a script of one language is that language', () => {
+    const cases: [string, string][] = [
+      ['Καλημέρα κόσμε', 'el'],
+      ['שלום עולם', 'he'],
+      ['გამარჯობა მსოფლიო', 'ka'],
+      ['Բարեւ աշխարհ', 'hy'],
+      ['नमस्ते दुनिया', 'hi'],
+      ['สวัสดีชาวโลก', 'th'],
+      ['你好，世界', 'zh'],
+      ['안녕하세요 세계', 'ko'],
+      ['こんにちは世界', 'ja'],
+      ['日本語のテキストです', 'ja'],
+    ]
+    for (const [text, code] of cases) expect([text, languageOf(text, 'Russian', words)]).toEqual([text, code])
+  })
+
+  test('a script of one language is that language even when the person does not use it', () => {
+    expect(languageOf('שלום עולם', 'Russian', words, ['ru', 'en'])).toBe('he')
+    expect(languageOf('გამარჯობა', 'German', words, ['de', 'en'])).toBe('ka')
+  })
+
+  test('a text with no letters at all is English', () => {
+    for (const text of ['12345', '3.14 + 2 = 5', '😀😀😀', '', '   ', '!!! ???']) expect([text, languageOf(text, 'Russian', words)]).toEqual([text, 'en'])
+  })
+
+  test('a link alone is English, and one inside a Russian text does not change it', () => {
+    expect(languageOf('https://example.com/a/b?c=1', 'Russian', words)).toBe('en')
+    expect(languageOf('https://ru.wikipedia.org/wiki/Привет', 'Russian', words)).toBe('en')
+    expect(languageOf('Привет, смотри https://example.com/page и скажи мне', 'Russian', words)).toBe('ru')
+  })
+
+  test('Cyrillic without a marker letter goes by common words, and only among the languages the person uses', () => {
+    const text = 'Я не знаю, что делать дальше'
+    expect(languageOf(text, 'German', words)).toBe('ru')
+    expect(languageOf('Днес съм вкъщи.', 'German', words)).toBe('bg')
+    expect(languageOf('Днес съм вкъщи.', 'German', words, ['de', 'en', 'ru'])).toBe('ru')
+    expect(languageOf(text, 'German', words, ['de', 'en', 'bg'])).toBe('bg')
+  })
+
+  test('a pool with no language of the text\'s script leaves all 32 in play', () => {
+    expect(languageOf('Днес съм вкъщи.', 'German', words, ['de', 'en'])).toBe('bg')
+    expect(languageOf('Привіт, як справи? Я сьогодні працюю вдома.', 'German', words, ['de', 'en'])).toBe('uk')
+    expect(languageOf('أنا لا أعرف ماذا تريد', 'Russian', words, ['ru', 'en'])).toBe('ar')
+    expect(languageOf('Я не знаю, что делать дальше', 'German', words, ['de', 'en'])).toBe('ru')
+  })
+
+  test('a pool of Latin languages keeps a Latin text among them', () => {
+    expect(languageOf('Ich habe heute keine Zeit, aber morgen komme ich gern.', 'Russian', words, ['ru', 'en', 'de'])).toBe('de')
+    expect(languageOf('The weather is nice today and I am going to the park.', 'Russian', words, ['ru', 'en', 'de'])).toBe('en')
+    expect(languageOf('No sé qué quieres decir, pero está bien.', 'Russian', words, ['ru', 'en'])).toBe('en')
+  })
+
   test('translated through English when neither side is English', async () => {
     const calls: string[] = []
     const translate: Translate = async (sentences, from, to) => {
@@ -147,5 +235,36 @@ describe('a text as it is', () => {
     calls.length = 0
     expect(await translatePlain('Hello.', 'en', 'en', translate)).toBe('Hello.')
     expect(calls).toEqual([])
+  })
+})
+
+describe('translatePairs', () => {
+  const translate: Translate = async (sentences, _from, to) => sentences.map(s => `${to}(${s})`)
+
+  test('every sentence beside its translation, lines and list markers kept, numbered in order', async () => {
+    const lines = await translatePairs('Hallo. Wie geht es?\n\n- Gut', 'de', 'en', translate)
+    expect(lines).toEqual([
+      { prefix: '', pairs: [{ src: 'Hallo.', out: 'en(Hallo.)' }, { src: 'Wie geht es?', out: 'en(Wie geht es?)' }] },
+      { prefix: '', pairs: [] },
+      { prefix: '- ', pairs: [{ src: 'Gut', out: 'en(Gut)' }] },
+    ])
+    expect(lines.flatMap(l => l.pairs.map(p => p.src))).toEqual(['Hallo.', 'Wie geht es?', 'Gut'])
+  })
+
+  test('a line broken mid-sentence is one sentence, as the card finds it in the field', async () => {
+    const lines = await translatePairs('This is a long\nsentence. And a word bro-\nken here.', 'en', 'ru', translate)
+    expect(lines.flatMap(l => l.pairs.map(p => p.src))).toEqual(['This is a long sentence.', 'And a word broken here.'])
+  })
+
+  test('a sentence the translator leaves out stays as it is', async () => {
+    const some: Translate = async sentences => sentences.map((s, i) => (i === 0 ? '  ' : `x(${s})`))
+    const lines = await translatePairs('One. Two.', 'en', 'ru', some)
+    expect(lines[0]?.pairs).toEqual([{ src: 'One.', out: 'One.' }, { src: 'Two.', out: 'x(Two.)' }])
+  })
+
+  test('plainText is what Copy and Paste take: the translations, line by line', async () => {
+    const lines = await translatePairs('Hallo. Wie geht es?\n\n- Gut', 'de', 'ru', translate)
+    expect(plainText(lines)).toBe(await translatePlain('Hallo. Wie geht es?\n\n- Gut', 'de', 'ru', translate))
+    expect(plainText(lines)).toBe('ru(en(Hallo.)) ru(en(Wie geht es?))\n\n- ru(en(Gut))')
   })
 })
