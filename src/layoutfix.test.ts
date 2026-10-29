@@ -15,6 +15,12 @@ function fix(text: string, lang: string, cycle?: string[], keep: string[] = []):
   return chooseFix(typed, others, LEXICONS, new Set(keep))?.text
 }
 
+/** The layout the fix key turns the keys typed as `text` in `lang` into, judged by the words. */
+function best(text: string, lang: string, cycle?: string[]): string | undefined {
+  const { typed, others } = readings(text, lang, cycle)
+  return bestLayout(typed, others, LEXICONS)?.layout
+}
+
 describe('keys in another layout', () => {
   test('the same keys read in each layout', () => {
     expect(readings('ghbdtn', 'en').others.map(r => r.text)).toEqual(['привет', 'привет'])
@@ -106,6 +112,142 @@ describe('short words meant in another layout', () => {
   })
 })
 
+/** Each word of `words` (space-separated) typed in `lang`; `cycle` holds the layouts to read them in. */
+const each = (words: string) => words.split(' ')
+
+describe('one letter and two, in English, Russian and Ukrainian', () => {
+  const pair = (from: string, to: string) => (text: string) => {
+    const { typed, others } = readings(text, from, [from, to])
+    return { typed, there: others[0] as Reading }
+  }
+  const goes = (from: string, to: string, ...words: string[]) => wordsMeant(words.map(pair(from, to)), LEXICONS)
+
+  test('a letter alone is never fixed by itself, nor chosen by the fix key', () => {
+    for (const c of 'abcdefghijklmnopqrstuvwxyz') expect([fix(c, 'en'), best(c, 'en')]).toEqual([undefined, undefined])
+    for (const c of 'йцукенгшщзхъфывапролджэячсмитьбюё') expect([fix(c, 'ru'), best(c, 'ru')]).toEqual([undefined, undefined])
+    for (const c of 'йцукенгшщзхїфівапролджєячсмитьбю') expect([fix(c, 'uk'), best(c, 'uk')]).toEqual([undefined, undefined])
+  })
+
+  test('a letter goes with the word fixed after it when it is a common word there and a rare one as typed', () => {
+    for (const c of 'zdcefjrbg') expect(goes('en', 'ru', c, 'rfr'), c).toBe(2)
+    for (const c of 'aisntlxvpq') expect(goes('en', 'ru', c, 'rfr'), c).toBe(1)
+    for (const c of 'sq') expect(goes('en', 'uk', c, 'oj'), c).toBe(2)
+    for (const c of 'фшьщ') expect(goes('ru', 'en', c, 'еру'), c).toBe(2)
+    for (const c of 'выедутсрнаяи') expect(goes('ru', 'en', c, 'еру'), c).toBe(1)
+    expect(goes('ru', 'en', 'Ш', 'Вщтэе')).toBe(2)
+    expect(goes('ru', 'en', 'в', 'и', 'еру')).toBe(1)
+    expect(goes('en', 'ru', 'plan', 'b')).toBe(1)
+  })
+
+  test('a sign key alone goes along when it is a common word there: , → б, \' → є; not when it is a bare letter: [ → х, . → ю', () => {
+    expect(goes('en', 'ru', 'z', ',', 'cltkfk')).toBe(3)
+    expect(goes('en', 'uk', "'", 'wt')).toBe(2)
+    expect(goes('en', 'ru', ';', 'yt')).toBe(2)
+    expect(goes('en', 'ru', '[', 'rfr')).toBe(1)
+    expect(goes('en', 'ru', '.', 'rfr')).toBe(1)
+    expect(goes('en', 'ru', '`', 'rfr')).toBe(1)
+  })
+
+  test('Russian words of one to three letters typed right stay', () => {
+    const ru = 'я в и с у а о к ж б э ы он мы ты вы да не на но из за же бы ну от до по ли их им ей ем ох ах эй ой уж что это как так вот все кто или нет его мне они она там тут вам нас дом год лет раз сам три два ваш наш мой'
+    for (const w of each(ru)) expect(fix(w, 'ru'), w).toBeUndefined()
+  })
+
+  test('Ukrainian words of one or two letters typed right stay, with English beside and with Russian too', () => {
+    const uk = 'я в у і и з а ж є б й ю ї ми ви ти це що на не за до як та ні ще із їх їй їм зі чи бо же ну от по'
+    for (const w of each(uk)) expect([fix(w, 'uk', ['en', 'uk']), fix(w, 'uk')], w).toEqual([undefined, undefined])
+  })
+
+  test('English words of one or two letters typed right stay, abbreviations too', () => {
+    const en = 'a i it to in is on no so of if go up us am be we he me my or an as do hi oh ok by at tv pc hp cv fb js ts ui ux ip id io ai ml cs qa os vm ft bg gb mb tb ms dr mr vs ds lf ns ye db ot sp ps oj lj'
+    for (const w of each(en)) expect(fix(w, 'en'), w).toBeUndefined()
+  })
+
+  test('English keys meant in Russian: jy → он, yt → не, \'nj → это, ;t → же, ,s → бы', () => {
+    for (const [keys, word] of [['jy', 'он'], ['yt', 'не'], ["'nj", 'это'], [';t', 'же'], [',s', 'бы'], ['rfr', 'как'], ['xnj', 'что']]) {
+      expect(fix(keys as string, 'en', ['en', 'ru']), keys).toBe(word)
+    }
+  })
+
+  test('English keys meant in Ukrainian: wt → це, nb → ти, ][ → їх, xb → чи, ,j → бо', () => {
+    for (const [keys, word] of [['wt', 'це'], ['nb', 'ти'], ['vb', 'ми'], ['zr', 'як'], ['nf', 'та'], ['][', 'їх'], ['xb', 'чи'], [',j', 'бо']]) {
+      expect(fix(keys as string, 'en'), keys).toBe(word)
+    }
+  })
+
+  test('English typed in the Russian layout: шы → is, ше → it, щл → ok', () => {
+    const en = 'is it to in on no so go up us am be we me my or an as do oh ok'
+    for (const w of each(en)) expect(fix(convertText(w, EN, RU), 'ru'), w).toBe(w)
+  })
+
+  test('a known limit: he, of, if, hi, by, at typed in the Russian layout stay alone (ру, ща, ша, рш, ин, фе are in its list), and go with a word after', () => {
+    for (const w of each('he of if hi by at')) {
+      const typed = convertText(w, EN, RU)
+      expect(fix(typed, 'ru'), w).toBeUndefined()
+      expect(goes('ru', 'en', typed, 'шы'), w).toBe(2)
+    }
+  })
+
+  test('a known limit: kb, in no English list, becomes ли', () => {
+    expect(fix('kb', 'en', ['en', 'ru'])).toBe('ли')
+  })
+
+  test('two capitals are an abbreviation, left as typed: NB, KB, VB, ЩЛ; the fix key still takes them', () => {
+    for (const w of each('NB KB VB')) expect(fix(w, 'en'), w).toBeUndefined()
+    expect(fix('ЩЛ', 'ru')).toBeUndefined()
+    expect(best('NB', 'en')).toBe('uk')
+    expect(best('ЩЛ', 'ru')).toBe('en')
+  })
+})
+
+describe('words with an apostrophe', () => {
+  test("English typed in the Russian layout: Вщтэе → Don't, шэь → i'm, with the sign after", () => {
+    const words = "don't Don't i'm it's can't we're you've I'll didn't don't. don't, Don't!"
+    for (const w of each(words)) expect(fix(convertText(w, EN, RU), 'ru'), w).toBe(w)
+  })
+
+  test("and in the Ukrainian one: Вщтєе → Don't", () => {
+    for (const w of each("Don't i'm")) expect(fix(convertText(w, EN, UK), 'uk'), w).toBe(w)
+  })
+
+  test("Ukrainian typed in English: g`znm → п'ять, sv`z → ім'я", () => {
+    expect(fix('g`znm', 'en')).toBe("п'ять")
+    expect(fix('sv`z', 'en')).toBe("ім'я")
+  })
+
+  test("right as typed, it stays: don't, п'ять", () => {
+    expect(fix("don't", 'en')).toBeUndefined()
+    expect(fix("п'ять", 'uk')).toBeUndefined()
+    expect(fix("ім'я", 'uk', ['en', 'uk'])).toBeUndefined()
+  })
+})
+
+describe('Russian or Ukrainian: the same word in both lists', () => {
+  function into(text: string, prefer: string[]): string | undefined {
+    const { typed, others } = readings(text, 'en')
+    return chooseFix(typed, others, LEXICONS, new Set(), new Map(), new Set(), prefer)?.layout
+  }
+
+  test("goes into the layout of the person's own language", () => {
+    for (const w of each('yf nfr dct yt ckjdj ;t')) {
+      expect(into(w, ['ru', 'en', 'uk']), w).toBe('ru')
+      expect(into(w, ['uk', 'en', 'ru']), w).toBe('uk')
+    }
+  })
+
+  test('a word only one of them has goes there, whatever the person speaks', () => {
+    expect(into('ghbdsn', ['ru', 'en'])).toBe('uk')
+    expect(into("'nj", ['uk', 'en'])).toBe('ru')
+    expect(into('wt', ['ru', 'en'])).toBe('uk')
+  })
+
+  test('the fix key too', () => {
+    const { typed, others } = readings('yf', 'en')
+    expect(bestLayout(typed, others, LEXICONS, ['ru', 'en'])?.layout).toBe('ru')
+    expect(bestLayout(typed, others, LEXICONS, ['uk', 'en'])?.layout).toBe('uk')
+  })
+})
+
 describe('stray capitals', () => {
   const letter = () => true
   test('two at the start, from four letters', () => {
@@ -123,11 +265,6 @@ describe('stray capitals', () => {
 })
 
 describe('the fix key', () => {
-  function best(text: string, lang: string, cycle?: string[]): string | undefined {
-    const { typed, others } = readings(text, lang, cycle)
-    return bestLayout(typed, others, LEXICONS)?.layout
-  }
-
   test('takes the layout that makes the best word, not the next one', () => {
     expect(best('ghbdtn', 'en')).toBe('ru')
     expect(best('ghbdsn', 'en')).toBe('uk')

@@ -89,8 +89,25 @@ function trigramsOf(word: string): string[] {
 
 /** The share of a word's three-letter runs the language has: 1 for any real-looking word, low for "ghbdtn" in English. */
 export function plausibility(word: string, lexicon: Lexicon): number {
-  const runs = trigramsOf(word)
+  const runs = trigramsOf(bare(word))
   return runs.filter(t => lexicon.trigrams.has(t)).length / runs.length
+}
+
+/** An apostrophe where a word has one: an English ending (don't, I'm, we're, I'll) or a Ukrainian one before я, ю, є, ї (п'ять, ім'я). */
+const APOSTROPHE_WORD = /'(?:t|s|m|d|re|ve|ll)$|'[яюєї]/
+
+/**
+ * Such a word without its apostrophe, as the word lists keep it: "don't" is
+ * "dont", "п'ять" is "пять". Any other apostrophe stays: "h'q" (рэй typed in
+ * English) is not "hq".
+ */
+function bare(word: string): string {
+  return APOSTROPHE_WORD.test(word) ? word.replace(/'/g, '') : word
+}
+
+/** How common a word is in a language (0 the commonest), with or without its apostrophes; undefined when it is no word there. */
+export function rankOf(lexicon: Lexicon | undefined, word: string): number | undefined {
+  return lexicon?.rank.get(word) ?? lexicon?.rank.get(bare(word))
 }
 
 const APOSTROPHES = /[’ʼ`]/g
@@ -130,7 +147,9 @@ function lettersOf(text: string): number {
  * fixed by hand often enough (`always`: the word as typed → the language it
  * goes into) is fixed whatever it is; a capital inside is left alone unless
  * another layout makes a word the person taught of it (`mine`, "lang\nword":
- * "ыКПИ" → "sRGB").
+ * "ыКПИ" → "sRGB"), and so are two capitals (NB, KB: an abbreviation). The
+ * same word in two languages goes into the layout of the one first in
+ * `prefer` (the person's languages, their own first).
  */
 export function chooseFix(
   typed: Reading,
@@ -139,6 +158,7 @@ export function chooseFix(
   keep: ReadonlySet<string>,
   always: ReadonlyMap<string, string> = new Map(),
   mine: ReadonlySet<string> = new Set(),
+  prefer: readonly string[] = [],
 ): Reading | undefined {
   const t = typed.text
   if (/\d|@|:\/\/|^www\./i.test(t)) return undefined
@@ -156,18 +176,33 @@ export function chooseFix(
   if (keep.has(word) || keep.has(t.toLowerCase())) return undefined
   const learned = always.get(word)
   if (learned) return others.find(o => o.lang === learned && coreOf(o.text))
-  const rank = core === undefined ? undefined : own.rank.get(core)
+  if (/^\p{Lu}{2}$/u.test([...t].filter(c => /\p{L}/u.test(c)).join(''))) return undefined
+  const rank = core === undefined ? undefined : rankOf(own, core)
   if (rank !== undefined) {
     const letters = lettersOf(t)
-    return others.find(o => lettersOf(o.text) > letters && meantThere(typed, o, lexicons) && trustedReading(o, lexicons))
+    const fits = others.filter(o => lettersOf(o.text) > letters && meantThere(typed, o, lexicons) && trustedReading(o, lexicons))
+    return fits[0] && ownFirst(fits[0], fits, prefer)
   }
-  return bestReading(others, lexicons, core === undefined ? 0 : plausibility(core, own))
+  return bestReading(others, lexicons, core === undefined ? 0 : plausibility(core, own), prefer)
 }
 
 function trustedReading(reading: Reading, lexicons: Readonly<Record<string, Lexicon>>): boolean {
   const word = coreOf(reading.text)
-  const rank = word === undefined ? undefined : lexicons[reading.lang]?.rank.get(word)
+  const rank = word === undefined ? undefined : rankOf(lexicons[reading.lang], word)
   return word !== undefined && word.length >= 2 && rank !== undefined && trusted(word, rank)
+}
+
+/**
+ * Of the readings that make the same text as `chosen` (Russian and Ukrainian
+ * share most short words, and either list holds some of the other's), the one
+ * in the layout of the language first in `prefer`; `chosen` when none is.
+ */
+function ownFirst(chosen: Reading, readings: readonly Reading[], prefer: readonly string[]): Reading {
+  const at = (r: Reading) => {
+    const i = prefer.indexOf(r.lang)
+    return i < 0 ? prefer.length : i
+  }
+  return readings.filter(r => r.text === chosen.text).reduce((a, b) => (at(b) < at(a) ? b : a), chosen)
 }
 
 /** How common a word as typed must at least be, by its length, for a much commoner word in another layout to win over it. */
@@ -182,27 +217,35 @@ const RARE = [0, 500, 1000, 2000]
 export function meantThere(typed: Reading, there: Reading, lexicons: Readonly<Record<string, Lexicon>>, keep: ReadonlySet<string> = new Set()): boolean {
   if (/\d|@|:\/\//.test(typed.text) || typed.layout === there.layout) return false
   const wanted = coreOf(there.text)
-  const thereRank = wanted === undefined ? undefined : lexicons[there.lang]?.rank.get(wanted)
+  const thereRank = wanted === undefined ? undefined : rankOf(lexicons[there.lang], wanted)
   if (thereRank === undefined) return false
   const core = coreOf(typed.text)
   if (core !== undefined && keep.has(core)) return false
-  const rank = core === undefined ? undefined : lexicons[typed.lang]?.rank.get(core)
+  const rank = core === undefined ? undefined : rankOf(lexicons[typed.lang], core)
   if (rank === undefined) return true
   return rank >= (RARE[Math.min(core?.length ?? 3, 3)] ?? 0) && rank >= 10 * thereRank
 }
+
+/** How common a word of keys that are signs as typed must be there to go along: б, ж, э, є do; х, ъ, ю, ё, ї alone are no words. */
+const SIGN_WORD = 1000
 
 /**
  * The words before a fixed word that go with it (the fix key's whole piece,
  * or a short word typed just before a word fixed by itself): walking back
  * from the last, each word read in the layout the last goes into, while it
- * was meant there. `words` are each word's readings as typed and there, in
- * order; the answer is how many of the last ones go, the last always.
+ * was meant there. A piece of signs ("," typed for "б") is as long as its
+ * word there and goes only when that word is a common one. `words` are each
+ * word's readings as typed and there, in order; the answer is how many of
+ * the last ones go, the last always.
  */
 export function wordsMeant(words: readonly { typed: Reading; there: Reading }[], lexicons: Readonly<Record<string, Lexicon>>, keep: ReadonlySet<string> = new Set(), most = 3): number {
   let n = words.length > 0 ? 1 : 0
   for (let i = words.length - 2; i >= 0; i--) {
     const w = words[i] as { typed: Reading; there: Reading }
-    if ((coreOf(w.typed.text)?.length ?? 99) > most || !meantThere(w.typed, w.there, lexicons, keep)) break
+    const core = coreOf(w.typed.text)
+    const there = coreOf(w.there.text)
+    const signs = core === undefined && (there === undefined || (rankOf(lexicons[w.there.lang], there) ?? SIGN_WORD) >= SIGN_WORD)
+    if (((core ?? there)?.length ?? 99) > most || signs || !meantThere(w.typed, w.there, lexicons, keep)) break
     n++
   }
   return n
@@ -215,31 +258,35 @@ export function wordsMeant(words: readonly { typed: Reading; there: Reading }[],
  * do not stop it. Undefined when no reading is a word (the key then takes
  * the next layout of the cycle).
  */
-export function bestLayout(typed: Reading, others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>): Reading | undefined {
+export function bestLayout(typed: Reading, others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>, prefer: readonly string[] = []): Reading | undefined {
   const own = lexicons[typed.lang]
   const core = coreOf(typed.text)
   // A layout without a word list cannot say the typed piece looks right, so it counts as not.
-  return bestReading(others, lexicons, own && core !== undefined ? plausibility(core, own) : 0)
+  return bestReading(others, lexicons, own && core !== undefined ? plausibility(core, own) : 0, prefer)
 }
 
 /**
  * The reading most likely meant: a known word ranks by how common it is
  * (lower is better); an unknown one only when it looks like its language
- * and the typed piece, by `typedLooks` (its plausibility), does not.
+ * and the typed piece, by `typedLooks` (its plausibility), does not. The
+ * same word in two languages goes by `ownFirst`.
  */
-function bestReading(others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>, typedLooks: number): Reading | undefined {
+function bestReading(others: readonly Reading[], lexicons: Readonly<Record<string, Lexicon>>, typedLooks: number, prefer: readonly string[] = []): Reading | undefined {
+  const words: Reading[] = []
   let best: { reading: Reading; score: number } | undefined
   for (const other of others) {
     const lexicon = lexicons[other.lang]
     const word = coreOf(other.text)
     if (!lexicon || !word || word.length < 2) continue
-    const rank = lexicon.rank.get(word)
+    const rank = rankOf(lexicon, word)
     let score: number | undefined
     if (rank !== undefined) score = trusted(word, rank) ? rank : undefined
     else if (word.length >= 5 && plausibility(word, lexicon) === 1 && typedLooks < 0.6) score = 1_000_000
-    if (score !== undefined && (!best || score < best.score)) best = { reading: other, score }
+    if (score === undefined) continue
+    words.push(other)
+    if (!best || score < best.score) best = { reading: other, score }
   }
-  return best?.reading
+  return best && ownFirst(best.reading, words, prefer)
 }
 
 // ---------------------------------------------------------------- stray capitals

@@ -30,6 +30,7 @@ import {
   coreOf,
   nextLayout,
   plausibility,
+  rankOf,
   typeIn,
   withWords,
   wordsMeant,
@@ -747,7 +748,7 @@ export class Typist {
     const others = this.cycle()
       .filter(id => id !== own)
       .map(id => this.reading(keys, id))
-    let choice = chooseFix(typed, others, this.lexicons, this.keep, this.always, this.mine)
+    let choice = chooseFix(typed, others, this.lexicons, this.keep, this.always, this.mine, this.config.languages)
     // Fixed on a pause only when the word as typed looks like none of its language: a word still being typed may yet become one.
     const ownLexicon = this.lexicons[typed.lang]
     const core = coreOf(typed.text)
@@ -840,7 +841,7 @@ export class Typist {
   /** Whether a reading is a word of its language's list, not one the person taught (their spelling may hold capitals the list has not kept). */
   private listed(reading: Reading): boolean {
     const core = coreOf(reading.text)
-    return !!core && !!this.lexicons[reading.lang]?.rank.has(core) && !this.mine.has(mineKey(reading.lang, core))
+    return !!core && rankOf(this.lexicons[reading.lang], core) !== undefined && !this.mine.has(mineKey(reading.lang, core))
   }
 
   /**
@@ -877,7 +878,7 @@ export class Typist {
       const others = this.cycle()
         .filter(id => id !== from)
         .map(id => this.reading(letters, id))
-      to = bestLayout(this.reading(letters, from), others, this.lexicons)?.layout ?? nextLayout(this.cycle(), from)
+      to = bestLayout(this.reading(letters, from), others, this.lexicons, this.config.languages)?.layout ?? nextLayout(this.cycle(), from)
       if (!to) return
       const tail: Span[] = []
       for (let i = spans.length - 1; i >= 0; i--) {
@@ -987,7 +988,7 @@ export class Typist {
       if (id === layout) return false
       const r = this.reading(word, id)
       const c = coreOf(r.text)
-      return !!c && !!this.lexicons[r.lang]?.rank.has(c)
+      return !!c && rankOf(this.lexicons[r.lang], c) !== undefined
     })
     if (!elsewhere) this.candidate = { word: core, lang: typed.lang }
   }

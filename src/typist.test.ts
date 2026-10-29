@@ -322,6 +322,134 @@ describe('fixing as one types', () => {
   })
 })
 
+describe('short words, apostrophes and three layouts, typed', () => {
+  test("I Don't typed in the Russian layout: Ш Вщтэе → I Don't, with a space, Enter or on a pause", () => {
+    const desk = new Desk({ autoFix: true })
+    desk.layout = 'ru'
+    desk.keys("I Don't ")
+    expect(desk.text).toBe("I Don't ")
+    expect(desk.layout).toBe('en')
+    const enter = new Desk({ autoFix: true })
+    enter.layout = 'ru'
+    enter.keys("I Don't")
+    enter.tap(VK_RETURN)
+    expect(enter.text).toBe("I Don't\n")
+    const pause = new Desk({ autoFix: true, fixOnPause: true })
+    pause.layout = 'ru'
+    pause.keys("Don't")
+    pause.tick(1100)
+    expect(pause.text).toBe("Don't")
+  })
+
+  test("contractions and signs after them: Вщтэе! → Don't!, руддщю → hello., руддщб → hello,", () => {
+    for (const text of ["Don't! ", "it's ", "I'm ", 'hello. ', 'hello, ', 'hello?']) {
+      const desk = new Desk({ autoFix: true })
+      desk.layout = 'ru'
+      desk.keys(text)
+      expect(desk.text, text).toBe(text)
+    }
+  })
+
+  test("Ukrainian with an apostrophe typed in English: g`znm → п'ять", () => {
+    const desk = new Desk({ autoFix: true, cycle: ['en', 'uk'] })
+    desk.keys('g`znm ')
+    expect(desk.text).toBe("п'ять ")
+    expect(desk.layout).toBe('uk')
+  })
+
+  test('a letter goes with the word fixed after it when it was meant there: Ф еру → a the; в и еру → в и the', () => {
+    const a = new Desk({ autoFix: true })
+    a.layout = 'ru'
+    a.keys('a the ')
+    expect(a.text).toBe('a the ')
+    const ru = new Desk({ autoFix: true })
+    ru.layout = 'ru'
+    ru.keys('в и ', 'ru')
+    ru.keys('the ')
+    expect(ru.text).toBe('в и the ')
+  })
+
+  test("a sign key alone goes along when it is a word there: z , cltkfk → я б сделал; ' wt → є це", () => {
+    const ru = new Desk({ autoFix: true })
+    ru.keys('z , cltkfk ')
+    expect(ru.text).toBe('я б сделал ')
+    const uk = new Desk({ autoFix: true, cycle: ['en', 'uk'] })
+    uk.keys("' wt ")
+    expect(uk.text).toBe('є це ')
+  })
+
+  test('a letter alone stays as typed until a word after it is fixed: z, then Enter', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.keys('z')
+    desk.tap(VK_RETURN)
+    expect(desk.text).toBe('z\n')
+  })
+
+  test('the fix key on one letter goes round the layouts: z → я → z; s → ы → і → s', () => {
+    const two = new Desk({ keys: { fix: 'Pause' } })
+    two.keys('z')
+    two.tap(VK_PAUSE)
+    expect(two.text).toBe('я')
+    two.tap(VK_PAUSE)
+    expect(two.text).toBe('z')
+    const three = new Desk({ keys: { fix: 'Pause' }, cycle: ['en', 'ru', 'uk'] })
+    three.keys('s')
+    const seen: string[] = []
+    for (let i = 0; i < 3; i++) {
+      three.tap(VK_PAUSE)
+      seen.push(three.text)
+    }
+    expect(seen).toEqual(['ы', 'і', 's'])
+  })
+
+  test('a letter erased inside the word: ghbdtm, Backspace, n → привет', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.keys('ghbdtm')
+    desk.tap(VK_BACK)
+    desk.keys('n ')
+    expect(desk.text).toBe('привет ')
+  })
+
+  test('mail typed right stays', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.keys('user@mail.ru ')
+    expect(desk.text).toBe('user@mail.ru ')
+  })
+
+  test('Ukrainian with Caps Lock left on or two capitals: пРИВІТ, ПРивіт → Привіт', () => {
+    const caps = new Desk({ autoFix: true, cycle: ['en', 'uk'] })
+    caps.layout = 'uk'
+    caps.caps = true
+    caps.keys('Привіт ', 'uk')
+    expect(caps.text).toBe('Привіт ')
+    expect(caps.caps).toBe(false)
+    const two = new Desk({ autoFix: true, cycle: ['en', 'uk'] })
+    two.layout = 'uk'
+    two.keys('ПРивіт ', 'uk')
+    expect(two.text).toBe('Привіт ')
+  })
+
+  test("with three layouts, a word Russian and Ukrainian share goes into the person's own: yf → на", () => {
+    const ru = new Desk({ autoFix: true, cycle: ['en', 'ru', 'uk'], languages: ['ru', 'en'] })
+    ru.keys('yf ')
+    expect([ru.text, ru.layout]).toEqual(['на ', 'ru'])
+    const uk = new Desk({ autoFix: true, cycle: ['en', 'ru', 'uk'], languages: ['uk', 'en'] })
+    uk.keys('yf ')
+    expect([uk.text, uk.layout]).toEqual(['на ', 'uk'])
+    const only = new Desk({ autoFix: true, cycle: ['en', 'ru', 'uk'], languages: ['ru', 'en'] })
+    only.keys('ghbdsn ')
+    expect([only.text, only.layout]).toEqual(['привіт ', 'uk'])
+  })
+
+  test('two capitals stay as typed: NB; the fix key takes them', () => {
+    const desk = new Desk({ autoFix: true, keys: { fix: 'Pause' }, cycle: ['en', 'ru', 'uk'], languages: ['uk', 'en'] })
+    desk.keys('NB ')
+    expect(desk.text).toBe('NB ')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('ТИ ')
+  })
+})
+
 describe('the fix key', () => {
   test('of three words typed wrong, it converts all three, with the space after them', () => {
     const desk = new Desk({ keys: { fix: 'Pause' } })
