@@ -44,11 +44,17 @@ async function shot(w: BrowserWindow, name: string): Promise<void> {
 const js = (w: BrowserWindow, code: string) => w.webContents.executeJavaScript(code, true)
 const click = (w: BrowserWindow, selector: string) => js(w, `(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) return 'missing ' + ${JSON.stringify(selector)}; n.click(); return 'ok' })()`)
 const esc = (w: BrowserWindow) => js(w, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 'ok'`)
+/** Focuses a field as if the window were in front: an offscreen window is never active, and :focus waits for that. */
+async function focus(w: BrowserWindow, selector: string): Promise<string> {
+  if (!w.webContents.debugger.isAttached()) w.webContents.debugger.attach('1.3')
+  await w.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  return js(w, `(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) return 'missing ' + ${JSON.stringify(selector)}; n.focus(); return 'ok' })()`)
+}
 
 const colors = () => (nativeTheme.shouldUseDarkColors ? { bg: '#202020', surface: '#2b2b2b' } : { bg: '#f3f3f3', surface: '#fbfbfb' })
 
 // The pages' answers from "main": copies, Chrome, the speech engine's streaming session.
-const heard = 'РџСЂРёРІРµС‚, СЌС‚Рѕ РїСЂРѕРІРµСЂРєР° РґРёРєС‚РѕРІРєРё: Р±РµР№РґР¶ РїРѕРєР°Р·С‹РІР°РµС‚ С„СЂР°Р·Сѓ С†РµР»РёРєРѕРј, РїРѕРєР° РµС‘ СЃР»С‹С€РёС‚ РґРІРёР¶РѕРє'
+const heard = 'Привет, это проверка диктовки: бейдж показывает фразу целиком, пока её слышит движок'
 ipcMain.handle('host-call', async (_e, r: { call: string; method?: string; route?: string }) => {
   log.push(`host-call ${JSON.stringify(r).slice(0, 120)}`)
   if (r.call === 'speech') {
@@ -94,6 +100,14 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     }
   }
   const home = async () => (await click(w, '.side [data-nav="home"]'), sleep(400))
+  // A list page with its field focused: the focus ring, and the field beside its button.
+  const focused = async (name: string) => {
+    await page(name)
+    log.push(`${name} focus: ${await focus(w, '.pbody .field')}`)
+    await sleep(300)
+    await shot(w, tag(`${name}-focus`))
+    await js(w, `document.activeElement?.blur(), 'ok'`)
+  }
   if (narrow) {
     await page('keyboard', ['fixing'])
     await page('settings')
@@ -107,6 +121,7 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     for (const name of ['words', 'transcripts', 'translations', 'phrases', 'vocabulary', 'kept', 'learned', 'programs', 'layouts']) await page(name)
     await page('settings', ['languages'])
     for (const name of ['engine', 'computer', 'about']) await page(name)
+    await focused('kept')
     // The search, and a find opened with its line lit.
     log.push(`search: ${await js(w, `(() => { const f = document.querySelector('.find input'); f.value = 'caps'; f.dispatchEvent(new Event('input')); return 'ok' })()`)}`)
     await sleep(500)
@@ -141,7 +156,7 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
   } else {
     await page('transcribe')
     await page('keyboard', ['fixing'])
-    await page('kept')
+    await focused('kept')
     await page('settings')
     await page('listen')
   }
