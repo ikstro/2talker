@@ -17,6 +17,7 @@ from typing import Callable
 
 import numpy as np
 
+import phantoms
 from audio import RATE
 from settings import CATALOG, MODELS_DIR
 
@@ -170,6 +171,20 @@ def pick_language(probs: dict[str, float], expected: tuple[str, ...] | list[str]
     return max(pool, key=lambda c: probs[c])
 
 
+def _said(segments, speech: np.ndarray) -> str:
+    """A dictated phrase's text, without the credits and sign-offs Whisper adds from its subtitles (phantoms.py)."""
+    segments = list(segments)
+    text = " ".join(s.text.strip() for s in segments).strip()
+    if not segments:
+        return text
+    sound = phantoms.Sound(
+        len(speech) / RATE,
+        max(s.no_speech_prob for s in segments),
+        min(s.avg_logprob for s in segments),
+    )
+    return phantoms.clean(text, sound, dictation=True)
+
+
 class Transcriber:
     def __init__(self, workers: int = 1):
         self._model = None
@@ -257,19 +272,19 @@ class Transcriber:
         )
         out = []
         for segment in segments:
+            if progress:
+                progress(min(segment.end / total, 1.0))
             words = [
                 {"start": round(w.start, 2), "end": round(w.end, 2), "word": w.word}
                 for w in (segment.words or [])
                 if w.word.strip()
             ]
-            out.append({
-                "start": round(segment.start, 2),
-                "end": round(segment.end, 2),
-                "text": segment.text.strip(),
-                "words": words,
-            })
-            if progress:
-                progress(min(segment.end / total, 1.0))
+            kept = phantoms.clean_segment(
+                {"start": round(segment.start, 2), "end": round(segment.end, 2), "text": segment.text.strip(), "words": words},
+                phantoms.Sound(segment.end - segment.start, segment.no_speech_prob, segment.avg_logprob),
+            )
+            if kept:
+                out.append(kept)
         return out, info.language
 
     def dictate(
@@ -330,7 +345,7 @@ class Transcriber:
         )
         tokenizer = Tokenizer(model.hf_tokenizer, model.model.is_multilingual, task="transcribe", language=language)
         segments = model.generate_segments(features, tokenizer, info.transcription_options, False, encoded)
-        return " ".join(s.text.strip() for s in segments).strip(), language, sure
+        return _said(segments, speech), language, sure
 
     def _two_passes(self, speech: np.ndarray, language: str | None, hotwords: str, beam: int, expected=(), strict: bool = False) -> tuple[str, str, float]:
         sure = 1.0
@@ -352,7 +367,7 @@ class Transcriber:
             condition_on_previous_text=False,
             hotwords=hotwords or None,
         )
-        return " ".join(s.text.strip() for s in segments).strip(), info.language, float(sure)
+        return _said(segments, speech), info.language, float(sure)
 
     def warm(self) -> None:
         """Runs the loaded model once (once per load: a card's first run sets itself up for seconds;
