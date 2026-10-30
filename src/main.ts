@@ -1307,7 +1307,9 @@ function onMessage(message: ToHost): void {
       if (typeof message.path === 'string' && path.win32.isAbsolute(message.path)) shell.showItemInFolder(message.path)
       return
     case 'openPath':
-      // A folder, a note or a text file; never a program, a script or a shortcut.
+      // A folder, a note or a text file; never a program, a script or a shortcut. One of Krya's own
+      // folders not made yet (the transcripts' before the first transcript) is made, then opened.
+      makeOwnFolder(message.path)
       if (openable(message.path, isDirectory)) void shell.openPath(message.path)
       else log(`openPath: refused ${message.path}`)
       return
@@ -2500,6 +2502,19 @@ function setUpSpeechEngine(): void {
 const EXPORT_FORMATS = new Set(['txt', 'md', 'srt', 'vtt', 'docx', 'json'])
 
 const isDirectory = (p: string) => fs.statSync(p).isDirectory()
+
+/** Makes `p` when it is one of Krya's own folders (its settings, its downloads, the transcripts') and not there yet. */
+function makeOwnFolder(p: unknown): void {
+  if (typeof p !== 'string' || fs.existsSync(p)) return
+  const same = (a: string) => path.win32.resolve(a).toLowerCase() === path.win32.resolve(p).toLowerCase()
+  const own = [userDir(), localDir(), speech?.service.health?.dataDir].filter((f): f is string => !!f)
+  if (!own.some(same)) return
+  try {
+    fs.mkdirSync(p, { recursive: true })
+  } catch (e) {
+    log(`openPath: could not make ${p}: ${String(e)}`)
+  }
+}
 
 /** A page's request with an answer: the speech engine's API, a folder to pick, a transcript to save. */
 async function hostCall(request: HostCall): Promise<unknown> {
