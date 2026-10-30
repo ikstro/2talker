@@ -73,6 +73,7 @@ describe('createLlmTranslators', () => {
     const asked: { target: LlamaTarget; system: string; text: string }[] = []
     let serving: LlamaTarget | undefined
     const server = {
+      apiKey: 'test-key',
       get model() {
         return serving?.model
       },
@@ -88,6 +89,8 @@ describe('createLlmTranslators', () => {
       dispose: vi.fn(),
     }
     const post = vi.fn(async (_url: string, init: RequestInit) => {
+      // Every request carries the server's key (llama.ts apiKey).
+      if (new Headers(init.headers).get('authorization') !== 'Bearer test-key') return new Response('{"error":"Invalid API Key"}', { status: 401 })
       const { messages } = JSON.parse(String(init.body)) as { messages: { content: string }[] }
       const [system, user] = messages
       asked.push({ target: serving!, system: system!.content, text: user!.content })

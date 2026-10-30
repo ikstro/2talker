@@ -10,6 +10,8 @@ import { execFile, spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+import { system32 } from './system32'
+
 /** The only pages a page of Krya may open in Chrome: the extensions, their keys, and one extension's card. */
 export const CHROME_PAGES = ['chrome://extensions/', 'chrome://extensions/shortcuts']
 const EXTENSION_CARD = /^chrome:\/\/extensions\/\?id=[a-p]{32}$/
@@ -29,7 +31,7 @@ export function regDefault(output: string): string | undefined {
 
 function regQuery(key: string): Promise<string | undefined> {
   return new Promise(resolve => {
-    execFile('reg.exe', ['query', key, '/ve'], { windowsHide: true, timeout: 5000 }, (error, stdout) => resolve(error ? undefined : regDefault(stdout)))
+    execFile(system32('reg.exe'), ['query', key, '/ve'], { windowsHide: true, timeout: 5000 }, (error, stdout) => resolve(error ? undefined : regDefault(stdout)))
   })
 }
 

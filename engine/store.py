@@ -47,7 +47,8 @@ class Store:
         )
 
     def folder(self, id: str) -> Path:
-        if not id or "/" in id or "\\" in id or ".." in id:
+        # One folder right inside the library: no separators, no "..", no drive ("D:" alone is drive D on Windows).
+        if not id or "/" in id or "\\" in id or ".." in id or ":" in id or id.strip(" .") != id:
             raise KeyError(id)
         return self.root / id
 

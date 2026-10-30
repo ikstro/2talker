@@ -81,7 +81,7 @@ export function createChecker(o: CheckerOptions): Checker {
     if (!text) return { corrected: piece, note: '' }
     const response = await post(`${base}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${files.server.apiKey}` },
       body: JSON.stringify({
         messages: [
           { role: 'system', content: checkPrompt(native) },

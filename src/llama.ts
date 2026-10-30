@@ -9,6 +9,7 @@
 // (`--device none`) until Krya starts again.
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as path from 'node:path'
@@ -23,7 +24,7 @@ export type LlamaOptions = {
   log: string
   idleMs?: number
   readyMs?: number
-  spawn?: (exe: string, args: string[]) => ChildProcess
+  spawn?: (exe: string, args: string[], env: NodeJS.ProcessEnv) => ChildProcess
   freePort?: () => Promise<number>
   fetch?: typeof fetch
 }
@@ -52,10 +53,20 @@ export function freePort(): Promise<number> {
   })
 }
 
-/** The server's arguments: the model, 8192 tokens shared by four sentences at once, no web page; where its layers go. */
+/** The server's arguments: the model, 8192 tokens shared by four sentences at once, no web page, no /slots; where its layers go. */
 export function serverArgs(target: LlamaTarget, port: number, cpu: boolean): string[] {
   const where = cpu ? ['--device', 'none'] : target.allLayers ? ['-ngl', 'all'] : []
-  return ['-m', target.model, '--host', '127.0.0.1', '--port', String(port), '-c', '8192', '-np', '4', '--kv-unified', '--no-webui', ...where]
+  return ['-m', target.model, '--host', '127.0.0.1', '--port', String(port), '-c', '8192', '-np', '4', '--kv-unified', '--no-webui', '--no-slots', ...where]
+}
+
+/**
+ * The server's environment: Krya's own, without the person's LLAMA_* settings (LLAMA_ARG_TOOLS would give
+ * the model a shell), with Krya's key: llama.cpp answers anyone on 127.0.0.1 (any program, a web page)
+ * unless asked for a key, which it takes from LLAMA_API_KEY (never in the arguments, which other programs can read).
+ */
+export function serverEnv(from: NodeJS.ProcessEnv, apiKey: string): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(Object.entries(from).filter(([name]) => !/^LLAMA_/i.test(name)))
+  return { ...env, LLAMA_API_KEY: apiKey }
 }
 
 const keyOf = (t: LlamaTarget) => `${t.exe}|${t.model}`
@@ -66,6 +77,9 @@ export class LlamaServer {
   private idle: NodeJS.Timeout | undefined
   /** Builds and models the card could not take: on the processor until Krya starts again. */
   private readonly cpuOnly = new Set<string>()
+
+  /** The key every request to the server carries (Authorization: Bearer), new each time Krya starts. */
+  readonly apiKey = randomBytes(32).toString('hex')
 
   constructor(private readonly o: LlamaOptions) {}
 
@@ -147,8 +161,8 @@ export class LlamaServer {
       // A log that cannot be written is no reason to stop.
       log.on('error', () => undefined)
       log.write(`\n--- ${new Date().toISOString()} start ${path.basename(target.model)} with ${path.basename(path.dirname(target.exe))}${cpu ? ' on the processor' : ''}\n`)
-      const spawn = this.o.spawn ?? ((file: string, args: string[]) => nodeSpawn(file, args, { cwd: path.dirname(file), windowsHide: true }))
-      const child = spawn(target.exe, serverArgs(target, port, cpu))
+      const spawn = this.o.spawn ?? ((file: string, args: string[], env: NodeJS.ProcessEnv) => nodeSpawn(file, args, { cwd: path.dirname(file), env, windowsHide: true }))
+      const child = spawn(target.exe, serverArgs(target, port, cpu), serverEnv(process.env, this.apiKey))
       r.child = child
       // Its last words, for the error when it stops before it is ready.
       const tail: string[] = []

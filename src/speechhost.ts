@@ -12,11 +12,13 @@ import * as path from 'node:path'
 
 import { driveOf, fingerprint, freeMb, loadProfile, probeDevice, quickProfile, saveProfile, type DeviceProfile } from './device'
 import { langCode } from './languages'
+import { log } from './log'
+import { freeFolder, runningProcesses } from './oldfolder'
 import type { SpeechView } from './protocol'
 import type { Settings } from './settings'
 import { DOWNLOAD_MB, hasNvidia, INSTALLED_MB, SpeechPack, type SpeechPart } from './speechpack'
 import { planSpeech, testKey, testRuns, type PlanInput, type SpeechPlan } from './speechplan'
-import { SpeechService, type SpeechResult } from './speechservice'
+import { SpeechService, speechToken, type SpeechResult } from './speechservice'
 import { vocabularyFor } from './vocabulary'
 
 /** "Not now" holds this long at least, even when there is something new to measure. */
@@ -84,6 +86,13 @@ export class SpeechHost {
       // A test run's own home (its models are still the installed engine's); else where the engine is installed:
       // %LOCALAPPDATA%\Krya\speech, or Altype's folder when it could not move (oldfolder.ts).
       env: o.testHome ? { KRYA_SPEECH_HOME: o.testHome } : { KRYA_SPEECH_DIR: o.root },
+      // Beside the engine's settings (its APP_DIR), where an engine run by hand finds it too.
+      token: speechToken(path.join(o.testHome ?? o.userDir, 'speech-token')),
+      // Its Python, run from the engine's own folder (the venv's launcher and the interpreter it starts); never uv.
+      stopStale: () => {
+        const { stopped, holding } = freeFolder(o.root, runningProcesses().filter(p => /^pythonw?\.exe$/i.test(p.name)))
+        log(`speech: an older engine without the key stopped (${stopped.length})${holding.length ? `, ${holding.length} would not stop` : ''}`)
+      },
       change: () => this.changed(),
     })
     this.extensionShipped = shippedVersion(o.extensionDir)
@@ -348,6 +357,16 @@ export class SpeechHost {
 
   restart(): void {
     if (this.installed) this.service.restart()
+  }
+
+  /** A file's bytes from the engine (a transcript exported). */
+  bytes(route: string): Promise<Buffer> {
+    return this.service.bytes(route)
+  }
+
+  /** The engine's key, for the requests a page makes itself (a transcript's sound in an <audio>): main adds it. */
+  get token(): string {
+    return this.service.token
   }
 
   call<T = unknown>(method: string, route: string, body?: unknown): Promise<SpeechResult<T>> {

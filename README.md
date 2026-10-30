@@ -15,7 +15,9 @@ Select any text, press **Ctrl+C twice**, and hear it in English. A small Windows
 
 ## Install
 
-Download `Krya-Setup-<version>.exe` from the [releases](https://github.com/ikstro/krya/releases) and run it. The installer is not signed (Krya is a free app), so Windows warns once: **More info → Run anyway**. Krya starts with Windows, lives in the tray and updates itself from the releases. It installs over Altype and 2Talker and takes their words, settings and downloads along.
+Download `Krya-Setup-<version>.exe` from the [releases](https://github.com/ikstro/krya/releases) and run it. The installer is not signed (Krya is a free app), so Windows warns once: **More info → Run anyway**. Krya starts with Windows and lives in the tray. It installs over Altype and 2Talker and takes their words, settings and downloads along.
+
+**New versions.** Krya does not update itself: download the new installer from the [releases](https://github.com/ikstro/krya/releases) and run it. It installs over the version you have; your settings, words and downloads stay. Settings → Version links there.
 
 The first translation downloads the translator for your language (about 85 MB for Russian ↔ English), once.
 
@@ -45,6 +47,15 @@ The tray icon opens the menu: Listen and Translate (the selection, the copied te
 From a launcher or a mouse button: `Krya.exe --clipboard` listens to the copied text and `--translate` translates it; `--snip` snips to listen, `--text` to translate.
 
 The keyboard helper looks only at the keys of what you are typing, since your last click; it keeps nothing and sends nothing anywhere. Turn off another layout switcher (EveryLang, Punto Switcher) while it runs, or words get fixed twice.
+
+## Who spoke when: the Hugging Face key
+
+Telling speakers apart in a transcript uses pyannote's model, which Hugging Face hands out for free once you accept its terms. Krya asks for a key once, on the Who spoke when page, and shows these steps there too:
+
+1. Sign up at [huggingface.co/join](https://huggingface.co/join), free.
+2. Open [the model's page](https://huggingface.co/pyannote/speaker-diarization-community-1) and fill in its form: Company or university, anything (your own name will do); Use case: **Meeting note taker**. Then **Agree and access repository**.
+3. Open [Access Tokens](https://huggingface.co/settings/tokens) → **Create new token** → type **Read** → copy the `hf_…` key.
+4. Paste it into Krya and press **Save**. The model downloads once; after that everything works offline, and the key is no longer needed. Krya keeps it only on your computer and never shows it again.
 
 ## Languages
 

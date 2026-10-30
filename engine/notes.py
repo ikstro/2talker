@@ -16,9 +16,16 @@ class NoKnowledgeBase(Exception):
 
 
 def inbox(kb_dir: str, sub: str) -> Path:
+    """The notes' folder: `sub` inside the knowledge base, never anywhere else (an absolute or ../ one is the base itself)."""
     if not kb_dir:
         raise NoKnowledgeBase()
-    folder = Path(kb_dir) / sub if sub else Path(kb_dir)
+    base = Path(kb_dir)
+    inside = Path(sub.replace("\\", "/")) if sub else None
+    # By the path itself, not where links lead: an Inbox that is a link to another drive stays the person's Inbox.
+    if inside is None or inside.is_absolute() or inside.drive or inside.anchor or ".." in inside.parts:
+        folder = base
+    else:
+        folder = base / inside
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 

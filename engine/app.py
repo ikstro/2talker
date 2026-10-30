@@ -1,7 +1,9 @@
 """Krya's speech service: a local HTTP service on 127.0.0.1 for Krya, its Chrome extension and other apps.
 
-Run: python app.py [--port 8765]. Only this computer can reach it; a web page
-cannot call it either (see `guard`), only the app (no Origin) and the extension.
+Run: python app.py [--port 8765]. Only this computer can reach it, and only
+callers with the engine's key (X-Krya-Token, see auth.py) are served; Krya's
+own Chrome extension may record meetings; a web page or another extension
+cannot call it (see `guard`).
 
 What other apps may use, and keep using:
   POST /dictate?language=auto|<code>&expected=ru,en[&strict=1][&format=pcm16]
@@ -20,7 +22,9 @@ What other apps may use, and keep using:
   POST /transcripts {path}            a file on this computer -> a transcript in the library
   POST /recordings ...                a recording that arrives in chunks (the extension)
   GET  /health                        what is installed (parts), loaded and busy, and the Chrome
-                                      extension last seen ({id, version, seen} or null)
+                                      extension last seen ({id, version, seen} or null); without
+                                      the key only {ok}; with X-Krya-Nonce also {proof}
+  GET  /transcripts/<id>/file?format= the transcript as txt, md, srt, vtt, docx or json (bytes)
 
 Krya alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
 where, made from this computer's measurements; the words to spell right and what they
@@ -42,6 +46,8 @@ from pathlib import Path
 
 # Hugging Face is asked for models only when one is missing (diarize.py downloads explicitly).
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+# pyannote reports every run to otel.pyannote.ai unless told not to: nothing leaves this computer.
+os.environ["PYANNOTE_METRICS_ENABLED"] = "0"
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 import uvicorn
@@ -52,6 +58,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 import asr
 import audio
+import auth
 import diarize
 import export
 import notes
@@ -91,6 +98,8 @@ def load_extension() -> dict | None:
     """The extension seen last time, so the app can say it is installed before it pings again."""
     try:
         found = json.loads(EXTENSION_FILE.read_text("utf-8"))
+        if found.get("id") != auth.EXTENSION_ID:
+            found["id"] = ""  # an older copy, with the id Chrome gave its folder: refused now, the app says to load it again
         return {"id": str(found["id"]), "version": str(found["version"]), "seen": float(found["seen"])}
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -106,8 +115,10 @@ def note_extension(origin: str, version: str) -> None:
     is new, as the extension pings every 15 minutes.
     """
     global extension
-    prefix = "chrome-extension://"
-    seen = {"id": origin[len(prefix):] if origin.startswith(prefix) else "", "version": version.strip()[:32], "seen": time.time()}
+    # A copy before the fixed id (its hello comes without an Origin, so only its version tells): no id, and the app
+    # says to remove it and load it again; from 0.4.0 on, the id is the fixed one.
+    version = version.strip()[:32]
+    seen = {"id": auth.EXTENSION_ID if auth.fixed_id(version) else "", "version": version, "seen": time.time()}
     changed = extension is None or extension["id"] != seen["id"] or extension["version"] != seen["version"] or not EXTENSION_FILE.exists()
     extension = seen
     if changed:
@@ -125,20 +136,34 @@ sessions = Sessions()
 worker.dictating = sessions.active
 # The speed test runs only while nothing else does: no transcription, no phrase being recognized.
 calibrator = Calibrator(worker.bench, lambda: worker.idle() and not _dictating.locked() and not sessions.active(), worker.unload_all, lambda: worker.activity, worker.threads)
-app = FastAPI(title="Krya speech", version=VERSION)
-app.add_middleware(CORSMiddleware, allow_origin_regex=r"chrome-extension://[a-p]{32}", allow_methods=["*"], allow_headers=["*"])
+# No /docs, /redoc or /openapi.json: Swagger's page would load scripts from a CDN onto the engine's own origin.
+app = FastAPI(title="Krya speech", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(CORSMiddleware, allow_origins=[auth.EXTENSION_ORIGIN], allow_methods=["*"], allow_headers=["*"])
+TOKEN = auth.load_token()
 
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    """The app calls without an Origin, the extension from chrome-extension://; any web page is refused.
+    """Krya with the engine's key, its own extension on its own routes; anyone else gets /health's bare ok.
 
     The Host check stops DNS rebinding: a page whose name points at 127.0.0.1 still says its own name.
     """
     host = request.headers.get("host", "").split(":")[0]
     origin = request.headers.get("origin", "")
-    if host not in ("127.0.0.1", "localhost") or (origin and not origin.startswith("chrome-extension://")):
+    if host not in ("127.0.0.1", "localhost"):
         return JSONResponse({"detail": "forbidden"}, status_code=403)
+    method, path = request.method, request.url.path
+    if origin:
+        # A web page or another extension: nothing. Krya's extension: only what it does.
+        if origin != auth.EXTENSION_ORIGIN or not auth.extension_may(method, path):
+            return JSONResponse({"detail": "forbidden"}, status_code=403)
+    elif not auth.token_ok(request.headers.get("x-krya-token", ""), TOKEN):
+        # The extension's look at /health may come without an Origin: it learns the engine is up, nothing else.
+        if method == "GET" and path == "/health":
+            if request.headers.get("x-krya-extension", "").strip():
+                note_extension(origin, request.headers["x-krya-extension"])
+            return JSONResponse({"ok": True})
+        return JSONResponse({"detail": "the engine's key is needed"}, status_code=401)
     # The extension of Altype's days (up to 0.2.1) sent X-Altype-Extension; it says hello until Chrome reloads it.
     version = request.headers.get("x-krya-extension", "") or request.headers.get("x-altype-extension", "")
     if version.strip():
@@ -159,7 +184,16 @@ def planned(feature: str) -> dict:
 
 
 @app.get("/health")
-def health():
+def health(request: Request):
+    if request.headers.get("origin"):
+        # Krya's extension needs to know only that the engine is up.
+        return {"ok": True, "version": VERSION}
+    nonce = request.headers.get("x-krya-nonce", "")
+    # The proof that this engine holds the key (auth.py), so Krya knows the engine on the port is its own.
+    return {**health_view(), **({"proof": auth.proof(TOKEN, nonce)} if nonce else {})}
+
+
+def health_view() -> dict:
     s = settings.get()
     bench = s["bench"]
     return {
@@ -534,16 +568,15 @@ def get_audio(id: str):
     return FileResponse(path, media_type="audio/ogg")
 
 
-@app.post("/transcripts/{id}/export")
-def export_to(id: str, body: dict = Body(...)):
-    """Writes the transcript to body.path in body.format (the app asked where with a Save dialog)."""
+@app.get("/transcripts/{id}/file")
+def file_of(id: str, format: str = "txt"):
+    """The transcript in a format, as bytes: Krya writes them where the person chose in its Save dialog.
+
+    (The engine itself writes no file a caller names.)"""
+    if format not in export.FORMATS:
+        raise HTTPException(400, f"Formats: {', '.join(export.FORMATS)}")
     t = transcript_or_404(id)
-    fmt = body.get("format")
-    if fmt not in export.FORMATS or not body.get("path"):
-        raise HTTPException(400, "format and path are needed")
-    path = Path(body["path"])
-    export.write(t, fmt, path)
-    return {"path": str(path)}
+    return Response(export.render(t, format), media_type="application/octet-stream")
 
 
 @app.get("/transcripts/{id}/text")

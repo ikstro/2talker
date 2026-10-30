@@ -331,7 +331,6 @@
     speechTestDeclinedKey: "",
     speechTestDeclinedAt: 0,
     startWithWindows: true,
-    betaUpdates: false,
     naturalDismissed: false,
     introSeen: false,
     paused: false,
@@ -2713,6 +2712,7 @@
 
   // src/webview/app.ts
   var save = (patch2) => post({ type: "saveSettings", patch: patch2 });
+  var RELEASES = "https://github.com/ikstro/krya/releases";
   var ACTIONS = ["listen", "translate", "check", "screen", "dictate", "transcribe", "keyboard"];
   var isAction = (name) => ACTIONS.includes(name);
   var ICONS = { listen: "volume-2", translate: "languages", check: "graduation-cap", screen: "scan", dictate: "mic", transcribe: "audio-lines", keyboard: "keyboard" };
@@ -4245,6 +4245,11 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     const ext = extensionSeen(v);
     return !!ext && !!v.speech.extensionShipped && olderVersion(ext.version, v.speech.extensionShipped);
   };
+  var FIXED_ID_SINCE = "0.4.0";
+  var extensionReload = (v) => {
+    const ext = extensionSeen(v);
+    return !!ext && olderVersion(ext.version, FIXED_ID_SINCE);
+  };
   var extensionsPage = (v) => {
     const id = extensionSeen(v)?.id;
     return id && /^[a-p]{32}$/.test(id) ? `chrome://extensions/?id=${id}` : "chrome://extensions/";
@@ -4252,14 +4257,19 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   function meetCard(v) {
     const ext = extensionSeen(v);
     const stale = extensionStale(v);
-    const value = !ext ? "set up in Chrome" : stale ? `Reload in Chrome \xB7 v${ext.version} \u2192 v${v.speech.extensionShipped}` : `Installed \xB7 v${ext.version}`;
+    const value = !ext ? "set up in Chrome" : extensionReload(v) ? `Load again in Chrome \xB7 v${ext.version} \u2192 v${v.speech.extensionShipped}` : stale ? `Reload in Chrome \xB7 v${ext.version} \u2192 v${v.speech.extensionShipped}` : `Installed \xB7 v${ext.version}`;
     return navCard("video", "Google Meet", "record a call in Chrome with the Krya extension", value, () => openSub("meet"), "meet", !!ext && !stale);
   }
   function meetPage(v) {
     const dir = v.speech.extensionDir;
     const ext = extensionSeen(v);
     const offer = engineRows(v, "Google Meet");
-    const status = !ext ? card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null) : extensionStale(v) ? card("rotate-cw", `Chrome runs v${ext.version}; Krya has v${v.speech.extensionShipped}`, ["press Reload on the extension\u2019s card in Chrome: Open in Chrome goes straight to it"], btn("Open in Chrome", () => openChrome(extensionsPage(v)), "primary")) : card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY));
+    const status = !ext ? card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null) : extensionReload(v) ? card(
+      "rotate-cw",
+      `Chrome runs v${ext.version}, which Krya no longer takes recordings from`,
+      ["remove it on Chrome\u2019s extensions page (Remove on its card), then Load unpacked again: steps 1 and 2 below; Chrome asks for the microphone once more"],
+      btn("Open in Chrome", () => openChrome("chrome://extensions/"), "primary")
+    ) : extensionStale(v) ? card("rotate-cw", `Chrome runs v${ext.version}; Krya has v${v.speech.extensionShipped}`, ["press Reload on the extension\u2019s card in Chrome: Open in Chrome goes straight to it"], btn("Open in Chrome", () => openChrome(extensionsPage(v)), "primary")) : card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY));
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
       grp("Chrome extension"),
@@ -4625,26 +4635,6 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         return null;
     }
   }
-  function updateText(u) {
-    switch (u.status) {
-      case "dev":
-        return "a run from source does not update";
-      case "checking":
-        return "checking\u2026";
-      case "none":
-        return "this is the latest version";
-      case "downloading":
-        return "downloading an update\u2026";
-      case "ready":
-        return `version ${u.version} is ready: it installs when Krya quits`;
-      case "unavailable":
-        return u.message;
-      case "failed":
-        return `could not check: ${u.message}`;
-      default:
-        return "";
-    }
-  }
   var removingSpeech = false;
   function enginePage(v) {
     const sp = v.speech;
@@ -4856,7 +4846,6 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   }
   function settingsPage(v) {
     const s = v.settings;
-    const u = v.update;
     return [
       grp("Language"),
       card(
@@ -4890,13 +4879,13 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       keyRow("pauseKey", "Pause or resume with a key", "works while paused too", !v.keysOk.pause, "pause"),
       keyRow("windowKey", "Open this window with a key", "from any program", !v.keysOk.window, "house"),
       card("rotate-ccw", "Reset all keys", ["every shortcut back to how it came; \u21BA by a key brings back just that one"], linkBtn("Reset keys", () => post({ type: "resetKeys" }))),
+      // New versions are downloaded by hand from GitHub (the owner, 2026-10-30): nothing installs itself.
       card(
         "rotate-cw",
         `Version ${v.version}${v.dev ? " dev" : ""}`,
-        [v.dev ? `built ${v.build}; ${updateText(u)}` : u.status === "failed" ? bad(updateText(u)) : updateText(u)],
-        linkBtn("Check for updates", () => post({ type: "checkUpdates" }), u.status === "dev" || u.status === "checking" || u.status === "downloading")
+        [v.dev ? `built ${v.build}` : "new versions: download the installer from GitHub and run it; your settings and downloads stay"],
+        linkBtn("New versions", () => post({ type: "openLink", url: RELEASES }))
       ),
-      toggleCard("sparkles", "Get test versions", s.betaUpdates, (betaUpdates) => save({ betaUpdates }), "try new features before they are released"),
       grp("Backup"),
       card(
         "file-text",
@@ -4909,7 +4898,6 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     ].filter((n) => n !== null);
   }
   function aboutPage(v) {
-    const update = updateText(v.update);
     const fact = (term, ...detail) => [el("dt", {}, term), el("dd", {}, ...detail)];
     return [
       el(
@@ -4918,7 +4906,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         el("div", { class: "mk" }, tile(88), logo()),
         el("p", { class: "tag" }, "Talk to the duck."),
         // A run from source says when it was built, so it is never taken for the last release.
-        el("p", { class: "ver" }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : update ? ` \xB7 ${update}` : ""} \xB7 free and open source, MIT`),
+        el("p", { class: "ver" }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : ""} \xB7 free and open source, MIT`),
         el(
           "dl",
           { class: "facts" },
@@ -4929,10 +4917,10 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
             el("span", { class: "q" }, "\u2014 your text is never sent anywhere")
           ),
           ...fact("made with", "Inter and JetBrains Mono (SIL OFL) \xB7 Electron \xB7 VS Code icons"),
-          ...fact("goes online only for", `updates, and a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
+          ...fact("goes online only for", `a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
           ...fact(
             "links",
-            link("https://github.com/ikstro/krya/releases", "Releases and what changed"),
+            link(RELEASES, "New versions and what changed"),
             " \xB7 ",
             link("https://github.com/ikstro/krya", "Source on GitHub"),
             " \xB7 ",

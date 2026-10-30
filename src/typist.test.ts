@@ -616,6 +616,37 @@ describe('learning from the person\'s typing', () => {
     expect(desk.sent.find(m => m.type === 'tally' && m.word)).toBeUndefined()
   })
 
+  test('a field that does not answer in time teaches nothing, and a word is still fixed there', () => {
+    const desk = new Desk({ learn: true, autoFix: true })
+    desk.auto = false
+    for (let i = 0; i < 3; i++) {
+      desk.keys('qzxvbkt ')
+      desk.tick(400)
+    }
+    expect(desk.sent.find(m => m.type === 'tally' && m.word)).toBeUndefined()
+    desk.keys('ghbdtn ')
+    desk.tick(400)
+    // The fix is typed after the wait, the field never having answered.
+    desk.typist.typeFix()
+    expect(desk.text).toBe('qzxvbkt qzxvbkt qzxvbkt привет ')
+  })
+
+  test('a field that says it cannot tell teaches nothing', () => {
+    const desk = new Desk({ learn: true, autoFix: true })
+    desk.auto = false
+    desk.keys('altype altype altype x ')
+    desk.typist.fieldIs('unknown')
+    expect(desk.sent.find(m => m.type === 'tally' && m.word)).toBeUndefined()
+  })
+
+  test.each(['windowsterminal.exe', 'conhost.exe', 'keepass.exe'])('nothing is learned in %s, a terminal or a password manager; fixing goes on', exe => {
+    const desk = new Desk({ learn: true, autoFix: true })
+    desk.exe = exe
+    desk.keys('altype altype altype x ghbdtn ')
+    expect(desk.sent.filter(m => m.type === 'tally')).toEqual([])
+    expect(desk.text).toBe('altype altype altype x привет ')
+  })
+
   test('a word learned to fix always is fixed even when it is a word as typed', () => {
     const desk = new Desk({ autoFix: true, alwaysFix: [{ word: 'vs', lang: 'ru' }] })
     desk.keys('vs ')

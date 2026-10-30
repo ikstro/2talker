@@ -74,7 +74,7 @@ describe('normalize', () => {
   })
 
   test('new keyboard parts start as decided: capitals set right, learning on, quiet on the full screen, the rest off', () => {
-    expect(normalize({})).toMatchObject({ fixTwoCaps: true, fixCapsLock: true, learn: true, quietFullScreen: true, keepCaps: false, fixOnPause: false, fixSound: false, trayLayout: false, switchOn: true, fixKeyOn: true, betaUpdates: false })
+    expect(normalize({})).toMatchObject({ fixTwoCaps: true, fixCapsLock: true, learn: true, quietFullScreen: true, keepCaps: false, fixOnPause: false, fixSound: false, trayLayout: false, switchOn: true, fixKeyOn: true })
   })
 
   test('English is the learned language, never the native one', () => {

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -101,7 +103,8 @@ def to_vtt(t: dict) -> str:
     return "WEBVTT\n\n" + "\n".join(f"{clock(a, '.')} --> {clock(b, '.')}\n{text}\n" for a, b, text in cues(t))
 
 
-def to_docx(t: dict, path: Path) -> None:
+def to_docx(t: dict, path) -> None:
+    """Into a file's path, or any binary stream (render)."""
     from docx import Document
     from docx.shared import Pt, RGBColor
 
@@ -120,13 +123,15 @@ def to_docx(t: dict, path: Path) -> None:
         if len(people) > 1:
             p.add_run(f"{name(t, u['speaker'])}: ").bold = True
         p.add_run(u["text"])
-    doc.save(str(path))
+    doc.save(path if hasattr(path, "write") else str(path))
 
 
-def write(t: dict, fmt: str, path: Path) -> None:
+def render(t: dict, fmt: str) -> bytes:
+    """The transcript in a format, as the file's bytes."""
     if fmt == "docx":
-        to_docx(t, path)
-        return
+        out = io.BytesIO()
+        to_docx(t, out)
+        return out.getvalue()
     text = {
         "txt": to_txt,
         "md": to_md,
@@ -134,4 +139,9 @@ def write(t: dict, fmt: str, path: Path) -> None:
         "vtt": to_vtt,
         "json": lambda t: json.dumps(t, ensure_ascii=False, indent=1),
     }[fmt](t)
-    path.write_text(text, "utf-8")
+    # Lines end as a text file written on this system has them (CRLF on Windows), as the files written before did.
+    return text.replace("\n", os.linesep).encode("utf-8")
+
+
+def write(t: dict, fmt: str, path: Path) -> None:
+    path.write_bytes(render(t, fmt))

@@ -14,6 +14,7 @@ import * as path from 'node:path'
 
 import { vendorOf, type DeviceProfile, type Gpu } from './hardware'
 import type { LlmModel } from './settings'
+import { POWERSHELL } from './system32'
 
 export { mainCard, nvidiaCard, vendorOf, type DeviceProfile, type Gpu, type GpuVendor } from './hardware'
 
@@ -130,7 +131,7 @@ export function fingerprint(p: DeviceProfile): string {
 
 function powershell(): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')], {
+    const child = spawn(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')], {
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     })

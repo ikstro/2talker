@@ -53,12 +53,6 @@ nsis:
   artifactName: Krya-Setup-${version}.${ext}
   # Uninstall asks whether the data goes too (build/installer.nsh); an update keeps it.
   include: build/installer.nsh
-# Each release carries the update files of every channel (latest.yml, beta.yml):
-# copies with test versions on read beta.yml and still get releases.
-generateUpdatesFilesForAllChannels: true
-# Releases on GitHub: the updater (src/update.ts) reads latest.yml from there.
-# The installer is not signed (a free app): Windows warns once at install.
-publish:
-  provider: github
-  owner: ikstro
-  repo: krya
+# No publish settings: the release workflow puts the installer in a GitHub release itself, and Krya does
+# not update itself (people download new versions from the releases). The installer is not signed
+# (a free app): Windows warns at install.

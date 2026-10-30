@@ -47,6 +47,38 @@ export type KeyAction = 'switch' | 'fix' | 'layout' | 'select' | 'snip' | 'trans
 /** The parts of the keyboard helper a program can be left out of: fixing as one types, the switch and layout keys, the badge, every key of Krya's. */
 export type AppPart = 'fix' | 'switch' | 'badge' | 'keys'
 
+/** The field's answer to "is it a password?": yes, no, or it would not say. */
+export type FieldAnswer = boolean | 'unknown'
+
+/**
+ * Programs whose typing teaches no words: terminals (a password typed at ssh or sudo is in a field
+ * that says it is no password) and password managers. Fixing still works there.
+ */
+export const UNLEARNED_APPS: ReadonlySet<string> = new Set([
+  'windowsterminal.exe',
+  'conhost.exe',
+  'openconsole.exe',
+  'cmd.exe',
+  'powershell.exe',
+  'pwsh.exe',
+  'wsl.exe',
+  'mintty.exe',
+  'putty.exe',
+  'kitty.exe',
+  'mobaxterm.exe',
+  'alacritty.exe',
+  'wezterm-gui.exe',
+  'tabby.exe',
+  'termius.exe',
+  'keepass.exe',
+  'keepassxc.exe',
+  '1password.exe',
+  'bitwarden.exe',
+  'enpass.exe',
+  'dashlane.exe',
+  'proton pass.exe',
+])
+
 /** A word learned from the person's typing: as typed (lower case), and the language it goes into, or belongs to. */
 export type Learned = { word: string; lang: string }
 
@@ -269,8 +301,12 @@ export class Typist {
   /** Waiting for the answer about the field before typing `pending`. */
   private asking: { since: number } | undefined
   private queued: { vk: number; scan: number; up: boolean }[] = []
-  /** The field typed in is a password (true), is not (false), or was not asked about since the run began. */
-  private secret: boolean | undefined
+  /**
+   * The field typed in is a password (true), is not (false), would not say ('unknown': no answer, or
+   * none in time), or was not asked about since the run began. Only a field that said it is no
+   * password teaches words; one that would not say is still fixed, as before the question.
+   */
+  private secret: FieldAnswer | undefined
   /** Learning that waits for the answer about the field. */
   private toLearn: KbdOut[] = []
   /** The keys erased by Backspace lately, first one first, for a word typed again in another layout; `erasing` while Backspaces go on. */
@@ -968,7 +1004,7 @@ export class Typist {
 
   /** Whether learning is on here: learned words serve fixing as one types and the fix key. */
   private learning(front = this.env.foreground()): boolean {
-    return this.config.learn && (this.config.autoFix || !!this.config.keys.fix) && !this.offHere('fix', front) && !this.quiet()
+    return this.config.learn && (this.config.autoFix || !!this.config.keys.fix) && !this.offHere('fix', front) && !this.quiet() && !UNLEARNED_APPS.has(this.env.exeOf(front.pid))
   }
 
   /** A word that just ended, typed with the same keys as a word just erased but in another layout: fixed by hand. */
@@ -1034,7 +1070,7 @@ export class Typist {
 
   /** Learning sent once the field is known to be no password (asked when it is not known yet). */
   private learnLater(message: KbdOut): void {
-    if (this.secret === true) return
+    if (this.secret === true || this.secret === 'unknown') return
     if (this.secret === false) return this.env.send(message)
     this.toLearn.push(message)
     if (!this.asking) {
@@ -1060,15 +1096,15 @@ export class Typist {
     this.env.later()
   }
 
-  /** The answer about the field typed in: a password field takes no fix and teaches nothing. */
-  fieldIs(secret: boolean): void {
+  /** The answer about the field typed in: a password field takes no fix and teaches nothing; one that would not say teaches nothing either. */
+  fieldIs(secret: FieldAnswer): void {
     this.asking = undefined
     this.secret = secret
     const learn = this.toLearn
     this.toLearn = []
-    if (!secret) for (const m of learn) this.env.send(m)
+    if (secret === false) for (const m of learn) this.env.send(m)
     if (!this.pending) return
-    if (secret && this.pending.auto) this.callOff()
+    if (secret === true && this.pending.auto) this.callOff()
     else this.env.later()
   }
 
@@ -1106,6 +1142,7 @@ export class Typist {
     this.env.press(keys)
     if (fix.auto && this.config.fixSound) this.env.click()
     // Typed only once the field is known to be no password (or never answered, which counts as none).
+    // The tray's "Keep a word" offers it (in memory only), unless the field said it is a password.
     if (fix.auto && fix.report && this.secret !== true) this.env.send({ type: 'autoFixed', ...fix.report })
   }
 
@@ -1119,7 +1156,7 @@ export class Typist {
    */
   tick(): void {
     const now = this.env.now()
-    if (this.asking && now - this.asking.since > FIELD_WAIT_MS) this.fieldIs(false)
+    if (this.asking && now - this.asking.since > FIELD_WAIT_MS) this.fieldIs('unknown')
     const front = this.env.foreground()
     if (front.hwnd && front.hwnd !== this.frontWindow) {
       this.frontWindow = front.hwnd

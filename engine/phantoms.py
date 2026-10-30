@@ -16,7 +16,7 @@ Three kinds, each cut on its own terms:
   the time, so only when they are all of the text and the sound does not carry it.
 
 The thresholds are first guesses, to be tuned on the owner's recordings (bench.py):
-the app log names every phrase cut.
+the app log counts every cut (never its words).
 """
 
 from __future__ import annotations
@@ -159,7 +159,8 @@ def clean(text: str, sound: Sound, dictation: bool) -> str:
     spans = phantoms(text, sound, dictation)
     if not spans:
         return text
-    log.info("cut what nobody said: %s", " | ".join(repr(text[a:b].strip()) for a, b in spans))
+    # How much, never what: were a cut ever wrong, the log would hold what the person said.
+    log.info("cut what nobody said: %d piece(s), %d letters", len(spans), sum(b - a for a, b in spans))
     return _without(text, spans)
 
 
@@ -169,7 +170,8 @@ def clean_segment(segment: dict, sound: Sound) -> dict | None:
     spans = phantoms(text, sound, dictation=False)
     if not spans:
         return segment
-    log.info("cut what nobody said: %s", " | ".join(repr(text[a:b].strip()) for a, b in spans))
+    # How much, never what: were a cut ever wrong, the log would hold what the person said.
+    log.info("cut what nobody said: %d piece(s), %d letters", len(spans), sum(b - a for a, b in spans))
     kept = _without(text, spans)
     if not kept:
         return None
