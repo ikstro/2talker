@@ -1,10 +1,11 @@
+import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 
 import { afterEach, expect, test } from 'vitest'
 
-import { adoptLocalFolder, adoptOldFolders, hasToMove, holdersIn, leftIn, moveDownloads, parseProcesses, partDir, removeOldUpdaterCaches, repairSpeech, whyLeft } from './oldfolder'
+import { adoptLocalFolder, adoptOldFolders, freeFolderSoon, hasToMove, holdersIn, leftIn, moveDownloads, parseProcesses, partDir, removeOldUpdaterCaches, repairSpeech, whyLeft } from './oldfolder'
 
 const made: string[] = []
 afterEach(() => made.splice(0).forEach(dir => fs.rmSync(dir, { recursive: true, force: true })))
@@ -160,6 +161,24 @@ test('the programs to stop before the move: those run from inside the old folder
   expect(processes.map(p => p.pid)).toEqual([120, 121, 122, 123, 124, 125])
   const holders = holdersIn(processes, 'C:\\Users\\you\\AppData\\Local\\Altype\\', 125)
   expect(holders.map(p => p.pid)).toEqual([120, 121])
+})
+
+test('an older engine is stopped while Krya goes on, and only a program run from inside its folder', async () => {
+  const dir = temp('krya-speech-')
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  await new Promise(resolve => child.once('spawn', resolve))
+  const inside = { pid: child.pid!, name: 'python.exe', path: path.join(dir, 'env', 'Scripts', 'python.exe') }
+  // A folder whose name only begins as this one's is another folder.
+  const beside = { pid: 2_000_000_000, name: 'python.exe', path: path.join(dir + '-other', 'python.exe') }
+  const gone = new Promise(resolve => child.once('exit', resolve))
+  let settled = false
+  const freeing = freeFolderSoon(dir, [inside, beside]).finally(() => (settled = true))
+  // Its wait is a timer, not main's thread held.
+  expect(settled).toBe(false)
+  const r = await freeing
+  await gone
+  expect(r.stopped.map(p => p.pid)).toEqual([child.pid])
+  expect(r.holding).toEqual([])
 })
 
 test('why a part stayed: the program that holds it when Krya knows it, else another program; Krya\'s own copy', () => {

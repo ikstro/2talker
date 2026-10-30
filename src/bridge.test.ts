@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { callAllowed, messageAllowed, openable, pageOf } from './bridge'
+import { callAllowed, messageAllowed, openable, pageOf, patchAllowed } from './bridge'
 
 const at = (page: string) => `file:///C:/Users/you/AppData/Local/Programs/krya/resources/app.asar/media/${page}?frame=dwm`
 
@@ -31,6 +31,22 @@ describe('a page that shows text from outside opens, removes and exports nothing
   })
 })
 
+describe('which settings a page may change', () => {
+  test('the card its reading mode, the tray panel its switches, the app window any', () => {
+    expect(patchAllowed('card', { oneAtATime: true })).toBe(true)
+    expect(patchAllowed('tray', { autoFix: false })).toBe(true)
+    expect(patchAllowed('tray', { paused: true })).toBe(true)
+    expect(patchAllowed('app', { translationLevel: 'most', keepWords: [] })).toBe(true)
+  })
+  test('nothing more, nothing else', () => {
+    expect(patchAllowed('card', { oneAtATime: true, translationLevel: 'most', model: 'most' })).toBe(false)
+    expect(patchAllowed('tray', { keepWords: [] })).toBe(false)
+    expect(patchAllowed('card', { doubleCopy: false })).toBe(false)
+    for (const page of ['dictation', 'other'] as const) expect(patchAllowed(page, { paused: true })).toBe(false)
+    expect(patchAllowed('tray', undefined)).toBe(false)
+  })
+})
+
 describe('calls with an answer', () => {
   const speech = (method: string, route: string) => ({ call: 'speech', method, route }) as const
   test('the dictation badge dictates and records a note, and nothing else', () => {
@@ -41,6 +57,9 @@ describe('calls with an answer', () => {
     expect(callAllowed('dictation', speech('GET', '/transcripts'))).toBe(false)
     expect(callAllowed('dictation', speech('GET', '/dictate/../transcripts'))).toBe(false)
     expect(callAllowed('dictation', speech('GET', '/dictateX'))).toBe(false)
+    for (const route of ['/dictate/%2e%2e/transcripts', '/dictate/.%2E/settings', '/recordings/%2E%2E/transcripts/x', '/dictate\\..\\settings']) {
+      expect(callAllowed('dictation', speech('GET', route)), route).toBe(false)
+    }
     expect(callAllowed('dictation', { call: 'exportTranscript', id: 'x', format: 'txt', name: 'x' })).toBe(false)
   })
   test('the card and the tray panel call nothing; the app window everything', () => {

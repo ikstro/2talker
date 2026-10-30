@@ -5,7 +5,7 @@
 // moves over too, whole when it can. Nothing already in the new folder is
 // replaced; a part that cannot move is used where it is (`partDir`).
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
@@ -213,20 +213,32 @@ export function holdersIn(processes: readonly RunningProcess[], dir: string, sel
 const PROCESS_SCRIPT = `[Console]::OutputEncoding = [Text.Encoding]::UTF8
 Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath } | ForEach-Object { "$($_.ProcessId)\`t$($_.Name)\`t$($_.ExecutablePath)" }`
 
+const PROCESS_ARGS = ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_SCRIPT, 'utf16le').toString('base64')]
+const PROCESS_TIMEOUT_MS = 20_000
+
 /** The programs running now, asked of Windows through PowerShell (a second or so); none when it does not answer. */
 export function runningProcesses(): RunningProcess[] {
   if (process.platform !== 'win32') return []
   try {
-    const out = execFileSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_SCRIPT, 'utf16le').toString('base64')], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 20_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
+    const out = execFileSync(POWERSHELL, PROCESS_ARGS, { encoding: 'utf8', windowsHide: true, timeout: PROCESS_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'] })
     return parseProcesses(out)
   } catch {
     return []
   }
+}
+
+/** The same, while Krya goes on (main's thread is never held while PowerShell answers). */
+export function runningProcessesSoon(): Promise<RunningProcess[]> {
+  if (process.platform !== 'win32') return Promise.resolve([])
+  return new Promise(resolve => {
+    const child = spawn(POWERSHELL, PROCESS_ARGS, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+    let out = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => (out += chunk))
+    const timer = setTimeout(() => child.kill(), PROCESS_TIMEOUT_MS)
+    child.on('error', () => (clearTimeout(timer), resolve([])))
+    child.on('exit', code => (clearTimeout(timer), resolve(code === 0 ? parseProcesses(out) : [])))
+  })
 }
 
 const alive = (pid: number): boolean => {
@@ -245,6 +257,22 @@ const alive = (pid: number): boolean => {
  * those stopped and those still running (another user's, or one that would not stop).
  */
 export function freeFolder(dir: string, processes: readonly RunningProcess[] = runningProcesses(), warn: Warn = () => undefined, waitMs = 5000): { stopped: RunningProcess[]; holding: RunningProcess[] } {
+  const holders = stopHolders(dir, processes, warn)
+  const tick = new Int32Array(new SharedArrayBuffer(4))
+  const until = Date.now() + waitMs
+  while (holders.some(p => alive(p.pid)) && Date.now() < until) Atomics.wait(tick, 0, 0, 100)
+  return settled(holders)
+}
+
+/** `freeFolder` while Krya goes on: for a folder nothing is waiting to move (an older speech engine left running). */
+export async function freeFolderSoon(dir: string, processes: readonly RunningProcess[], warn: Warn = () => undefined, waitMs = 5000): Promise<{ stopped: RunningProcess[]; holding: RunningProcess[] }> {
+  const holders = stopHolders(dir, processes, warn)
+  const until = Date.now() + waitMs
+  while (holders.some(p => alive(p.pid)) && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 100))
+  return settled(holders)
+}
+
+function stopHolders(dir: string, processes: readonly RunningProcess[], warn: Warn): RunningProcess[] {
   const holders = holdersIn(processes, dir)
   for (const p of holders) {
     try {
@@ -253,9 +281,10 @@ export function freeFolder(dir: string, processes: readonly RunningProcess[] = r
       warn(`Krya: could not stop ${p.name} (${p.pid}), run from ${dir}`, error)
     }
   }
-  const tick = new Int32Array(new SharedArrayBuffer(4))
-  const until = Date.now() + waitMs
-  while (holders.some(p => alive(p.pid)) && Date.now() < until) Atomics.wait(tick, 0, 0, 100)
+  return holders
+}
+
+function settled(holders: readonly RunningProcess[]): { stopped: RunningProcess[]; holding: RunningProcess[] } {
   const holding = holders.filter(p => alive(p.pid))
   return { stopped: holders.filter(p => !holding.includes(p)), holding }
 }

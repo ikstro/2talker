@@ -2,8 +2,9 @@
 // speech pack installed, on 127.0.0.1:<port>. Started once a part is
 // installed, started again when it falls over, stopped with Krya. One
 // already answering on the port (run by hand) is used when it proves it holds
-// the engine's key (auth.py); another program on the port is not. Every
-// feature and every other app (the Chrome extension) speaks to it over HTTP.
+// the engine's key (auth.py); another program on the port is not, and never
+// receives the key: it is sent only once the proof holds. Every feature and
+// every other app (the Chrome extension) speaks to it over HTTP.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -86,8 +87,8 @@ export type SpeechServiceOptions = {
   pycache: string
   /** The engine's key (speechToken): sent with every call, given to the engine Krya starts. */
   token: string
-  /** Stops an engine of an older Krya, left running without the key (Krya stopped without stopping it). */
-  stopStale?: () => void
+  /** Stops an engine of an older Krya, left running without the key (Krya stopped without stopping it); Krya's own starts after. */
+  stopStale?: () => Promise<void>
   env?: Record<string, string>
   change: () => void
 }
@@ -102,6 +103,10 @@ export class SpeechService {
   private stopped = true
   private seen = ''
   private staleStopped = false
+  /** The older engine being stopped: no look at the port meanwhile. */
+  private stopping: Promise<void> | undefined
+  /** The engine on the port has proved it holds the key (`check`): only then is the key sent to it. */
+  private proved = false
 
   constructor(private readonly o: SpeechServiceOptions) {}
 
@@ -109,8 +114,9 @@ export class SpeechService {
     return `http://127.0.0.1:${this.o.port}`
   }
 
-  get token(): string {
-    return this.o.token
+  /** The key, once the engine on the port has proved it holds it; before, nothing on the port gets it. */
+  get token(): string | undefined {
+    return this.proved ? this.o.token : undefined
   }
 
   async start(): Promise<void> {
@@ -136,6 +142,7 @@ export class SpeechService {
     clearInterval(this.timer)
     this.child?.kill()
     this.child = undefined
+    this.proved = false
     this.health = undefined
     this.set('off')
   }
@@ -161,6 +168,8 @@ export class SpeechService {
     child.on('exit', code => {
       log.end(`--- exit ${code}\n`)
       if (this.child === child) this.child = undefined
+      // Whatever takes the port next proves itself again before it gets the key.
+      this.proved = false
       if (this.stopped) return
       const wait = RETRIES[this.failures]
       this.failures++
@@ -174,33 +183,53 @@ export class SpeechService {
     this.child = child
   }
 
+  /** Whether the port is taken care of: Krya's engine is there (or being started), or another program holds it. */
   private async check(): Promise<boolean> {
+    if (this.stopping) return true
     try {
+      // The proof first, without the key: the key goes only to an engine that shows it has it.
       const nonce = randomBytes(16).toString('hex')
-      const response = await fetch(`${this.base}/health`, { headers: { ...this.auth, 'x-krya-nonce': nonce }, signal: AbortSignal.timeout(1500) })
-      if (!response.ok) throw new Error(String(response.status))
-      const health = (await response.json()) as SpeechHealth & { proof?: unknown }
-      if (!provesKey(this.o.token, nonce, health.proof)) {
+      const look = (await this.askHealth({ 'x-krya-nonce': nonce })) as { proof?: unknown } | null
+      if (!provesKey(this.o.token, nonce, look?.proof)) {
+        this.proved = false
         this.health = undefined
         // An engine of an older Krya (it answers as one, but holds no key), left running: it goes, once, and Krya starts its own.
-        if (!this.staleStopped && !this.child && looksLikeEngine(health) && this.o.stopStale) {
+        if (!this.staleStopped && !this.child && looksLikeEngine(look) && this.o.stopStale) {
           this.staleStopped = true
-          this.o.stopStale()
-          return false
+          this.stopping = this.o.stopStale().catch(error => console.warn('Krya: could not stop the older speech engine', error))
+          await this.stopping
+          this.stopping = undefined
+          if (!this.stopped && !this.child) this.launch()
+          return true
         }
         // Something else answers on the port without the key: not Krya's engine (another program, another account's).
         this.set('down', `Port ${this.o.port} is used by another program: quit it, then press Restart`)
         return true
       }
+      this.proved = true
+      const health = (await this.askHealth(this.auth)) as SpeechHealth & { proof?: unknown }
       delete health.proof
       this.health = health
       this.failures = 0
       this.set('ready')
       return true
     } catch {
+      this.proved = false
       if (this.state === 'ready') this.set('starting')
       return false
     }
+  }
+
+  private async askHealth(headers: Record<string, string>): Promise<unknown> {
+    const response = await fetch(`${this.base}/health`, { headers, signal: AbortSignal.timeout(1500) })
+    if (!response.ok) throw new Error(String(response.status))
+    return response.json()
+  }
+
+  /** The engine on the port has proved itself, or does now (a call right after its start comes before the next look). */
+  private async provenNow(): Promise<boolean> {
+    if (!this.proved && !this.stopped) await this.check()
+    return this.proved
   }
 
   private get auth(): Record<string, string> {
@@ -219,6 +248,7 @@ export class SpeechService {
   /** One call to the engine: JSON in and out, or bytes in (a recording's chunk, a dictated phrase). */
   async call<T = unknown>(method: string, route: string, body?: unknown): Promise<SpeechResult<T>> {
     const binary = body instanceof Uint8Array
+    if (!(await this.provenNow())) return { ok: false, status: 0, error: 'The speech engine is not running' }
     try {
       const response = await fetch(this.base + route, {
         method,
@@ -240,7 +270,7 @@ export class SpeechService {
 
   /** A file's bytes from the engine (a transcript exported), or its refusal. */
   async bytes(route: string): Promise<Buffer> {
-    if (this.state !== 'ready') throw new Error('The speech engine is not running')
+    if (this.state !== 'ready' || !(await this.provenNow())) throw new Error('The speech engine is not running')
     const response = await fetch(this.base + route, { headers: this.auth, signal: AbortSignal.timeout(60_000) })
     if (!response.ok) throw new Error((await response.text()) || response.statusText)
     return Buffer.from(await response.arrayBuffer())

@@ -8,12 +8,16 @@ on the computer can reach, and any Chrome extension too. So:
   engine's settings (in the person's own %APPDATA%, which other accounts cannot
   read) and handed to the engine Krya starts in KRYA_SPEECH_TOKEN.
 - Krya's own Chrome extension, known by its fixed id (the "key" in
-  extension/manifest.json), may only say hello and record a meeting.
+  extension/manifest.json), may only say hello and record a meeting. Its Origin
+  proves nothing to the engine (any program here can send that header), so a
+  caller by it may only start a `meet` recording, send its chunks (up to
+  `app.EXTENSION_RECORDING_MAX` a recording) and finish it.
 - Anything else gets /health's bare "ok" (the extension's first look may come
   without an Origin) and nothing more.
 
-`/health` with X-Krya-Nonce answers HMAC(key, nonce), so Krya knows the engine
-on the port is its own, not another program that took the port first.
+`/health` with X-Krya-Nonce and no key answers HMAC(key, nonce) and nothing
+else: Krya checks it before it sends the key, so another program (another
+account's) that took the port first never receives the key.
 """
 
 from __future__ import annotations
@@ -43,14 +47,15 @@ def fixed_id(version: str) -> bool:
         return False
 
 
-# What the extension does: say hello, then record a meeting chunk by chunk.
+# What the extension does (background.js, offscreen.js): say hello, then record a meeting chunk by chunk.
 _EXTENSION_ROUTES = [
     ("GET", re.compile(r"/health")),
     ("POST", re.compile(r"/recordings")),
     ("PUT", re.compile(r"/recordings/[^/]+/[^/]+/\d+")),
     ("POST", re.compile(r"/recordings/[^/]+/finish")),
-    ("DELETE", re.compile(r"/recordings/[^/]+")),
 ]
+# Krya's nonce is 32 hex digits; a longer one is not Krya's.
+NONCE_MAX = 128
 
 
 def load_token(path: Path = TOKEN_FILE) -> str:
@@ -74,8 +79,12 @@ def token_ok(given: str, token: str) -> bool:
     return bool(given) and hmac.compare_digest(given.encode(), token.encode())
 
 
+def nonce_ok(nonce: str) -> bool:
+    return 0 < len(nonce) <= NONCE_MAX
+
+
 def proof(token: str, nonce: str) -> str:
-    """What only the engine holding the key can answer to a nonce."""
+    """What only the engine holding the key can answer to a nonce (it tells nothing of the key)."""
     return hmac.new(token.encode(), nonce.encode(), hashlib.sha256).hexdigest()
 
 

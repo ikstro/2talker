@@ -39,7 +39,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, session, shell, Tray, type Rectangle } from 'electron'
 
 import { backupSummary, makeBackup, readBackup, type BackupRead } from './backup'
-import { callAllowed, messageAllowed, openable, pageOf } from './bridge'
+import { callAllowed, messageAllowed, openable, pageOf, patchAllowed } from './bridge'
 import { createChecker, type Checker } from './checker'
 import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
@@ -2488,7 +2488,8 @@ function setUpSpeechEngine(): void {
   // main adds the engine's key to that window's requests to the engine, and to no other window's.
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: [`http://127.0.0.1:${speechPort}/*`] }, (details, done) => {
     const fromApp = !!appWin && !appWin.isDestroyed() && details.webContentsId === appWin.webContents.id
-    done({ requestHeaders: fromApp ? { ...details.requestHeaders, 'X-Krya-Token': speech.token } : details.requestHeaders })
+    const key = fromApp ? speech.token : undefined
+    done({ requestHeaders: key ? { ...details.requestHeaders, 'X-Krya-Token': key } : details.requestHeaders })
   })
   speech.start()
   // Windows is asked about the cards and the battery once Krya is up: it takes a second or two.
@@ -2660,7 +2661,7 @@ function start(): void {
   // Each page only what it does (bridge.ts): a page that shows text from outside never opens, removes or exports.
   ipcMain.on('to-host', (event, message: ToHost) => {
     const page = pageOf(event.sender.getURL())
-    if (messageAllowed(page, message?.type)) onMessage(message)
+    if (messageAllowed(page, message?.type) && (message.type !== 'saveSettings' || patchAllowed(page, message.patch))) onMessage(message)
     else log(`bridge: ${page} may not send ${String(message?.type)}`)
   })
   ipcMain.handle('host-call', (event, request: HostCall) => {

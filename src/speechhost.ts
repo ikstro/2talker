@@ -13,7 +13,7 @@ import * as path from 'node:path'
 import { driveOf, fingerprint, freeMb, loadProfile, probeDevice, quickProfile, saveProfile, type DeviceProfile } from './device'
 import { langCode } from './languages'
 import { log } from './log'
-import { freeFolder, runningProcesses } from './oldfolder'
+import { freeFolderSoon, runningProcessesSoon } from './oldfolder'
 import type { SpeechView } from './protocol'
 import type { Settings } from './settings'
 import { DOWNLOAD_MB, hasNvidia, INSTALLED_MB, SpeechPack, type SpeechPart } from './speechpack'
@@ -89,8 +89,9 @@ export class SpeechHost {
       // Beside the engine's settings (its APP_DIR), where an engine run by hand finds it too.
       token: speechToken(path.join(o.testHome ?? o.userDir, 'speech-token')),
       // Its Python, run from the engine's own folder (the venv's launcher and the interpreter it starts); never uv.
-      stopStale: () => {
-        const { stopped, holding } = freeFolder(o.root, runningProcesses().filter(p => /^pythonw?\.exe$/i.test(p.name)))
+      // Seconds of PowerShell and of waiting, off main's thread: the engine's start waits for it, nothing else does.
+      stopStale: async () => {
+        const { stopped, holding } = await freeFolderSoon(o.root, (await runningProcessesSoon()).filter(p => /^pythonw?\.exe$/i.test(p.name)))
         log(`speech: an older engine without the key stopped (${stopped.length})${holding.length ? `, ${holding.length} would not stop` : ''}`)
       },
       change: () => this.changed(),
@@ -364,8 +365,8 @@ export class SpeechHost {
     return this.service.bytes(route)
   }
 
-  /** The engine's key, for the requests a page makes itself (a transcript's sound in an <audio>): main adds it. */
-  get token(): string {
+  /** The engine's key, for the requests a page makes itself (a transcript's sound in an <audio>): main adds it, once the engine has proved itself. */
+  get token(): string | undefined {
     return this.service.token
   }
 

@@ -23,7 +23,7 @@ What other apps may use, and keep using:
   POST /recordings ...                a recording that arrives in chunks (the extension)
   GET  /health                        what is installed (parts), loaded and busy, and the Chrome
                                       extension last seen ({id, version, seen} or null); without
-                                      the key only {ok}; with X-Krya-Nonce also {proof}
+                                      the key only {ok}, or with X-Krya-Nonce only {proof}
   GET  /transcripts/<id>/file?format= the transcript as txt, md, srt, vtt, docx or json (bytes)
 
 Krya alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
@@ -157,11 +157,17 @@ async def guard(request: Request, call_next):
         # A web page or another extension: nothing. Krya's extension: only what it does.
         if origin != auth.EXTENSION_ORIGIN or not auth.extension_may(method, path):
             return JSONResponse({"detail": "forbidden"}, status_code=403)
+        # Any program here can send that Origin: the recording routes hold such a caller to a meeting (`by_extension`).
+        request.state.extension = True
     elif not auth.token_ok(request.headers.get("x-krya-token", ""), TOKEN):
         # The extension's look at /health may come without an Origin: it learns the engine is up, nothing else.
         if method == "GET" and path == "/health":
             if request.headers.get("x-krya-extension", "").strip():
                 note_extension(origin, request.headers["x-krya-extension"])
+            nonce = request.headers.get("x-krya-nonce", "")
+            # Krya's first look, before it sends the key: the proof alone, so a program that took the port never gets it.
+            if auth.nonce_ok(nonce):
+                return JSONResponse({"proof": auth.proof(TOKEN, nonce)})
             return JSONResponse({"ok": True})
         return JSONResponse({"detail": "the engine's key is needed"}, status_code=401)
     # The extension of Altype's days (up to 0.2.1) sent X-Altype-Extension; it says hello until Chrome reloads it.
@@ -189,8 +195,8 @@ def health(request: Request):
         # Krya's extension needs to know only that the engine is up.
         return {"ok": True, "version": VERSION}
     nonce = request.headers.get("x-krya-nonce", "")
-    # The proof that this engine holds the key (auth.py), so Krya knows the engine on the port is its own.
-    return {**health_view(), **({"proof": auth.proof(TOKEN, nonce)} if nonce else {})}
+    # The proof that this engine holds the key (auth.py), as without it; Krya asks it without the key first (guard).
+    return {**health_view(), **({"proof": auth.proof(TOKEN, nonce)} if auth.nonce_ok(nonce) else {})}
 
 
 def health_view() -> dict:
@@ -621,13 +627,51 @@ def from_file(body: dict = Body(...)):
     return {"id": id}
 
 
+# A caller by the extension's Origin (which any program here can send, auth.py) records a meeting and no more:
+# the extension's webm is 64 kbit/s a track, some 58 MB an hour for the tab and the microphone, so 1 GB is a
+# meeting of 18 hours, and a chunk (10 s, about 80 KB a track) is never near 16 MB. Above them the disk is not filled.
+EXTENSION_RECORDING_MAX = 1 << 30
+EXTENSION_CHUNK_MAX = 16 << 20
+# Bytes received for each recording by the extension's Origin, counted from its folder after a restart.
+_received: dict[str, int] = {}
+
+
+def by_extension(request: Request) -> bool:
+    return getattr(request.state, "extension", False)
+
+
+def extension_meeting(request: Request, row: dict | None) -> None:
+    """A caller by the extension's Origin touches only a meeting's recording, never Krya's microphone or a note."""
+    if by_extension(request) and row is not None and row["source"] != "meet":
+        raise HTTPException(403, "forbidden")
+
+
+def received(store: Store, id: str) -> int:
+    if id not in _received:
+        _received[id] = sum(f.stat().st_size for f in (store.folder(id) / "incoming").glob("*.part"))
+    return _received[id]
+
+
+async def body_within(request: Request, limit: int) -> bytes:
+    """The request's body, read no further than `limit` bytes (a longer one is refused, never held whole)."""
+    data = bytearray()
+    async for piece in request.stream():
+        data += piece
+        if len(data) > limit:
+            raise HTTPException(413, "The recording is too large")
+    return bytes(data)
+
+
 @app.post("/recordings")
-def start_recording(body: dict = Body(...)):
+def start_recording(request: Request, body: dict = Body(...)):
     """A recording that arrives in chunks: {source, title?, tracks: {tab|mic|main: {startedAt}}}."""
     source = body.get("source")
     tracks = body.get("tracks") or {}
     if source not in ("mic", "meet", "note") or not tracks or any(t not in TRACKS for t in tracks):
         raise HTTPException(400, "source and tracks are needed")
+    if by_extension(request) and source != "meet":
+        # The extension starts only meetings (offscreen.js); a note or the microphone is Krya's, with the key.
+        raise HTTPException(403, "forbidden")
     title = (body.get("title") or "").strip() or {"mic": "Microphone recording", "meet": "Meeting", "note": "Note"}[source]
     store = state.get_store()
     job = {"kind": source, "tracks": {t: {"startedAt": float(v.get("startedAt", 0))} for t, v in tracks.items()},
@@ -645,16 +689,25 @@ async def chunk(id: str, track: str, seq: int, request: Request):
         raise HTTPException(409, "The recording has ended")
     if track not in row["job"].get("tracks", {}) or not 0 <= seq < 1_000_000:
         raise HTTPException(400, "No such track")
-    data = await request.body()
+    extension_meeting(request, row)
     part = store.folder(id) / "incoming" / f"{track}-{seq:06d}.part"
+    if by_extension(request):
+        # A chunk sent again replaces its first copy, so that one's bytes count no more.
+        before = part.stat().st_size if part.exists() else 0
+        data = await body_within(request, min(EXTENSION_CHUNK_MAX, EXTENSION_RECORDING_MAX - received(store, id) + before))
+        _received[id] += len(data) - before
+    else:
+        data = await request.body()
     part.write_bytes(data)
     store.update(id, touched=now_iso())
     return Response(status_code=204)
 
 
 @app.post("/recordings/{id}/finish")
-def finish(id: str, body: dict = Body(default={})):
+def finish(id: str, request: Request, body: dict = Body(default={})):
     store = state.get_store()
+    extension_meeting(request, store.row(id))
+    _received.pop(id, None)
     if not finish_recording(store, id, body):
         raise HTTPException(409, "Nothing to transcribe")
     worker.submit(id)

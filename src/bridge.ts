@@ -61,10 +61,33 @@ export function messageAllowed(page: Page, type: string): boolean {
   return page === 'app' || !APP_ONLY.has(type as ToHost['type'])
 }
 
+/** The settings a page other than the app window may change: the card its reading mode, the tray panel its switches. */
+const PAGE_SETTINGS: Partial<Record<Page, ReadonlySet<string>>> = {
+  card: new Set(['oneAtATime']),
+  tray: new Set(['autoFix', 'switchOn', 'layoutBadge', 'trayLayout', 'doubleCopy', 'paused']),
+}
+
+/** Whether `page` may save this settings patch: the app window any, the card and the tray panel only their own. */
+export function patchAllowed(page: Page, patch: unknown): boolean {
+  if (page === 'app') return true
+  const own = PAGE_SETTINGS[page]
+  return !!own && !!patch && typeof patch === 'object' && Object.keys(patch).every(key => own.has(key))
+}
+
+/** The path a route reaches, as fetch resolves it from the engine's address (%2e%2e and \ are .. and / there). */
+function reached(route: string): string {
+  try {
+    return new URL(`http://127.0.0.1${route}`).pathname
+  } catch {
+    return ''
+  }
+}
+
 /** The dictation badge dictates and records a note; the app window does everything; the others call nothing. */
 export function callAllowed(page: Page, request: HostCall): boolean {
   if (page === 'app') return true
-  if (page === 'dictation') return request.call === 'speech' && /^\/(dictate|recordings)([/?]|$)/.test(request.route) && !request.route.includes('..')
+  const dictating = /^\/(dictate|recordings)([/?]|$)/
+  if (page === 'dictation') return request.call === 'speech' && dictating.test(request.route) && dictating.test(reached(request.route))
   return false
 }
 

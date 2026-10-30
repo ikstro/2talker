@@ -151,7 +151,6 @@ export type Settings = {
   speechTestDeclinedAt: number
   /** Start Krya when Windows starts. */
   startWithWindows: boolean
-  /** Updates include the test versions published before a release. */
   /** The offer of the natural voice was closed. */
   naturalDismissed: boolean
   /** The Home's opening moment (one line through fix, translate, listen) has played once; Replay plays it again. */

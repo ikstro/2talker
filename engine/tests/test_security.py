@@ -51,8 +51,8 @@ class Answer:
 class Client:
     """Calls the app as the server would: one ASGI request, its answer gathered."""
 
-    def request(self, method: str, route: str, headers: dict | None = None, json: dict | None = None, params: dict | None = None) -> Answer:
-        body = b"" if json is None else __import__("json").dumps(json).encode()
+    def request(self, method: str, route: str, headers: dict | None = None, json: dict | None = None, params: dict | None = None, content: bytes | None = None) -> Answer:
+        body = content if content is not None else b"" if json is None else __import__("json").dumps(json).encode()
         raw = {"host": "127.0.0.1:8765", **({"content-type": "application/json"} if json is not None else {}), **(headers or {})}
         scope = {
             "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": method, "scheme": "http",
@@ -83,6 +83,9 @@ class Client:
     def options(self, route, **kw):
         return self.request("OPTIONS", route, **kw)
 
+    def put(self, route, **kw):
+        return self.request("PUT", route, **kw)
+
 
 @pytest.mark.parametrize("route", ["/settings", "/transcripts"])
 def test_without_the_key_nothing_is_served(client, route):
@@ -101,6 +104,16 @@ def test_the_engine_proves_it_holds_the_key(client):
     assert r["proof"] == auth.proof(KEY["x-krya-token"], "n1") and "dataDir" in r
 
 
+def test_a_nonce_without_the_key_gets_the_proof_and_nothing_else(client):
+    # Krya's first look: whatever holds the port learns no key from it, and the engine tells nothing but the proof.
+    r = client.get("/health", headers={"x-krya-nonce": "n1"})
+    assert r.status_code == 200 and r.json() == {"proof": auth.proof(KEY["x-krya-token"], "n1")}
+    assert client.get("/health", headers={"x-krya-nonce": "n" * (auth.NONCE_MAX + 1)}).json() == {"ok": True}
+    # The extension's ping without an Origin still says hello.
+    assert client.get("/health", headers={"x-krya-extension": "0.4.0"}).json() == {"ok": True}
+    assert engine.extension["version"] == "0.4.0"
+
+
 def test_a_web_page_and_another_extension_are_refused_everywhere(client):
     for who in (PAGE, OTHER, {"origin": "null"}):
         for method, route in (("GET", "/health"), ("GET", "/transcripts"), ("PUT", "/settings"), ("POST", "/recordings")):
@@ -113,6 +126,53 @@ def test_krya_s_extension_records_and_says_hello_but_reads_nothing(client):
     assert client.post("/recordings", headers=OURS, json={"source": "meet", "title": "x", "tracks": {"tab": {"startedAt": 0}}}).status_code == 200
     for method, route in (("GET", "/transcripts"), ("GET", f"/transcripts/{ID}/text"), ("PUT", "/settings"), ("GET", "/settings")):
         assert client.request(method, route, headers=OURS).status_code == 403, (method, route)
+
+
+def meeting(client, headers=OURS) -> str:
+    r = client.post("/recordings", headers=headers, json={"source": "meet", "title": "x", "tracks": {"tab": {"startedAt": 0}}})
+    assert r.status_code == 200
+    return r.json()["id"]
+
+
+@pytest.mark.parametrize("source", ["note", "mic"])
+def test_the_extension_s_origin_starts_no_note_and_no_microphone(client, source):
+    # Any program here can send the extension's Origin; it records a meeting and nothing of Krya's.
+    tracks = {"main" if source == "note" else "mic": {"startedAt": 0}}
+    assert client.post("/recordings", headers=OURS, json={"source": source, "tracks": tracks}).status_code == 403
+    assert client.post("/recordings", headers=KEY, json={"source": source, "tracks": tracks}).status_code == 200
+
+
+def test_the_extension_s_origin_touches_no_recording_of_krya_s(client):
+    id = client.post("/recordings", headers=KEY, json={"source": "mic", "tracks": {"mic": {"startedAt": 0}}}).json()["id"]
+    assert client.put(f"/recordings/{id}/mic/0", headers=OURS, content=b"x").status_code == 403
+    assert client.post(f"/recordings/{id}/finish", headers=OURS, json={}).status_code == 403
+    assert client.request("DELETE", f"/recordings/{id}", headers=OURS).status_code == 403
+    assert engine.state.get_store().row(id)["status"] == "recording"
+
+
+def test_a_meeting_by_the_extension_s_origin_fills_no_more_than_its_cap(client, monkeypatch):
+    monkeypatch.setattr(engine, "EXTENSION_RECORDING_MAX", 100)
+    monkeypatch.setattr(engine, "EXTENSION_CHUNK_MAX", 60)
+    monkeypatch.setattr(engine, "_received", {})
+    id = meeting(client)
+    assert client.put(f"/recordings/{id}/tab/0", headers=OURS, content=b"a" * 61).status_code == 413
+    assert client.put(f"/recordings/{id}/tab/0", headers=OURS, content=b"a" * 60).status_code == 204
+    # The same chunk sent again replaces the first: its bytes are not counted twice.
+    assert client.put(f"/recordings/{id}/tab/0", headers=OURS, content=b"a" * 60).status_code == 204
+    assert client.put(f"/recordings/{id}/tab/1", headers=OURS, content=b"a" * 41).status_code == 413
+    assert client.put(f"/recordings/{id}/tab/1", headers=OURS, content=b"a" * 40).status_code == 204
+    assert client.put(f"/recordings/{id}/tab/2", headers=OURS, content=b"a").status_code == 413
+    incoming = engine.state.get_store().folder(id) / "incoming"
+    assert sum(f.stat().st_size for f in incoming.iterdir()) == 100
+    # After a restart the count is taken from the folder.
+    engine._received.clear()
+    assert client.put(f"/recordings/{id}/tab/2", headers=OURS, content=b"a").status_code == 413
+
+
+def test_the_cap_holds_only_the_extension_s_origin(client, monkeypatch):
+    monkeypatch.setattr(engine, "EXTENSION_RECORDING_MAX", 10)
+    id = meeting(client, KEY)
+    assert client.put(f"/recordings/{id}/tab/0", headers=KEY, content=b"a" * 50).status_code == 204
 
 
 def test_another_extension_gets_no_cors_answer(client):
