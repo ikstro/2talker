@@ -18,11 +18,13 @@ const PostThreadMessageW = user32.func('bool __stdcall PostThreadMessageW(uint32
 const WM_APP_FIELD = 0x8002
 
 port.on('message', () => {
-  let secret = false
+  // null: the field would not say (no element with the keyboard, an error). Fixing goes on as it would
+  // without the question; nothing typed there is learned (typist.ts FieldAnswer).
+  let secret: boolean | null = null
   try {
-    secret = focusedIsPassword() ?? false
+    secret = focusedIsPassword() ?? null
   } catch {
-    // No answer is no password: fixing goes on as it would without the question.
+    secret = null
   }
   port.postMessage({ secret })
   PostThreadMessageW(tid, WM_APP_FIELD, 0, 0)

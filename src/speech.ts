@@ -6,6 +6,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 
 import type { HostVoice } from './protocol'
+import { POWERSHELL } from './system32'
 
 const SAPI_HELPER = `
 using System;
@@ -63,7 +64,7 @@ export class Speaker {
     let child: ChildProcess
     try {
       if (process.platform === 'win32') {
-        child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', SAPI_SCRIPT], {
+        child = spawn(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', SAPI_SCRIPT], {
           stdio: ['pipe', 'pipe', 'ignore'],
           env: {
             ...process.env,
@@ -140,7 +141,7 @@ function run(command: string, args: string[]): Promise<string> {
 
 export async function listHostVoices(): Promise<HostVoice[]> {
   if (process.platform === 'win32') {
-    const out = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', SAPI_LIST])
+    const out = await run(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', SAPI_LIST])
     return out
       .split(/\r?\n/)
       .map(line => line.trim().split('|'))

@@ -188,6 +188,16 @@ def clean_vocabulary(raw) -> list[dict]:
     return out
 
 
+def clean_inbox(raw) -> str:
+    """The notes' folder inside the knowledge base: a relative path (Inbox, Notes/Krya), never out of it."""
+    if not isinstance(raw, str):
+        return "Inbox"
+    parts = [p.strip() for p in raw.replace("\\", "/").split("/")]
+    if raw.strip()[:1] in ("/", "\\") or any(":" in p or p == ".." for p in parts):
+        return "Inbox"
+    return "/".join(p for p in parts if p and p != ".")
+
+
 class Settings:
     def __init__(self, file: Path = SETTINGS_FILE):
         self.file = file
@@ -226,6 +236,7 @@ class Settings:
             self._values["language"] = "auto"
         self._values["plan"] = clean_plan(self._values["plan"])
         self._values["vocabulary"] = clean_vocabulary(self._values["vocabulary"])
+        self._values["kbInbox"] = clean_inbox(self._values["kbInbox"])
         if not isinstance(self._values["bench"].get("runs"), dict):
             self._values["bench"] = {}
 

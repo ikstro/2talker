@@ -152,7 +152,6 @@ export type Settings = {
   /** Start Krya when Windows starts. */
   startWithWindows: boolean
   /** Updates include the test versions published before a release. */
-  betaUpdates: boolean
   /** The offer of the natural voice was closed. */
   naturalDismissed: boolean
   /** The Home's opening moment (one line through fix, translate, listen) has played once; Replay plays it again. */
@@ -225,7 +224,6 @@ export const DEFAULTS: Settings = {
   speechTestDeclinedKey: '',
   speechTestDeclinedAt: 0,
   startWithWindows: true,
-  betaUpdates: false,
   naturalDismissed: false,
   introSeen: false,
   paused: false,
@@ -386,7 +384,6 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     speechTestDeclinedKey: key(r.speechTestDeclinedKey, DEFAULTS.speechTestDeclinedKey),
     speechTestDeclinedAt: typeof r.speechTestDeclinedAt === 'number' && Number.isFinite(r.speechTestDeclinedAt) ? r.speechTestDeclinedAt : 0,
     startWithWindows: flag(r.startWithWindows, DEFAULTS.startWithWindows),
-    betaUpdates: flag(r.betaUpdates, DEFAULTS.betaUpdates),
     naturalDismissed: flag(r.naturalDismissed, DEFAULTS.naturalDismissed),
     introSeen: flag(r.introSeen, DEFAULTS.introSeen),
     paused: flag(r.paused, DEFAULTS.paused),

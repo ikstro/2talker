@@ -26,11 +26,11 @@ describe('lostWords', () => {
 
 describe('createChecker', () => {
   function setup(answers: Record<string, { corrected: string; note: string } | string>) {
-    const asked: { system: string; text: string; body: Record<string, unknown> }[] = []
+    const asked: { system: string; text: string; body: Record<string, unknown>; auth: string | null }[] = []
     const post = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as { messages: { content: string }[] }
       const [system, user] = body.messages
-      asked.push({ system: system!.content, text: user!.content, body })
+      asked.push({ system: system!.content, text: user!.content, body, auth: new Headers(init.headers).get('authorization') })
       const answer = answers[user!.content] ?? { corrected: user!.content, note: '' }
       return new Response(JSON.stringify({ choices: [{ message: { content: typeof answer === 'string' ? answer : JSON.stringify(answer) } }] }), { status: 200 })
     })
@@ -38,7 +38,7 @@ describe('createChecker', () => {
       state: () => ({ status: 'ready', progress: 1, size: 5155 }),
       prepare: vi.fn(async () => undefined),
       target: () => ({ exe: 'llama-server.exe', model: 'check.gguf' }),
-      server: { run: async (_t: unknown, job: (base: string, loaded: boolean) => Promise<unknown>) => job('http://127.0.0.1:9001', true) },
+      server: { apiKey: 'test-key', run: async (_t: unknown, job: (base: string, loaded: boolean) => Promise<unknown>) => job('http://127.0.0.1:9001', true) },
     } as unknown as LlmFiles
     const timed: { model: string; text: number; start?: number }[] = []
     const checker = createChecker({ files, model: () => 'most', fetch: post as unknown as typeof fetch, onTimed: (model, t) => timed.push({ model, ...t }) })
@@ -51,6 +51,8 @@ describe('createChecker', () => {
     })
     expect(await checker.check('  Think abot this idea.\n', 'ru')).toEqual({ corrected: '  Think about this idea.\n', note: 'abot → about: опечатка.' })
     expect(asked[0]?.system).toContain('whose own language is Russian')
+    // The server answers only requests with its key (llama.ts apiKey).
+    expect(asked[0]?.auth).toBe('Bearer test-key')
     expect(asked[0]?.body).toMatchObject({ temperature: 0, chat_template_kwargs: { enable_thinking: false }, response_format: { type: 'json_schema' } })
     expect(timed[0]).toMatchObject({ model: 'most' })
     expect(timed[0]?.start).toBeGreaterThanOrEqual(0)

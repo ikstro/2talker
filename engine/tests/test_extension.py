@@ -9,7 +9,8 @@ from starlette.responses import Response
 
 import app as engine
 
-ORIGIN = "chrome-extension://" + "a" * 32
+ORIGIN = engine.auth.EXTENSION_ORIGIN
+ID = engine.auth.EXTENSION_ID
 
 
 @pytest.fixture(autouse=True)
@@ -31,8 +32,8 @@ def call(headers: dict) -> int:
 
 def test_the_header_with_an_extension_origin_is_recorded():
     assert call({"origin": ORIGIN, "x-krya-extension": "0.2.0"}) == 200
-    assert engine.extension["id"] == "a" * 32 and engine.extension["version"] == "0.2.0"
-    assert engine.health()["extension"] == engine.extension
+    assert engine.extension["id"] == ID and engine.extension["version"] == "0.2.0"
+    assert engine.health_view()["extension"] == engine.extension
     assert json.loads(engine.EXTENSION_FILE.read_text("utf-8"))["version"] == "0.2.0"
 
 
@@ -45,7 +46,7 @@ def test_the_old_name_s_header_is_recorded_too():
 def test_without_the_header_nothing_is_recorded():
     assert call({"origin": ORIGIN}) == 200
     assert engine.extension is None and not engine.EXTENSION_FILE.exists()
-    assert engine.health()["extension"] is None
+    assert engine.health_view()["extension"] is None
 
 
 def test_a_later_ping_refreshes_the_time_but_rewrites_the_file_only_for_a_new_version(monkeypatch):
@@ -65,5 +66,10 @@ def test_a_refused_request_records_nothing():
 
 
 def test_the_last_sighting_is_read_at_start():
-    engine.EXTENSION_FILE.write_text(json.dumps({"id": "b" * 32, "version": "0.2.0", "seen": 5.0}), "utf-8")
-    assert engine.load_extension() == {"id": "b" * 32, "version": "0.2.0", "seen": 5.0}
+    engine.EXTENSION_FILE.write_text(json.dumps({"id": ID, "version": "0.2.0", "seen": 5.0}), "utf-8")
+    assert engine.load_extension() == {"id": ID, "version": "0.2.0", "seen": 5.0}
+
+
+def test_an_older_copy_with_the_id_of_its_folder_is_not_installed():
+    engine.EXTENSION_FILE.write_text(json.dumps({"id": "b" * 32, "version": "0.3.0", "seen": 5.0}), "utf-8")
+    assert engine.load_extension() is None

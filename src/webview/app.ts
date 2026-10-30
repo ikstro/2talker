@@ -15,7 +15,7 @@
 
 import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
-import type { AppTab, AppView, DiffPart, KeyboardLayout, MistakeEntry, SavedWord, Settings, StorageId, StoragePart, StorageView, ToView, TutorHost, UpdateStatus } from '../protocol'
+import type { AppTab, AppView, DiffPart, KeyboardLayout, MistakeEntry, SavedWord, Settings, StorageId, StoragePart, StorageView, ToView, TutorHost } from '../protocol'
 import { LANGUAGES } from '../languages'
 import { translationAdvice, type LevelFit } from '../hardware'
 import { DEFAULTS, keptForm, LEVEL_NAMES, myLanguages, RATES, type AppRule, type LlmModel, type ThemeMode, type TranslationLevel } from '../settings'
@@ -40,6 +40,8 @@ declare global {
 }
 
 const save = (patch: Partial<Settings>) => post({ type: 'saveSettings', patch })
+/** Where new versions are: downloaded by hand, nothing installs itself (main.ts LINKS has it). */
+const RELEASES = 'https://github.com/ikstro/krya/releases'
 
 type Action = 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
 type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'engine' | 'storage' | 'computer' | 'about' | 'search'
@@ -2480,28 +2482,6 @@ function naturalRow(v: AppView): HTMLElement | null {
   }
 }
 
-/** What the updater is doing, said in a few words. */
-function updateText(u: UpdateStatus): string {
-  switch (u.status) {
-    case 'dev':
-      return 'a run from source does not update'
-    case 'checking':
-      return 'checking…'
-    case 'none':
-      return 'this is the latest version'
-    case 'downloading':
-      return 'downloading an update…'
-    case 'ready':
-      return `version ${u.version} is ready: it installs when Krya quits`
-    case 'unavailable':
-      return u.message
-    case 'failed':
-      return `could not check: ${u.message}`
-    default:
-      return ''
-  }
-}
-
 /** Remove was tapped once: it asks. */
 let removingSpeech = false
 
@@ -2749,7 +2729,6 @@ function voiceRows(v: AppView): (HTMLElement | null)[] {
 
 function settingsPage(v: AppView): HTMLElement[] {
   const s = v.settings
-  const u = v.update
   return [
     grp('Language'),
     card(
@@ -2783,13 +2762,13 @@ function settingsPage(v: AppView): HTMLElement[] {
     keyRow('pauseKey', 'Pause or resume with a key', 'works while paused too', !v.keysOk.pause, 'pause'),
     keyRow('windowKey', 'Open this window with a key', 'from any program', !v.keysOk.window, 'house'),
     card('rotate-ccw', 'Reset all keys', ['every shortcut back to how it came; ↺ by a key brings back just that one'], linkBtn('Reset keys', () => post({ type: 'resetKeys' }))),
+    // New versions are downloaded by hand from GitHub (the owner, 2026-10-30): nothing installs itself.
     card(
       'rotate-cw',
       `Version ${v.version}${v.dev ? ' dev' : ''}`,
-      [v.dev ? `built ${v.build}; ${updateText(u)}` : u.status === 'failed' ? bad(updateText(u)) : updateText(u)],
-      linkBtn('Check for updates', () => post({ type: 'checkUpdates' }), u.status === 'dev' || u.status === 'checking' || u.status === 'downloading'),
+      [v.dev ? `built ${v.build}` : 'new versions: download the installer from GitHub and run it; your settings and downloads stay'],
+      linkBtn('New versions', () => post({ type: 'openLink', url: RELEASES })),
     ),
-    toggleCard('sparkles', 'Get test versions', s.betaUpdates, betaUpdates => save({ betaUpdates }), 'try new features before they are released'),
     grp('Backup'),
     card(
       'file-text',
@@ -2805,7 +2784,6 @@ function settingsPage(v: AppView): HTMLElement[] {
 // ---------------------------------------------------------------- about
 
 function aboutPage(v: AppView): HTMLElement[] {
-  const update = updateText(v.update)
   const fact = (term: string, ...detail: (HTMLElement | string)[]) => [el('dt', {}, term), el('dd', {}, ...detail)]
   return [
     el(
@@ -2814,7 +2792,7 @@ function aboutPage(v: AppView): HTMLElement[] {
       el('div', { class: 'mk' }, tile(88), logo()),
       el('p', { class: 'tag' }, 'Talk to the duck.'),
       // A run from source says when it was built, so it is never taken for the last release.
-      el('p', { class: 'ver' }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : update ? ` · ${update}` : ''} · free and open source, MIT`),
+      el('p', { class: 'ver' }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : ''} · free and open source, MIT`),
       el(
         'dl',
         { class: 'facts' },
@@ -2825,10 +2803,10 @@ function aboutPage(v: AppView): HTMLElement[] {
           el('span', { class: 'q' }, '— your text is never sent anywhere'),
         ),
         ...fact('made with', 'Inter and JetBrains Mono (SIL OFL) · Electron · VS Code icons'),
-        ...fact('goes online only for', `updates, and a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
+        ...fact('goes online only for', `a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
         ...fact(
           'links',
-          link('https://github.com/ikstro/krya/releases', 'Releases and what changed'),
+          link(RELEASES, 'New versions and what changed'),
           ' · ',
           link('https://github.com/ikstro/krya', 'Source on GitHub'),
           ' · ',

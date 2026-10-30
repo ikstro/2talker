@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 
 import type { OcrReading } from './ocrpick'
 import type { OcrLine } from './ocrtext'
+import { POWERSHELL } from './system32'
 
 const SCRIPT = `
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -80,7 +81,7 @@ function linesOf(raw: unknown): OcrLine[] {
 /** Reads the PNG at `image` with every engine installed among `languages` (codes such as "ru", "en"). */
 export function recognize(image: string, languages: readonly string[]): Promise<OcrResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')], {
+    const child = spawn(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: { ...process.env, TUTOR_OCR_IMAGE: image, TUTOR_OCR_LANGS: languages.join(',') },

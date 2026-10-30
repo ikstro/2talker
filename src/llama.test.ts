@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { LlamaServer, serverArgs } from './llama'
+import { LlamaServer, serverArgs, serverEnv } from './llama'
 
 type Fake = ChildProcess & { killed: boolean; alive: boolean }
 
@@ -64,7 +64,7 @@ describe('LlamaServer', () => {
   }
 
   it('asks for four sentences at once, every layer on the card for CUDA, the processor only when told', () => {
-    expect(serverArgs(t('m.gguf'), 9001, false)).toEqual(['-m', 'm.gguf', '--host', '127.0.0.1', '--port', '9001', '-c', '8192', '-np', '4', '--kv-unified', '--no-webui'])
+    expect(serverArgs(t('m.gguf'), 9001, false)).toEqual(['-m', 'm.gguf', '--host', '127.0.0.1', '--port', '9001', '-c', '8192', '-np', '4', '--kv-unified', '--no-webui', '--no-slots'])
     expect(serverArgs({ ...t('m.gguf'), allLayers: true }, 9001, false).slice(-2)).toEqual(['-ngl', 'all'])
     expect(serverArgs({ ...t('m.gguf'), allLayers: true }, 9001, true).slice(-2)).toEqual(['--device', 'none'])
   })
@@ -140,4 +140,13 @@ describe('LlamaServer', () => {
     expect(started).toHaveLength(2)
     server.dispose()
   })
+})
+
+it('the server answers only Krya: a key of its own, given in the environment, and none of the person\'s LLAMA_* settings', () => {
+  const env = serverEnv({ PATH: 'C:\\Windows', LLAMA_ARG_TOOLS: 'all', LLAMA_API_KEY: 'theirs', llama_arg_host: '0.0.0.0' }, 'k1')
+  expect(env).toEqual({ PATH: 'C:\\Windows', LLAMA_API_KEY: 'k1' })
+  const server = new LlamaServer({ log: 'x.log' })
+  expect(server.apiKey).toMatch(/^[0-9a-f]{64}$/)
+  expect(new LlamaServer({ log: 'x.log' }).apiKey).not.toBe(server.apiKey)
+  expect(serverArgs({ exe: 'llama-server.exe', model: 'm.gguf' }, 9001, false).join(' ')).not.toContain('k1')
 })

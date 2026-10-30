@@ -31,7 +31,7 @@ function buildStamp() {
 const main = {
   ...node,
   entryPoints: ['src/main.ts'],
-  external: ['electron', 'koffi', 'electron-updater'],
+  external: ['electron', 'koffi'],
   outfile: 'dist/main.js',
   define: { KRYA_BUILD: JSON.stringify(buildStamp()) },
 }

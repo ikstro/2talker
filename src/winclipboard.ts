@@ -24,6 +24,7 @@ const GetOpenClipboardWindow = user32.func('intptr_t __stdcall GetOpenClipboardW
 const GetForegroundWindow = user32.func('intptr_t __stdcall GetForegroundWindow()')
 const GetWindowThreadProcessId = user32.func('uint32_t __stdcall GetWindowThreadProcessId(intptr_t hwnd, _Out_ uint32_t *pid)')
 const RegisterClipboardFormatW = user32.func('uint32_t __stdcall RegisterClipboardFormatW(str16 name)')
+const IsClipboardFormatAvailable = user32.func('bool __stdcall IsClipboardFormatAvailable(uint32_t format)')
 const GlobalAlloc = kernel32.func('intptr_t __stdcall GlobalAlloc(uint32_t flags, uintptr_t bytes)')
 const GlobalLock = kernel32.func('intptr_t __stdcall GlobalLock(intptr_t memory)')
 const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(intptr_t memory)')
@@ -57,6 +58,16 @@ function historyMarks(): { format: number; data: Buffer }[] {
     ]
   }
   return marks
+}
+
+let privateFormats: number[] | undefined
+/**
+ * The clipboard holds what its program asked others not to watch: a password manager's copy (KeePass,
+ * 1Password and others put these marks on a password). Krya then neither shows nor reads it.
+ */
+export function privateCopy(): boolean {
+  privateFormats ??= ['ExcludeClipboardContentFromMonitorProcessing', 'Clipboard Viewer Ignore'].map(name => RegisterClipboardFormatW(name) as number)
+  return privateFormats.some(format => !!IsClipboardFormatAvailable(format))
 }
 
 export function sequence(): number {

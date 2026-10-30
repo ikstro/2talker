@@ -36,9 +36,10 @@ import * as path from 'node:path'
 
 import { execFile, execFileSync } from 'node:child_process'
 
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, session, shell, Tray, type Rectangle } from 'electron'
 
 import { backupSummary, makeBackup, readBackup, type BackupRead } from './backup'
+import { callAllowed, messageAllowed, openable, pageOf } from './bridge'
 import { createChecker, type Checker } from './checker'
 import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
@@ -76,16 +77,17 @@ import { SpeechHost } from './speechhost'
 import { SPEECH_PORT } from './speechservice'
 import { markAway, measureParts, type Place } from './storage'
 import { NaturalSpeaker } from './synth'
+import { system32 } from './system32'
 import { englishReady, languageOf, plainText, splitText, targetFor, translateLines, translatePairs, translatePlain, type LanguageWords } from './translate'
 import { TranslationLog } from './translationlog'
 import type { Translator } from './translator'
-import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
 import { wordDiff } from './worddiff'
 import { focus, focusedElement, release, selectedText } from './uia'
 import { allowForeground, ctrlHeld, handleOf, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard, watchRendering } from './winclip'
 import {
+  privateCopy,
   readers as clipboardReaders,
   render as renderClipboardText,
   renderAll as renderAllClipboardText,
@@ -298,7 +300,6 @@ let pendingTab: AppTab | undefined
 let pendingTranscript: string | undefined
 let words: WordStore
 let dictationLog: DictationLog
-let updater: Updater
 /** The most common English words, for the card's dotted lines; read once. */
 let common: string[] | undefined
 
@@ -359,7 +360,7 @@ function logMoved(r: Moved): void {
 function oldAppRunning(): boolean {
   if (TEST_HOME || !fs.existsSync(path.join(app.getPath('appData'), 'Altype', 'settings.json'))) return false
   try {
-    const out = execFileSync('tasklist.exe', ['/FI', 'IMAGENAME eq Altype.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    const out = execFileSync(system32('tasklist.exe'), ['/FI', 'IMAGENAME eq Altype.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
     return /"Altype\.exe"/i.test(out)
   } catch {
     return false
@@ -386,7 +387,6 @@ function saveSettings(patch: Partial<Settings>): void {
   // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
   if ([...ACTION_KEYS, ...DICTATION_KEYS, 'paused'].some(k => k in patch)) registerShortcuts()
   if ([...ACTION_KEYS, ...DICTATION_KEYS, ...KEYBOARD_SETTINGS].some(k => k in patch)) applyKeyboard()
-  if ('betaUpdates' in patch) updater?.setBeta(settings.betaUpdates)
   if ('trayLayout' in patch && !settings.trayLayout) frontLayout = undefined
   // Paused while a phrase is recorded: the phrase is dropped, as Esc would.
   if (patch.paused && settings.paused) dictation?.cancel()
@@ -969,7 +969,6 @@ function appView(): AppView {
       .filter(l => l !== undefined)
       .map(l => ({ name: l.name, native: l.native })),
     words: words.list(),
-    update: updater.status,
     keysOk,
     translator: activeTranslator().state(langCode(settings.native)).status,
     translatorState: translator.state(langCode(settings.native)),
@@ -1305,10 +1304,12 @@ function onMessage(message: ToHost): void {
       speech.restart()
       return
     case 'showInFolder':
-      shell.showItemInFolder(message.path)
+      if (typeof message.path === 'string' && path.win32.isAbsolute(message.path)) shell.showItemInFolder(message.path)
       return
     case 'openPath':
-      void shell.openPath(message.path)
+      // A folder, a note or a text file; never a program, a script or a shortcut.
+      if (openable(message.path, isDirectory)) void shell.openPath(message.path)
+      else log(`openPath: refused ${message.path}`)
       return
     case 'ready':
       cardReady = true
@@ -1406,9 +1407,6 @@ function onMessage(message: ToHost): void {
       return
     case 'copyWords':
       clipboard.writeText(wordsText(words.list())).catch(error => console.warn('Krya: could not copy the words', error))
-      return
-    case 'checkUpdates':
-      updater.check()
       return
     case 'openLink':
       if (LINKS.has(message.url)) void shell.openExternal(message.url)
@@ -1865,11 +1863,14 @@ function onClipboardChange(): void {
     const { at, purpose, window, field, via } = copyWanted
     log(`copy: came in ${now - copyWanted.since} ms from ${copyWanted.exe}`)
     copyWanted = undefined
+    // A password manager's copy (marked "do not watch") is neither shown nor read aloud.
+    const secret = privateCopy()
     afterSettling(async () => {
       // The copy Krya pressed: taken back once read.
       clipGuard.claim()
-      const text = (await clipboard.readText()).trim()
+      const text = secret ? '' : (await clipboard.readText()).trim()
       await clipGuard.putBack()
+      if (secret) log('copy: a copy marked private (a password manager) is left alone')
       if (text) showText(text, purpose, at, window, via, field)
       else releaseField(field)
     })
@@ -1903,8 +1904,9 @@ function onClipboardChange(): void {
 
 /** A change of the clipboard by the person: Ctrl+C twice asks for the card. */
 function doubleCopyChange(now: number, ctrl: boolean): void {
-  // Copying from the card itself is not a request, nor is any copy while Krya is paused.
-  if (card?.isFocused() || !settings.doubleCopy || settings.paused) return
+  // Copying from the card itself is not a request, nor is any copy while Krya is paused, nor a password
+  // manager's copy (marked "do not watch"): Ctrl+C twice on a password never shows or reads it.
+  if (card?.isFocused() || !settings.doubleCopy || settings.paused || privateCopy()) return
   if (!copies.change(now, ctrl)) return
   const at = screen.getCursorScreenPoint()
   afterSettling(async () => {
@@ -2094,7 +2096,7 @@ async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
 
 /** Other layout switchers running now, for the settings' warning, and the other programs that watch the keyboard. */
 function findRivals(): void {
-  execFile('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true }, (error, stdout) => {
+  execFile(system32('tasklist.exe'), ['/fo', 'csv', '/nh'], { windowsHide: true }, (error, stdout) => {
     if (error) return
     const running = new Set(stdout.split(/\r?\n/).map(line => (line.split(',')[0] ?? '').replace(/"/g, '').toLowerCase()))
     const named = (list: Record<string, string>) => [
@@ -2479,10 +2481,21 @@ function setUpSpeechEngine(): void {
     offset: () => settings.dictationBadge,
     moved: offset => saveSettings({ dictationBadge: offset }),
   })
+  // The app window plays a transcript's sound from the engine in an <audio>, which sends no header of its own:
+  // main adds the engine's key to that window's requests to the engine, and to no other window's.
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: [`http://127.0.0.1:${speechPort}/*`] }, (details, done) => {
+    const fromApp = !!appWin && !appWin.isDestroyed() && details.webContentsId === appWin.webContents.id
+    done({ requestHeaders: fromApp ? { ...details.requestHeaders, 'X-Krya-Token': speech.token } : details.requestHeaders })
+  })
   speech.start()
   // Windows is asked about the cards and the battery once Krya is up: it takes a second or two.
   setTimeout(() => void speech.probe().catch(error => console.warn('Krya: could not look at this computer', error)), 4000)
 }
+
+/** The formats a transcript is saved in (the engine's export.FORMATS). */
+const EXPORT_FORMATS = new Set(['txt', 'md', 'srt', 'vtt', 'docx', 'json'])
+
+const isDirectory = (p: string) => fs.statSync(p).isDirectory()
 
 /** A page's request with an answer: the speech engine's API, a folder to pick, a transcript to save. */
 async function hostCall(request: HostCall): Promise<unknown> {
@@ -2495,6 +2508,7 @@ async function hostCall(request: HostCall): Promise<unknown> {
       return canceled ? null : (filePaths[0] ?? null)
     }
     case 'exportTranscript': {
+      if (!EXPORT_FORMATS.has(request.format)) throw new Error(`Cannot save as ${request.format}`)
       const safe = request.name.replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').trim() || 'Transcript'
       const options: Electron.SaveDialogOptions = {
         title: 'Save the transcript',
@@ -2503,8 +2517,8 @@ async function hostCall(request: HostCall): Promise<unknown> {
       }
       const { canceled, filePath } = appWin ? await dialog.showSaveDialog(appWin, options) : await dialog.showSaveDialog(options)
       if (canceled || !filePath) return null
-      const r = await speech.call('POST', `/transcripts/${request.id}/export`, { format: request.format, path: filePath })
-      if (!r.ok) throw new Error(r.error)
+      // The engine gives the bytes; Krya writes them where the person chose (the engine writes no file a caller names).
+      fs.writeFileSync(filePath, await speech.bytes(`/transcripts/${encodeURIComponent(request.id)}/file?format=${request.format}`))
       return filePath
     }
     case 'copy':
@@ -2553,13 +2567,6 @@ function start(): void {
   dictationLog = new DictationLog(path.join(userDir(), 'dictation.json'))
   translationLog = new TranslationLog(path.join(userDir(), 'translations.json'))
   learned = new LearnStore(path.join(userDir(), 'learning.json'))
-  updater = new Updater(
-    {
-      change: () => postApp(),
-      ready: version => tray?.displayBalloon({ title: 'Krya', content: `Version ${version} is ready. It installs when Krya quits.` }),
-    },
-    settings.betaUpdates,
-  )
   translator = createTranslator(downloads('models'), unpacked('dist', 'mt-worker.js'), {
     loader: unpacked('vendor', 'bergamot', 'bergamot-translator.js'),
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
@@ -2647,8 +2654,18 @@ function start(): void {
   })
   applyKeyboard()
   card = createCard()
-  ipcMain.on('to-host', (_event, message: ToHost) => onMessage(message))
-  ipcMain.handle('host-call', (_event, request: HostCall) => hostCall(request))
+  // Each page only what it does (bridge.ts): a page that shows text from outside never opens, removes or exports.
+  ipcMain.on('to-host', (event, message: ToHost) => {
+    const page = pageOf(event.sender.getURL())
+    if (messageAllowed(page, message?.type)) onMessage(message)
+    else log(`bridge: ${page} may not send ${String(message?.type)}`)
+  })
+  ipcMain.handle('host-call', (event, request: HostCall) => {
+    const page = pageOf(event.sender.getURL())
+    if (callAllowed(page, request)) return hostCall(request)
+    log(`bridge: ${page} may not call ${String(request?.call)}`)
+    throw new Error('Not allowed from this window')
+  })
   // The card's window owns Krya's pasted text: handed over when the paste's program reads it.
   const stopRendering = watchRendering(
     card,
@@ -2669,7 +2686,6 @@ function start(): void {
     tray.displayBalloon({ title: 'Krya', content: `Ctrl+C twice will not work: ${messageOf(error)}. Use the tray menu.` })
   }
   void sendHostVoices()
-  updater.start()
   // The first start opens the window on "How to use".
   if (firstRun) openApp('home')
   runCommand(process.argv)
@@ -2698,7 +2714,6 @@ if (!theOnlyOne) {
       ['shortcuts', () => globalShortcut.unregisterAll()],
       ['speech', () => speech?.dispose()],
       ['dictation', () => dictation?.dispose()],
-      ['updater', () => updater?.dispose()],
       ['clipboard', () => stopWatching?.()],
       ['voice', () => natural?.dispose()],
       ['translator', () => translator?.dispose()],

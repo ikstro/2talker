@@ -195,11 +195,13 @@ test('a part in use stays in the old folder and is used there; once let go, the 
   expect(hasToMove(old, next)).toBe(false)
 })
 
-test('the old names\' updater downloads go', () => {
+test('the updater downloads go, Krya\'s own too: it no longer updates itself', () => {
   const local = temp('krya-local-')
   put(path.join(local, 'altype-updater', 'pending', 'Altype-Setup-0.10.2.exe'), 'x')
   put(path.join(local, 'krya-updater', 'pending', 'Krya-Setup-0.11.0.exe'), 'y')
-  expect(removeOldUpdaterCaches(local)).toEqual(['altype-updater'])
+  put(path.join(local, 'krya-other', 'kept.txt'), 'z')
+  expect(removeOldUpdaterCaches(local)).toEqual(['altype-updater', 'krya-updater'])
   expect(fs.existsSync(path.join(local, 'altype-updater'))).toBe(false)
-  expect(fs.existsSync(path.join(local, 'krya-updater'))).toBe(true)
+  expect(fs.existsSync(path.join(local, 'krya-updater'))).toBe(false)
+  expect(fs.existsSync(path.join(local, 'krya-other'))).toBe(true)
 })

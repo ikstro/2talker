@@ -9,6 +9,8 @@ import { execFileSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+import { POWERSHELL } from './system32'
+
 /** A move that failed: what was said, the error, and the folder or file that stayed (`from`). */
 export type Warn = (message: string, error: unknown, from?: string) => void
 
@@ -215,7 +217,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath } | ForEach-Obj
 export function runningProcesses(): RunningProcess[] {
   if (process.platform !== 'win32') return []
   try {
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_SCRIPT, 'utf16le').toString('base64')], {
+    const out = execFileSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_SCRIPT, 'utf16le').toString('base64')], {
       encoding: 'utf8',
       windowsHide: true,
       timeout: 20_000,
@@ -292,8 +294,8 @@ export function leftIn(oldDir: string, newDir: string, errors: ReadonlyMap<strin
   })
 }
 
-/** electron-updater's download folders of the app's earlier names, in %LOCALAPPDATA%: the installers already installed. */
-export const OLD_UPDATER_CACHES = ['altype-updater', '2talker-updater']
+/** electron-updater's download folders, in %LOCALAPPDATA%: the installers already installed (Krya updates by hand since 0.11, from GitHub). */
+export const OLD_UPDATER_CACHES = ['altype-updater', '2talker-updater', 'krya-updater']
 
 /** Deletes the old names' updater folders; returns which went. */
 export function removeOldUpdaterCaches(localAppData: string, warn: Warn = () => undefined): string[] {

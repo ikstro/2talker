@@ -10,10 +10,12 @@
 // Esc while recording throws it away. Typed phrases go into the log
 // (dictationlog.ts), so the again key can type the last one once more.
 
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 import { BrowserWindow, globalShortcut, screen, shell } from 'electron'
 
+import { openable } from './bridge'
 import type { DictationLog } from './dictationlog'
 import { frameWindow } from './dwm'
 import { log } from './log'
@@ -240,7 +242,9 @@ export class Dictation {
         if (t.note) {
           const file = t.note
           this.send({ type: 'dictationDone', text: path.basename(file, '.md') })
-          this.o.balloon('Note saved', `${path.basename(file)}\nClick to open it.`, () => void shell.openPath(file))
+          this.o.balloon('Note saved', `${path.basename(file)}\nClick to open it.`, () => {
+            if (openable(file, p => fs.statSync(p).isDirectory())) void shell.openPath(file)
+          })
         } else {
           this.send({ type: 'dictationDone', text: t.title })
           this.o.balloon('The note is in Transcripts', t.noteError ?? 'No knowledge base folder is chosen yet: choose one on the Dictate page.', () => this.o.openTranscript(id))

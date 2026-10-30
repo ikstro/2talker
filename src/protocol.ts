@@ -121,14 +121,6 @@ export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dic
 
 export type HostVoice = { name: string; lang: string }
 
-/** What the updater is doing; `dev`: a run from source, which never updates. */
-export type UpdateStatus =
-  | { status: 'dev' | 'idle' | 'checking' | 'none' | 'downloading' }
-  | { status: 'ready'; version: string }
-  /** Not checked, for a reason that is no fault: the releases are private, or there is no connection. */
-  | { status: 'unavailable'; message: string }
-  | { status: 'failed'; message: string }
-
 /** A keyboard layout Windows has: `id` as settings.ts keeps it ("04090409"), `name` as Windows calls its language. */
 /** One of Windows' layouts: `lang` is its language's code, as the layout fixer's word lists are named. */
 export type KeyboardLayout = { id: string; name: string; short: string; lang: string }
@@ -186,7 +178,6 @@ export type AppView = {
   /** The languages a person may name as their own: English name and own name. */
   languages: { name: string; native: string }[]
   words: SavedWord[]
-  update: UpdateStatus
   /** Each shortcut is registered (false: another program holds it). */
   keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean; inPlace: boolean; check: boolean; type: boolean; typeCheck: boolean; pause: boolean; window: boolean }
   /** What Krya learned from the person's typing (learning.ts): words fixed always, words of theirs. */
@@ -362,7 +353,6 @@ export type ToHost =
   /** Save the notebook as a file for Anki, or copy it as text. */
   | { type: 'exportWords' }
   | { type: 'copyWords' }
-  | { type: 'checkUpdates' }
   /** Open one of the About tab's links in the browser. */
   | { type: 'openLink'; url: string }
   /** The app window's own buttons: it has no Windows frame. Close hides it, as Krya lives in the tray. */

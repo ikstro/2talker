@@ -176,7 +176,7 @@ function drainPort(): void {
 
 function drainField(): void {
   if (!field) return
-  for (let m = receiveMessageOnPort(field.port); m; m = receiveMessageOnPort(field.port)) typist.fieldIs((m.message as { secret: boolean }).secret)
+  for (let m = receiveMessageOnPort(field.port); m; m = receiveMessageOnPort(field.port)) typist.fieldIs((m.message as { secret: boolean | null }).secret ?? 'unknown')
 }
 
 function tick(): void {
