@@ -29,6 +29,8 @@ const BADGE = { width: 360, min: 64, max: 180 }
 /** How soon after it shows, then how often while it is up, the badge asks whether Windows shows it too. */
 /** When the badge is looked at: first after it shows, then every so often; quicker while something lies over it (a picture opened full screen in Telegram is kept on top too). */
 const LOOK_MS = { first: 500, every: 2000, covered: 400 }
+/** How often the window in front is asked while the badge is up: a new one (a picture opened full screen) gets the badge over it at once. */
+const FRONT_MS = 100
 const NOTE_WAIT_MS = 5 * 60_000
 /** The most languages the engine weighs a phrase against. */
 const MOST_EXPECTED = 8
@@ -85,6 +87,7 @@ export class Dictation {
   private trouble = ''
   /** Windows cloaked the badge: a new one is made before the next phrase. */
   private stale = false
+  private watchingFront: NodeJS.Timeout | undefined
 
   constructor(private readonly o: DictationOptions) {}
 
@@ -131,6 +134,7 @@ export class Dictation {
     const was = before ? troubleOf(before) : ''
     log(`badge: shown at ${JSON.stringify(badge.getBounds())} (asked ${JSON.stringify(place)}, area ${JSON.stringify(area)}, offset ${JSON.stringify(this.o.offset())}), visible ${badge.isVisible()}, session ${session ? 'yes' : 'no'}${was ? `; was ${was}, raised` : ''}`)
     this.look(LOOK_MS.first)
+    this.watchFront(badge)
     this.send({ type: 'dictation', command: 'start', mode, key, ...(session ? { session } : {}), expected })
     globalShortcut.register('Escape', () => this.cancel())
   }
@@ -325,6 +329,7 @@ export class Dictation {
     })
     b.on('hide', () => {
       clearTimeout(this.looking)
+      clearInterval(this.watchingFront)
       log(`badge: hidden, state ${this.state}`)
     })
     b.on('unresponsive', () => log('badge: the page does not answer'))
@@ -381,6 +386,30 @@ export class Dictation {
     }, after)
   }
 
+  /**
+   * The dictation comes first: a window that comes to the front while the
+   * badge is up (Telegram's picture viewer, full screen and kept on top too)
+   * would lie over it until the next look, so the window in front is asked
+   * every FRONT_MS (one cheap call) and a new one has the badge put over it
+   * at once. Esc stays the dictation's meanwhile.
+   */
+  private watchFront(b: BrowserWindow): void {
+    clearInterval(this.watchingFront)
+    let front = 0n
+    this.watchingFront = setInterval(() => {
+      if (b.isDestroyed() || !b.isVisible()) return clearInterval(this.watchingFront)
+      let now: bigint
+      try {
+        now = foreground().hwnd
+      } catch {
+        return
+      }
+      if (now === front) return
+      front = now
+      this.raise(b)
+    }, FRONT_MS)
+  }
+
   /** A new badge in place of one Windows cloaked: made now, it is on the desktop in use. */
   private renew(): void {
     this.stale = false
@@ -429,6 +458,7 @@ export class Dictation {
 
   dispose(): void {
     clearTimeout(this.looking)
+    clearInterval(this.watchingFront)
     this.badge?.destroy()
   }
 }
