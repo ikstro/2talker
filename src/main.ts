@@ -84,7 +84,7 @@ import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
 import { wordDiff } from './worddiff'
 import { focus, focusedElement, release, selectedText } from './uia'
-import { allowForeground, ctrlHeld, handleOf, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard, watchRendering } from './winclip'
+import { allowForeground, ctrlHeld, handleOf, inFront, keysLetGo, maskMenu, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard, watchRendering } from './winclip'
 import {
   readers as clipboardReaders,
   render as renderClipboardText,
@@ -1837,7 +1837,7 @@ async function useSelection(purpose: Purpose, via?: string): Promise<void> {
     lateCopyUntil = Date.now() + LATE_COPY_MS
     // Put back once a late copy has had its time; nothing changed, nothing is written.
     clipGuard.release(LATE_COPY_MS)
-    log(`copy: nothing in ${COPY_WAIT_MS} ms from ${exe}`)
+    log(`copy: nothing in ${COPY_WAIT_MS} ms from ${exe}, key ${via ?? 'none'}`)
     tray?.displayBalloon({ title: 'Krya', content: 'Nothing was copied. Select a text, then press the shortcut.' })
   }, COPY_WAIT_MS)
 }
@@ -1928,7 +1928,11 @@ function registerShortcuts(): void {
   const register = (accelerator: string, run: () => void): boolean => {
     if (!accelerator || !isAccelerator(accelerator)) return true
     try {
-      return globalShortcut.register(accelerator, run)
+      // Alt or Win in it: the program in front must not take their release for a tap (its menu would take the next Ctrl+C).
+      return globalShortcut.register(accelerator, () => {
+        maskMenu()
+        run()
+      })
     } catch {
       return false
     }
