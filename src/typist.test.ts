@@ -56,6 +56,8 @@ class Desk {
   password = false
   fullScreen = false
   clicks = 0
+  /** Alt or Win taps let go behind a key that types nothing. */
+  masked: number[] = []
   /** Run a fix as soon as it is due, as the thread's loop does; false holds it, for keys typed meanwhile. */
   auto = true
   private due = false
@@ -88,6 +90,7 @@ class Desk {
         later: () => {
           this.due = true
         },
+        mask: vk => this.masked.push(vk),
         askField: () => {
           this.asked = true
         },
@@ -173,7 +176,7 @@ class Desk {
       if ('again' in key) {
         if (!this.typist.key(key.again.vk, key.again.scan, !key.again.up)) this.apply(key.again.vk, !key.again.up)
       } else if ('char' in key) this.text += key.char
-      else this.apply(key.vk, true)
+      else if ('vk' in key) this.apply(key.vk, true)
     }
   }
 }
@@ -708,6 +711,31 @@ test('Alt tapped twice is the translate key, with a mask key from another progra
   desk.typist.key(0xe8, 0, false, false, true)
   desk.tap(0xa4)
   expect(desk.sent).toContainEqual({ type: 'hotkey', action: 'translate' })
+})
+
+test('an Alt or Win tap that is a key of Altype\'s is let go behind a key that types nothing, so no menu takes the focus', () => {
+  const desk = new Desk({ keys: { check: 'LeftAlt*2', snip: 'RightSuper' } })
+  // Both taps of the double: the first cannot know a second comes.
+  expect(desk.typist.key(0xa4, 0, true)).toBe(false)
+  expect(desk.typist.key(0xa4, 0, false)).toBe(true)
+  desk.tap(0xa4)
+  expect(desk.masked).toEqual([0xa4, 0xa4])
+  expect(desk.sent).toContainEqual({ type: 'hotkey', action: 'check' })
+  desk.tap(0x5c)
+  expect(desk.masked).toEqual([0xa4, 0xa4, 0x5c])
+  // Alt as a modifier, Right Alt that is no key, and Ctrl taps are left alone.
+  desk.event(0xa4, true)
+  desk.tap(0x46)
+  desk.event(0xa4, false)
+  desk.tap(0xa5)
+  const ctrl = new Desk({ keys: { translate: 'LeftControl*2' } })
+  ctrl.tap(VK_LCONTROL)
+  ctrl.tap(VK_LCONTROL)
+  expect([desk.masked.length, ctrl.masked]).toEqual([3, []])
+  // A program left out of Altype's keys keeps its menu.
+  const off = new Desk({ keys: { check: 'LeftAlt*2' }, apps: { 'notepad.exe': { off: ['keys'], layout: '' } } })
+  off.tap(0xa4)
+  expect(off.masked).toEqual([])
 })
 
 test('another program\'s keys between two taps (a switcher answering a Ctrl tap) do not break the double', () => {

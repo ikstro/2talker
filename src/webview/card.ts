@@ -5,6 +5,8 @@
 // a sentence and waits; each paragraph has its own play button in the margin.
 // Translate: the text as it is in a field the person edits, translated into
 // any language, Swap and Paste; ▶ Listen reads its English half when pressed.
+// Check: the person's English in the same field, under it the text with its
+// mistakes struck out and set right, and the main one said in their language.
 // In either, a click on an English word shows its meanings (Shift+hover too),
 // a dotted line marks the rarer ones, and a click on a sentence marks its
 // other side. The HTML of the halves arrives rendered from the main process.
@@ -13,7 +15,7 @@ import { hotkeyLabel } from '../hotkey'
 import { findLanguage, labelCode, langCode, voiceMatches } from '../languages'
 import { chosenNatural } from '../natural'
 import { LEVEL_NAMES } from '../settings'
-import type { CardKind, CardState, CardView, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
+import type { CardKind, CardState, CardView, CheckResult, DiffPart, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
 import { dwmFlag, el, html, icon } from './dom'
 import { glyph } from './glyphs'
 import { fieldText, halfBar, paint, plainOf, rangeIndexAt, sentenceRanges } from './halves'
@@ -251,6 +253,7 @@ const toSelect = el('select', { 'aria-label': 'Into', title: 'The language to tr
 const swapButton = el('button', { class: 'swap-btn', title: 'Swap the languages: the translation becomes the text', onclick: () => swapLanguages() }, icon('arrow-swap'), el('span', {}, 'Swap'))
 /** A list of languages drawn as a pill: the select itself, its arrow over it. */
 const pill = (select: HTMLSelectElement) => el('span', { class: 'select-pill' }, select, icon('chevron-down'))
+const textLangs = el('span', { class: 'text-langs' }, pill(fromSelect), el('span', { class: 'to', 'aria-hidden': 'true' }, '→'), pill(toSelect), swapButton)
 const textResult = el('div', { class: 'text-result', hidden: true })
 // Nothing leaves the computer, and the card says so where the translation is made.
 const textFoot = el('footer', { class: 'card-foot' })
@@ -258,10 +261,7 @@ const textView = el(
   'main',
   { class: 'text-view', hidden: true },
   textField,
-  halfBar(
-    [textCopy, textListen],
-    [el('span', { class: 'text-langs' }, pill(fromSelect), el('span', { class: 'to', 'aria-hidden': 'true' }, '→'), pill(toSelect), swapButton)],
-  ),
+  halfBar([textCopy, textListen], [textLangs]),
   textResult,
   textFoot,
 )
@@ -347,10 +347,14 @@ const KINDS: Record<CardKind, [string, string?]> = {
   screenshot: ['Listen', 'screen'],
   translate: ['Translate'],
   text: ['Translate', 'screen'],
+  check: ['Check'],
 }
 
-/** The translator's kinds: the text as it is, with its translation. */
-const translator = (c: CardView | undefined) => c?.kind === 'translate' || c?.kind === 'text'
+/** The kinds with the text as it is in a field, and its other side under it: the translator's, and Check my English. */
+const translator = (c: CardView | undefined) => c?.kind === 'translate' || c?.kind === 'text' || c?.kind === 'check'
+
+/** Check my English: the field is the person's English, checked instead of translated. */
+const checking = () => state.card?.kind === 'check'
 
 function renderChrome(): void {
   const c = state.card
@@ -385,9 +389,11 @@ function translating(): string {
 /** 1.4 of 84 MB; 1.2 of 2.5 GB. */
 const amount = (mb: number, of: number) => (of >= 1000 ? `${(mb / 1000).toFixed(1)} of ${(of / 1000).toFixed(1)} GB` : `${mb.toFixed(1)} of ${of} MB`)
 
-/** A first use: the translator for a pair (Fast) or the level's model comes once, with how much of it is in and what happens meanwhile. */
+/** A first use: the translator for a pair (Fast), the level's model or the checker's comes once, with how much of it is in and what happens meanwhile. */
 function downloading(pair: string, progress: number, size: number, meanwhile = ''): HTMLElement {
   const level = state.card?.level ?? 'fast'
+  const s = state.card?.state
+  const model = s?.status === 'check' ? s.model : undefined
   const done = Math.min(1, Math.max(0, progress))
   const bar = el('i')
   bar.style.width = `${(done * 100).toFixed(1)}%`
@@ -395,15 +401,20 @@ function downloading(pair: string, progress: number, size: number, meanwhile = '
     'div',
     { class: 'download', role: 'status' },
     el('div', { class: 'kl' }, 'first use · once'),
-    el('div', { class: 'download-head' }, el('b', {}, level === 'fast' ? `Translator, ${pair}` : `${LEVEL_NAMES[level]} translator`), el('span', { class: 'kl' }, amount(done * size, size))),
+    el(
+      'div',
+      { class: 'download-head' },
+      el('b', {}, model ? `Checker, ${model}` : level === 'fast' ? `Translator, ${pair}` : `${LEVEL_NAMES[level]} translator`),
+      el('span', { class: 'kl' }, amount(done * size, size)),
+    ),
     el('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(done * 100) }, bar),
-    el('p', {}, `Downloads once from ${level === 'fast' ? 'Mozilla' : 'Hugging Face'}, then translates on this computer.${meanwhile ? ' ' + meanwhile : ''}`),
+    el('p', {}, `Downloads once from ${!model && level === 'fast' ? 'Mozilla' : 'Hugging Face'}, then ${model ? 'checks' : 'translates'} on this computer.${meanwhile ? ' ' + meanwhile : ''}`),
   )
 }
 
 function failed(message: string, retry: () => void = () => post({ type: 'retry' })): HTMLElement[] {
   return [
-    el('p', { class: 'empty-title' }, 'Not translated'),
+    el('p', { class: 'empty-title' }, checking() ? 'Not checked' : 'Not translated'),
     el('p', { class: 'empty-text' }, message),
     el('p', {}, el('button', { class: 'primary-btn', onclick: () => retry() }, 'Try again')),
   ]
@@ -436,12 +447,12 @@ function renderState(): void {
   const c = state.card
   const s = c?.state
   const done = s?.status === 'done'
-  const text = s?.status === 'text'
+  const text = s?.status === 'text' || s?.status === 'check'
   list.hidden = !done
   textView.hidden = !text
   stateView.hidden = done || text || !s
   if (!c || !s) return
-  if (s.status === 'text') {
+  if (s.status === 'text' || s.status === 'check') {
     renderText(c, s)
     return
   }
@@ -508,25 +519,30 @@ function languageName(code: string): string {
  * later message for it (the translation coming in) keeps what the person
  * typed, the caret and the languages picked. The result follows the state.
  */
-function renderText(c: CardView, s: Extract<CardState, { status: 'text' }>): void {
+function renderText(c: CardView, s: Extract<CardState, { status: 'text' | 'check' }>): void {
   if (state.textId !== c.id) {
     state.textId = c.id
     lastOut = undefined
+    lastCheck = undefined
     pasteWhenReady = false
     focusByTab = false
     window.clearTimeout(retranslate)
     retranslate = undefined
     setFieldText(s.text)
-    fillLanguages(s.languages, s.from, s.to, s.mine ?? [])
+    textLangs.hidden = s.status === 'check'
+    textField.setAttribute('aria-label', s.status === 'check' ? 'Your English' : 'The text')
+    textField.dataset.placeholder = s.status === 'check' ? 'Type or paste your English' : ''
+    if (s.status === 'text') fillLanguages(s.languages, s.from, s.to, s.mine ?? [])
     syncLanguages()
     delete textResult.dataset.key
     hover.hide()
     window.scrollTo({ top: 0 })
   }
   state.shownId = c.id
-  renderTextResult(s.result, !!s.canPaste)
+  if (s.status === 'check') renderCheckResult(s.result, !!s.canPaste)
+  else renderTextResult(s.result, !!s.canPaste)
   hover.refresh()
-  const by = `Translated · ${LEVEL_NAMES[c.level]}`
+  const by = s.status === 'check' ? `Checked · ${s.model}` : `Translated · ${LEVEL_NAMES[c.level]}`
   textFoot.textContent = s.canPaste ? `${by} · Shift+Enter, a new line` : by
   // Said under a translation, or one on its way; not under nothing, or a failure.
   textFoot.hidden = s.result.status === 'none' || s.result.status === 'failed'
@@ -551,9 +567,10 @@ function unmarkField(): void {
 
 /** What the languages decide: the field's language, and whether its words are English ones to click and read. */
 function syncLanguages(): void {
-  textField.lang = fromSelect.value
-  textField.toggleAttribute('data-words', fromSelect.value === 'en')
-  textListen.hidden = fromSelect.value !== 'en'
+  const english = checking() || fromSelect.value === 'en'
+  textField.lang = checking() ? 'en' : fromSelect.value
+  textField.toggleAttribute('data-words', english)
+  textListen.hidden = !english
 }
 
 /** Both lists: the languages the person uses first (`mine`, in their order), then the others by name; a code the list lacks falls back to English. */
@@ -608,13 +625,14 @@ function swapLanguages(): void {
   translateText()
 }
 
-/** The text as it stands in the field, maybe fixed by hand, from and into the languages picked. */
+/** The text as it stands in the field, maybe fixed by hand, from and into the languages picked; Check's checked. */
 function translateText(): void {
   const c = state.card
   const text = fieldText(textField)
   if (!c || !text.trim()) return
   sentText = text
-  post({ type: 'translateText', id: c.id, text, from: fromSelect.value, to: toSelect.value })
+  if (c.kind === 'check') post({ type: 'checkText', id: c.id, text })
+  else post({ type: 'translateText', id: c.id, text, from: fromSelect.value, to: toSelect.value })
 }
 
 /** A translation as the card shows it: its text (to copy and paste), language and sentences. */
@@ -673,6 +691,74 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
   }
 }
 
+/** Check's last answer: shown faded while the edited text is checked again. */
+let lastCheck: Extract<CheckResult, { status: 'ready' }> | undefined
+
+/** The text with its mistakes: the person's words struck out, the right ones put in after them (a space between), the rest as it was. */
+function markedText(parts: readonly DiffPart[]): Node[] {
+  const out: Node[] = []
+  for (const [i, part] of parts.entries()) {
+    if (part.kind === 'same') {
+      out.push(document.createTextNode(part.text))
+      continue
+    }
+    out.push(el(part.kind, { class: part.kind }, part.text))
+    if (part.kind === 'del' && parts[i + 1]?.kind === 'ins') out.push(document.createTextNode(' '))
+  }
+  return out
+}
+
+/**
+ * Check's answer: the text marked (or "Looks right"), the main mistake in
+ * the person's language, then Copy, ▶ Listen and Paste of the text set right;
+ * `ready`: Listen and Paste may be pressed.
+ */
+function checkBlock(r: Extract<CheckResult, { status: 'ready' }>, canPaste: boolean, ready: boolean): HTMLElement[] {
+  const pasteButton = el('button', { class: 'paste-btn', title: 'Paste the text set right over the selection (Enter)', disabled: !ready, onclick: () => paste() }, 'Paste')
+  const changed = r.parts.some(p => p.kind !== 'same')
+  const fade = ready ? '' : ' stale'
+  return [
+    changed
+      ? el('div', { class: `text-out check-out${fade}`, lang: 'en', 'data-words': true }, ...markedText(r.parts))
+      : el('p', { class: `check-clean${fade}` }, icon('check'), 'Looks right'),
+    ...(changed && r.note ? [el('p', { class: `check-note${fade}`, lang: langCode(state.card?.native ?? '') }, r.note)] : []),
+    // A right text: the field's own Copy and Listen are enough.
+    halfBar(changed ? [copyButton(() => r.corrected), ready ? listenText('out') : null] : [], canPaste ? [pasteButton] : []),
+  ]
+}
+
+/** Under the field: what the checker is doing, or its answer. The same answer is left as it is, so a selection in it stays. */
+function renderCheckResult(r: CheckResult, canPaste: boolean): void {
+  const key = JSON.stringify([r, canPaste])
+  if (textResult.dataset.key === key) return
+  textResult.dataset.key = key
+  textResult.hidden = r.status === 'none'
+  // The text set right read aloud is about to be replaced.
+  if (player.key === 'out') player.stop()
+  switch (r.status) {
+    case 'none':
+      textResult.replaceChildren()
+      return
+    case 'checking':
+      textResult.replaceChildren(status('Checking…'), ...(lastCheck ? checkBlock(lastCheck, canPaste, false) : []))
+      return
+    case 'downloading':
+      textResult.replaceChildren(downloading('', r.progress, r.size))
+      return
+    case 'ready':
+      lastCheck = r
+      textResult.replaceChildren(...checkBlock(r, canPaste, true))
+      if (pasteWhenReady) {
+        pasteWhenReady = false
+        paste()
+      }
+      return
+    case 'failed':
+      textResult.replaceChildren(...failed(r.message, () => translateText()))
+      return
+  }
+}
+
 /** An empty field has nothing to copy, read or translate. */
 function updateTextButtons(): void {
   const empty = !fieldText(textField).trim()
@@ -684,7 +770,7 @@ function updateTextButtons(): void {
 /** The translation, pasted over the selection it was made from; only once it is in. */
 function canPaste(): boolean {
   const s = state.card?.state
-  return s?.status === 'text' && !!s.canPaste
+  return (s?.status === 'text' || s?.status === 'check') && !!s.canPaste
 }
 
 /**
@@ -694,15 +780,16 @@ function canPaste(): boolean {
 function paste(): void {
   const c = state.card
   const s = c?.state
-  if (!c || s?.status !== 'text' || !s.canPaste) return
+  if (!c || (s?.status !== 'text' && s?.status !== 'check') || !s.canPaste) return
   if (retranslate !== undefined) {
     window.clearTimeout(retranslate)
     retranslate = undefined
     pasteWhenReady = true
     return translateText()
   }
-  if (s.result.status === 'ready') return post({ type: 'pasteText', id: c.id, text: s.result.text })
-  if (s.result.status === 'translating' || s.result.status === 'downloading') pasteWhenReady = true
+  // Check pastes the text set right.
+  if (s.result.status === 'ready') return post({ type: 'pasteText', id: c.id, text: s.status === 'check' ? s.result.corrected : s.result.text })
+  if (s.result.status === 'translating' || s.result.status === 'checking' || s.result.status === 'downloading') pasteWhenReady = true
 }
 
 function copyButton(text: () => string): HTMLButtonElement {
@@ -755,7 +842,7 @@ function read(key: string, els: HTMLElement[], from: number, asked: boolean): vo
   state.reading = key
   const after = from >= 0 ? englishSentences()[from + els.length] : undefined
   // The field's sentences are read from spans of their own, out of sight: the page does not follow them.
-  if (!hasVoice() || !player.play(key, els, { follow: key !== 'src', ahead: after ? [after] : [] })) {
+  if (!hasVoice() || !player.play(key, els, { follow: key !== 'src' && !checking(), ahead: after ? [after] : [] })) {
     if (asked) noVoiceHint()
   }
 }
@@ -767,6 +854,10 @@ function read(key: string, els: HTMLElement[], from: number, asked: boolean): vo
  */
 function textReading(key: 'src' | 'out'): { els: HTMLElement[]; ranges: (Range | undefined)[] } {
   const latin = (text: string) => /\p{Script=Latin}/u.test(text)
+  // Check's other half is the text set right, read from spans of its own lines.
+  const s = state.card?.state
+  if (key === 'out' && s?.status === 'check')
+    return { els: s.result.status === 'ready' ? s.result.corrected.split('\n').filter(latin).map(line => el('span', {}, line)) : [], ranges: [] }
   if (key === 'out') return { els: [...textResult.querySelectorAll<HTMLElement>('.text-out:not(.stale) span.t')].filter(s => latin(s.textContent ?? '')), ranges: [] }
   if (!fieldRanges) return { els: fieldText(textField).split('\n').filter(latin).map(line => el('span', {}, line)), ranges: [] }
   const found = fieldRanges.filter((r): r is Range => !!r && latin(r.toString()))
@@ -788,6 +879,7 @@ function stopTextReading(): void {
 /** Space in the translator: its English half read, or stopped. */
 function toggleTextReading(): void {
   if (player.key === 'src' || player.key === 'out') return player.stop()
+  if (checking()) return state.card?.state.status === 'check' && state.card.state.result.status === 'ready' ? readText('out') : readText('src')
   if (fromSelect.value === 'en' && fieldText(textField).trim()) readText('src')
   else if (toSelect.value === 'en' && lastOut) readText('out')
 }

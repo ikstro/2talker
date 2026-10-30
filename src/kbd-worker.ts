@@ -61,6 +61,10 @@ const WM_APP_PORT = 0x8000
 const WM_APP_FIX = 0x8001
 /** The field thread answered. */
 const WM_APP_FIELD = 0x8002
+/** An Alt or Win tap of Altype's is let go behind a key that types nothing (wParam: the key). */
+const WM_APP_MASK = 0x8003
+/** AutoHotkey's key that types nothing. */
+const VK_MASK = 0xe8
 const LLKHF_INJECTED = 0x10
 /** The thread's clock: the layout in front (for the badge), the program in front, a program on the full screen, a word left standing. */
 const TICK_MS = 150
@@ -112,6 +116,7 @@ const typist = new Typist(
     },
     press,
     later: () => PostThreadMessageW(tid, WM_APP_FIX, 0, 0),
+    mask: vk => PostThreadMessageW(tid, WM_APP_MASK, vk, 0),
     askField,
     fullScreen: () => fullScreen,
     click: () => {
@@ -254,6 +259,7 @@ while (running && (GetMessageW(msg, 0, 0, 0) as number) > 0) {
   if (message === WM_APP_PORT) guarded(undefined, drainPort)
   else if (message === WM_APP_FIX) guarded(undefined, () => typist.typeFix())
   else if (message === WM_APP_FIELD) guarded(undefined, drainField)
+  else if (message === WM_APP_MASK) guarded(undefined, () => press([{ vk: VK_MASK }, { release: Number(msg.wParam) }]))
   else if (message === WM_TIMER) guarded(undefined, tick)
 }
 if (timer) KillTimer(0, timer)

@@ -56,7 +56,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 50px;
+  height: 40px;
   margin: 0 -8px;
   padding: 0 16px 0 10px;
   border-bottom: 1px solid var(--border-soft);
@@ -73,9 +73,16 @@ button {
 }
 
 .wm {
-  font: 750 17px / 1 var(--font);
+  font: 750 16px / 1 var(--font);
   letter-spacing: -0.03em;
   color: var(--strong);
+}
+
+/* The version, quiet beside the wordmark. */
+.ver {
+  margin-left: 2px;
+  font: 500 11px / 1 var(--mono);
+  color: var(--muted);
 }
 
 /* The state gives way to Open: a long one ("translator on first use") ends in an ellipsis. */
@@ -134,7 +141,7 @@ body.keys .open.cur {
 
 /* A group: its quiet name, then its rows; no rules between groups, as in the sidebar. */
 .grp {
-  margin: 14px 10px 4px;
+  margin: 8px 10px 2px;
   font: 500 var(--t-caption) / 16px var(--font);
   color: var(--muted);
 }
@@ -144,18 +151,18 @@ body.keys .open.cur {
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 32px;
+  height: 28px;
   padding: 0 10px;
   border-radius: var(--r-md);
-  font: 450 14px / 1 var(--font);
+  font: 450 13px / 1 var(--font);
   color: var(--text);
   white-space: nowrap;
   transition: background-color 0.12s;
 }
 
 .cmd .lu {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
 }
 
@@ -197,6 +204,46 @@ body.keys .cmd.cur .lu {
   margin-left: 3px;
   font: 500 11.5px / 1 var(--mono);
   color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- the footer */
+
+/* Pause, Settings and Quit side by side under a hairline. */
+.foot {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin: 8px -8px -8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.fb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border-radius: var(--r-md);
+  font: 450 13px / 1 var(--font);
+  color: var(--text);
+  transition: background-color 0.12s;
+}
+
+.fb .lu {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.fb.paused,
+.fb.paused .lu {
+  color: var(--orange);
+}
+
+body:not(.keys) .fb:hover,
+body.keys .fb.cur {
+  background: var(--hover);
 }
 
 /* ---------------------------------------------------------------- the switches */

@@ -43,6 +43,8 @@ export type DictationOptions = {
   paste: (text: string) => Promise<void>
   /** The text in English; `from` is the language the engine heard. */
   toEnglish: (text: string, from: string) => Promise<string>
+  /** Practice: a phrase spoken in English, shown checked (Check my English) instead of typed. */
+  check: (text: string) => void
   /** The languages the person uses (their own, English, the others they named): a phrase is taken as one of them, never another. */
   expected: () => string[]
   /** The language of a text by its letters and words (translate.ts), when Whisper was unsure. */
@@ -105,7 +107,7 @@ export class Dictation {
     // The screen to show on is the one with the window the text goes into, taken now, while it is in front.
     const area = this.workArea()
     this.set('recording')
-    const expected = this.o.expected().slice(0, MOST_EXPECTED)
+    const expected = this.expected(mode)
     let session: string | undefined
     if (mode !== 'note') {
       // Heard while it is spoken (the engine loads its model meanwhile); an engine without sessions gets the phrase whole.
@@ -180,7 +182,7 @@ export class Dictation {
   }
 
   private async typePhrase(mode: DictationMode, audio: Uint8Array): Promise<void> {
-    const expected = this.o.expected().slice(0, MOST_EXPECTED).map(encodeURIComponent).join(',')
+    const expected = this.expected(mode).map(encodeURIComponent).join(',')
     // strict: a phrase is never taken for a language the person does not use.
     const r = await this.o.speech.call<{ text: string; language: string; sure?: number }>('POST', `/dictate?language=auto&expected=${expected}&strict=1`, audio)
     if (!r.ok) return this.fail(r.error)
@@ -188,11 +190,21 @@ export class Dictation {
     await this.typeHeard(mode, r.data.text, r.data.language, r.data.sure ?? 1)
   }
 
-  /** A recognized phrase typed where the cursor is; in English first for the English key. */
+  /** The languages a phrase may be in: the person's, or English alone for practice (so a mistake is not heard as another language). */
+  private expected(mode: DictationMode): string[] {
+    return mode === 'check' ? ['en'] : this.o.expected().slice(0, MOST_EXPECTED)
+  }
+
+  /** A recognized phrase typed where the cursor is; in English first for the English key; checked in the card for practice. */
   private async typeHeard(mode: DictationMode, heard: string, language: string, sure: number): Promise<void> {
     if (this.state !== 'working') return
     let text = heard.trim()
     if (!text) return this.fail('Nothing was heard')
+    if (mode === 'check') {
+      this.badge?.hide()
+      this.over()
+      return this.o.check(text)
+    }
     try {
       // Whisper unsure, or a model that does not say (Parakeet): the language by the text's letters and words.
       const spoken = language && sure >= 0.5 ? language : this.o.languageOf(text)

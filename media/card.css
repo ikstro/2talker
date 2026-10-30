@@ -953,9 +953,57 @@ body.maximized .text-field {
   margin-bottom: 0;
 }
 
-/* The last translation, while a newer one comes. */
-.text-out.stale {
+/* The last translation (or check), while a newer one comes. */
+.text-out.stale,
+.check-note.stale,
+.check-clean.stale {
   opacity: 0.5;
+}
+
+/* An empty field says what goes in it (Check my English). */
+.text-field:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Check my English: the person's words struck out in red, the right ones in
+   bold green after them, as the VS Code tutor marks them; then the main
+   mistake, one line in the person's own language. */
+.check-out {
+  white-space: pre-wrap;
+}
+
+.check-out del {
+  color: var(--red);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--red) 75%, transparent);
+}
+
+.check-out ins {
+  color: var(--green);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.text-result > .check-note {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.check-clean {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-weight: 600;
+}
+
+.text-result > .status-line + .check-out,
+.text-result > .status-line + .check-clean {
+  margin-top: 8px;
 }
 
 .text-result .half-bar {

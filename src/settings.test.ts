@@ -39,6 +39,9 @@ describe('normalize', () => {
       layoutKeys: { '04190419': 'RightControl' },
     })
     expect(normalize({ translateKey: ' LeftShift*2 ' }).translateKey).toBe('LeftShift*2')
+    // Check my English: its key and the practice key, none by default.
+    expect(normalize({})).toMatchObject({ checkKey: '', practiceKey: '' })
+    expect(normalize({ checkKey: ' RightControl*2 ', practiceKey: 'Control+Alt+P' })).toMatchObject({ checkKey: 'RightControl*2', practiceKey: 'Control+Alt+P' })
   })
 
   test('programs: the old list of programs left out of fixing becomes rules; a rule keeps known parts and a layout id only', () => {

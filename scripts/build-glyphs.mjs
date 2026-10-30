@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const NAMES = [
   // actions and pages
-  'volume-2', 'languages', 'scan', 'mic', 'audio-lines', 'keyboard', 'file-text', 'notebook-pen', 'book-open', 'house', 'info', 'settings',
+  'volume-2', 'languages', 'graduation-cap', 'scan', 'mic', 'audio-lines', 'keyboard', 'file-text', 'notebook-pen', 'book-open', 'list-checks', 'house', 'info', 'settings',
   // the sidebar
   'list-ordered', 'message-square-text', 'arrow-left',
   // rows

@@ -70,8 +70,8 @@ export function cardText(g: Gpu): string {
  */
 export type LevelFit = { where: 'card' | 'part' | 'processor'; slow: boolean; cuda: boolean }
 
-/** The model's own memory on the card, in MB, with its working room (TranslateGemma 4B and 12B, Q4_K_M). */
-const LEVEL_VRAM_MB = { accurate: 3500, most: 9000 }
+/** The model's own memory on the card, in MB, with its working room (TranslateGemma 4B and 12B, Q4_K_M; Gemma 4 E4B, q4_0, whose per-layer embeddings stay in the computer's memory: 3.1 GB measured). */
+const LEVEL_VRAM_MB = { accurate: 3500, most: 9000, check: 3500 }
 
 /** An NVIDIA card llama.cpp's CUDA 12.4 build runs on: compute 5.0, a driver of 551 or newer (as nvidia-smi numbers it). */
 function cudaReady(g: Gpu | undefined): boolean {
@@ -87,16 +87,26 @@ function cudaReady(g: Gpu | undefined): boolean {
  * Any card with memory of its own counts, as llama.cpp's Vulkan build runs on
  * NVIDIA, AMD and Intel alike; a chip sharing the system's memory does not.
  */
-export function translationAdvice(p: DeviceProfile | undefined): { advised: 'fast' | 'accurate' | 'most'; accurate: LevelFit; most: LevelFit } {
+/** How a model needing `need` MB on the card fits here. */
+function fitter(p: DeviceProfile | undefined): (need: number) => LevelFit {
   const vram = p?.gpus.reduce((most, g) => Math.max(most, g.vramMb), 0) ?? 0
   const nvidia = cudaReady(nvidiaCard(p)) && (nvidiaCard(p)?.vramMb ?? 0) === vram
-  const fit = (need: number): LevelFit =>
+  return need =>
     vram >= need
       ? { where: 'card', slow: false, cuda: false }
       : vram >= need / 2
         ? { where: 'part', slow: true, cuda: nvidia }
         : { where: 'processor', slow: true, cuda: false }
+}
+
+export function translationAdvice(p: DeviceProfile | undefined): { advised: 'fast' | 'accurate' | 'most'; accurate: LevelFit; most: LevelFit } {
+  const fit = fitter(p)
   const accurate = fit(LEVEL_VRAM_MB.accurate)
   const most = fit(LEVEL_VRAM_MB.most)
   return { advised: most.where === 'card' ? 'most' : accurate.where === 'card' ? 'accurate' : 'fast', accurate, most }
+}
+
+/** How Check my English's model fits here: on a card that holds it, a text in under a second; on the processor, several. */
+export function checkAdvice(p: DeviceProfile | undefined): LevelFit {
+  return fitter(p)(LEVEL_VRAM_MB.check)
 }

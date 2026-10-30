@@ -1218,6 +1218,24 @@ mark {
   white-space: nowrap;
 }
 
+/* A mistake as the check card marks it: the person's words struck out in red, the right ones in bold green. */
+.marks del {
+  color: var(--red);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--red) 75%, transparent);
+}
+
+.marks ins {
+  color: var(--green);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* A checked text wraps: its marks are the point. */
+.row.mistake .said {
+  white-space: normal;
+}
+
 /* A whole line that is a switch. */
 .trow {
   cursor: pointer;

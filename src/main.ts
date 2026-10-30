@@ -37,6 +37,7 @@ import { execFile } from 'node:child_process'
 
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
 
+import { createChecker, type Checker } from './checker'
 import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
 import { ClipboardGuard } from './clipguard'
@@ -46,7 +47,7 @@ import { DOWNLOADABLE, DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { frameWindow, WIN11 } from './dwm'
 import { createTranslator, NATIVES } from './engine'
-import { translationAdvice } from './hardware'
+import { checkAdvice, translationAdvice } from './hardware'
 import { hotkeyLabel, isAccelerator } from './hotkey'
 import { FIX_LANGUAGES, KeyboardHelper, keyboardLayouts } from './keyboard'
 import { loadLevelSpeeds, loadVoiceSpeed, median, nextLevelSpeed, nextVoiceSpeed, saveLevelSpeeds, saveVoiceSpeed, type LevelSpeeds, type VoiceSpeed } from './device'
@@ -54,7 +55,10 @@ import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { LearnStore } from './learning'
 import { lookup, type Dictionary } from './lemma'
+import { LlamaServer } from './llama'
+import { createLlmFiles, LLM_MODELS, type LlmFiles } from './llmfiles'
 import { createLlmTranslators, type LlmLevel, type LlmTranslators } from './llmtranslator'
+import { MistakeStore } from './mistakes'
 import { log, logTo } from './log'
 import { systemVoiceName, type NaturalState } from './natural'
 import { recognize } from './ocr'
@@ -62,7 +66,7 @@ import { pickLines } from './ocrpick'
 import { adoptOldFolders } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
-import type { AppTab, AppView, CardKind, CardState, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
+import type { AppTab, AppView, CardKind, CardState, CheckResult, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, textOutHtml, translationHtml } from './render'
 import { CARD_WIDTH, DEFAULTS, myLanguages, normalize, TARGET, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
@@ -75,6 +79,7 @@ import type { Translator } from './translator'
 import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
+import { wordDiff } from './worddiff'
 import { focus, focusedElement, release } from './uia'
 import { allowForeground, ctrlHeld, handleOf, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard, watchRendering } from './winclip'
 import {
@@ -126,7 +131,7 @@ const TRAY_REOPEN_MS = 300
 /** Ctrl+C pressed twice, as a card's header draws the key that called it. */
 const DOUBLE_COPY = 'Control+C*2'
 /** The settings that are keys of actions. */
-const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'inPlaceKey', 'switchKey', 'fixKey', 'pauseKey', 'windowKey']
+const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'inPlaceKey', 'checkKey', 'switchKey', 'fixKey', 'pauseKey', 'windowKey']
 /** The settings the keyboard thread is given (besides the keys). */
 const KEYBOARD_SETTINGS: readonly (keyof Settings)[] = [
   'layouts',
@@ -161,7 +166,7 @@ const LINKS = new Set([
 ])
 
 /** The settings that are Dictate's keys: registered only once the speech engine is installed. */
-const DICTATION_KEYS: readonly (keyof Settings)[] = ['dictateKey', 'englishKey', 'noteKey', 'againKey']
+const DICTATION_KEYS: readonly (keyof Settings)[] = ['dictateKey', 'englishKey', 'noteKey', 'againKey', 'practiceKey']
 
 // One Altype at a time, whichever folder it keeps its things in: the lock is taken on Altype's own
 // folder first, before a test run moves to its own. A second copy (another start, `npm start`, a test
@@ -222,8 +227,8 @@ const copies = new DoubleCopy()
 let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
-let keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, pause: true, window: true }
-let speechKeysOk = { dictate: true, note: true, english: true, again: true }
+let keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, pause: true, window: true }
+let speechKeysOk = { dictate: true, note: true, english: true, again: true, practice: true }
 let speech: SpeechHost
 let dictation: Dictation
 /** What a click on the tray's balloon does, for the balloon shown last. */
@@ -260,7 +265,7 @@ const LATE_COPY_MS = 1500
  * the keyboard back to: VS Code's chat, brought back to the front, does not
  * take it back by itself.
  */
-let pasteTarget: { id: number; window: bigint; field: unknown } | undefined
+let pasteTarget: { id: number; window: bigint; field: unknown; after?: string } | undefined
 /** The window in front when the card opened, which gets the keyboard back when the card is closed (Esc, ✕). */
 let cameFrom: bigint | undefined
 /** The card's bounds when its edge began to be dragged; the content's height, which the card follows otherwise. */
@@ -445,6 +450,14 @@ function levelTimed(level: LlmLevel, timed: { sentence: number; start?: number }
   levelSpeeds = { ...levelSpeeds, [level]: nextLevelSpeed(levelSpeeds[level], timed) }
   saveLevelSpeeds(deviceFile(), levelSpeeds)
   postApp()
+}
+
+/** The checker's measured seconds: a text, and loading its model, once timed a few times. */
+function checkSpeedView(): { speed?: { text: number; start?: number } } {
+  const s = levelSpeeds.check
+  const text = s && s.sentence.length >= LEVEL_SURE_AFTER ? median(s.sentence) : undefined
+  const start = s && s.start.length >= LEVEL_SURE_AFTER ? median(s.start) : undefined
+  return text === undefined ? {} : { speed: { text, ...(start !== undefined ? { start } : {}) } }
 }
 
 function levelSpeedView(): AppView['translationSpeed'] {
@@ -645,8 +658,8 @@ function post(message: ToView): void {
   if (card && cardReady && !card.isDestroyed()) card.webContents.send('to-view', message)
 }
 
-/** What a text is picked for: the card that reads its English aloud, the translator, or its translation pasted over it. */
-type Purpose = 'listen' | 'translate' | 'inPlace'
+/** What a text is picked for: the card that reads its English aloud, the translator, its translation pasted over it, or its English checked. */
+type Purpose = 'listen' | 'translate' | 'inPlace' | 'check'
 
 let languageWordsRead: LanguageWords | undefined
 /** The words that tell a text's language, read once. */
@@ -703,10 +716,21 @@ function commonWords(): string[] {
 
 // ---------------------------------------------------------------- the app window
 
+/** esbuild.mjs: when this copy was built, and from which commit. */
+declare const ALTYPE_BUILD: { at: string; commit: string; changed: boolean }
+
+/** "30 Oct, 07:12 (ff17ba8, changed)": a run from source tells today's build from yesterday's. */
+function buildText(): string {
+  const at = new Date(ALTYPE_BUILD.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  return ALTYPE_BUILD.commit ? `${at} (${ALTYPE_BUILD.commit}${ALTYPE_BUILD.changed ? ', changed' : ''})` : at
+}
+
 function appView(): AppView {
   return {
     settings,
     version: app.getVersion(),
+    build: buildText(),
+    dev: !app.isPackaged,
     natural: naturalState(),
     hostVoices: hostVoices ?? [],
     languages: NATIVES.map(code => findLanguage(code))
@@ -724,6 +748,8 @@ function appView(): AppView {
     },
     translationSpeed: levelSpeedView(),
     dictionary: { status: dictionaryStatus() },
+    check: { name: LLM_MODELS.check.name, state: checker.state(), fit: checkAdvice(speech?.profile), ...checkSpeedView() },
+    mistakes: mistakes.list(),
     layouts: keyboardLayouts(),
     ...(keyboardTrouble ? { keyboardTrouble } : {}),
     ...(lastApp ? { lastApp } : {}),
@@ -858,6 +884,8 @@ function hideCard(): void {
   // A translation the translator holds as it closes is kept for the Translate page.
   const state = shown?.state
   if (state?.status === 'text' && state.result.status === 'ready' && card?.isVisible()) logTranslation(state.text, state.result.text, state.result.from, state.result.to)
+  // A checked text with a mistake goes into Mistakes once, as the card closes.
+  if (state?.status === 'check' && state.result.status === 'ready' && card?.isVisible()) logMistake(state.result)
   stopSpeaking()
   // The card plays the natural voice's audio, and its own voices, itself: they stop there.
   post({ type: 'stop' })
@@ -984,10 +1012,27 @@ function onMessage(message: ToHost): void {
       return
     case 'removeTranslation':
       if (settings.translationLevel === message.level) saveSettings({ translationLevel: 'fast' })
-      llm
+      llmFiles
         .remove(message.level)
         .catch(error => console.warn('Altype: could not remove the translation model', error))
         .finally(postApp)
+      return
+    case 'prepareChecker':
+      prepareChecker()
+      return
+    case 'removeChecker':
+      llmFiles
+        .remove('check')
+        .catch(error => console.warn('Altype: could not remove the checker', error))
+        .finally(postApp)
+      return
+    case 'forgetMistake':
+      mistakes.remove(message.at)
+      postApp()
+      return
+    case 'clearMistakes':
+      mistakes.clear()
+      postApp()
       return
     case 'prepareDictionary':
       dictionaries.get(langCode(settings.native), true)
@@ -1065,6 +1110,9 @@ function onMessage(message: ToHost): void {
       return
     case 'translateText':
       void translateTextCard(message.id, message.text, message.from, message.to)
+      return
+    case 'checkText':
+      void checkCard(message.id, message.text)
       return
     case 'copyText':
       clipboard.writeText(message.text).catch(error => console.warn('Altype: could not copy', error))
@@ -1282,7 +1330,7 @@ async function pasteTranslation(id: number, text: string): Promise<void> {
   await keysLetGo()
   focusWindow(target.window)
   hideCard()
-  await pasteInto(target.window, target.field, text)
+  await pasteInto(target.window, target.field, text + (target.after ?? ''))
 }
 
 /** The text pasted where the keyboard is in `window`, once it is in front, into `field` when known; the clipboard put back after. */
@@ -1382,6 +1430,76 @@ async function translateTextCard(id: number, text: string, from: string, to: str
   }
 }
 
+// ---------------------------------------------------------------- checking English
+
+/** Check my English (Gemma 4 E4B, on llama.cpp's server with the translation levels), and the mistakes it found. */
+let llmFiles: LlmFiles
+let checker: Checker
+let mistakes: MistakeStore
+
+/** The latest check asked of a check card: an older one, still running, is not shown. */
+let checkAsked = 0
+
+/**
+ * Opens Check my English by the pointer with a text (empty: one to type),
+ * checked at once; `window` (and its `field`): where it was selected or
+ * dictated, to paste the text set right back into, `after` it.
+ */
+function checkWindow(text: string, at: Point, window?: bigint, via?: string, field?: unknown, after?: string): void {
+  const id = openCard('check', { status: 'check', text, result: { status: 'none' }, model: LLM_MODELS.check.name, canPaste: !!window }, at, via)
+  releaseField(pasteTarget?.field)
+  pasteTarget = window ? { id, window, field, ...(after ? { after } : {}) } : undefined
+  if (!window) releaseField(field)
+  if (text.trim()) void checkCard(id, text)
+}
+
+/** Practice: a phrase spoken in English, checked by the pointer; Paste types it set right where the cursor was, a space after it. */
+function practice(text: string): void {
+  checkWindow(text, screen.getCursorScreenPoint(), foreground().hwnd, settings.practiceKey, focusedField(), ' ')
+}
+
+/** Checks the card's text, as it stands; its model downloaded first, the first time. */
+async function checkCard(id: number, text: string): Promise<void> {
+  const set = (result: CheckResult) => {
+    if (shown?.id === id && shown.state.status === 'check') setState(id, { ...shown.state, text, result })
+  }
+  const asked = ++checkAsked
+  const current = () => asked === checkAsked
+  try {
+    set({ status: 'checking' })
+    if (checker.state().status !== 'ready') {
+      await checker.prepare(state => {
+        if (current() && state.status === 'downloading') set({ status: 'downloading', progress: state.progress, size: state.size })
+        postApp()
+      })
+      if (current()) set({ status: 'checking' })
+    }
+    const out = await checker.check(text, langCode(settings.native))
+    if (current()) set({ status: 'ready', text, corrected: out.corrected, parts: wordDiff(text, out.corrected), note: out.note })
+  } catch (error) {
+    if (current()) set({ status: 'failed', message: messageOf(error) })
+  }
+}
+
+/** The checker's model downloaded ahead (the Check page's Use). */
+function prepareChecker(): void {
+  checker
+    .prepare(() => postApp())
+    .catch(error => console.warn('Altype: the checker did not download', error))
+    .finally(postApp)
+}
+
+function checkTimed(timed: { text: number; start?: number }): void {
+  levelSpeeds = { ...levelSpeeds, check: nextLevelSpeed(levelSpeeds.check, { sentence: timed.text, ...(timed.start !== undefined ? { start: timed.start } : {}) }) }
+  saveLevelSpeeds(deviceFile(), levelSpeeds)
+  postApp()
+}
+
+/** A checked text with a mistake, kept for Library › Mistakes. */
+function logMistake(result: Extract<CheckResult, { status: 'ready' }>): void {
+  if (mistakes.add({ text: result.text, corrected: result.corrected, note: result.note })) postApp()
+}
+
 /** Opens Windows' snipping overlay; the text of the picture it puts on the clipboard is shown to listen to, or translated. */
 function snip(purpose: Purpose = 'listen', via?: string): void {
   hideCard()
@@ -1402,6 +1520,7 @@ function endSnip(): void {
 /** Shows a picked text by the pointer: the card to listen to, or the translator; `window`: where it was selected (`field`, the field in it), or pastes its translation over it. */
 function showText(text: string, purpose: Purpose, at: Point, window?: bigint, via?: string, field?: unknown): void {
   if (purpose === 'translate') return translateWindow(text, at, window, via, field)
+  if (purpose === 'check') return checkWindow(text, at, window, via, field)
   releaseField(field)
   if (purpose === 'inPlace' && window) void translateInPlace(text, at, window, via)
   else translateText(text, 'selection', at, via)
@@ -1417,8 +1536,8 @@ async function useClipboard(purpose: Purpose): Promise<void> {
 async function useSelection(purpose: Purpose, via?: string): Promise<void> {
   const at = screen.getCursorScreenPoint()
   const window = foreground().hwnd
-  // The translator's Paste gives the keyboard back to this field.
-  const field = purpose === 'translate' ? focusedField() : undefined
+  // The translator's (and the checker's) Paste gives the keyboard back to this field.
+  const field = purpose === 'translate' || purpose === 'check' ? focusedField() : undefined
   snipSince = 0
   clipGuard.hold()
   await pressCopy()
@@ -1528,8 +1647,8 @@ function registerShortcuts(): void {
   }
   // Paused: no key but the pause key, and none is "taken".
   if (settings.paused) {
-    keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, pause: register(settings.pauseKey, togglePause), window: true }
-    speechKeysOk = { dictate: true, english: true, note: true, again: true }
+    keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, pause: register(settings.pauseKey, togglePause), window: true }
+    speechKeysOk = { dictate: true, english: true, note: true, again: true, practice: true }
     return
   }
   keysOk = {
@@ -1538,6 +1657,7 @@ function registerShortcuts(): void {
     translate: register(settings.translateKey, () => selection('translate', settings.translateKey)),
     text: register(settings.textKey, () => snip('translate', settings.textKey)),
     inPlace: register(settings.inPlaceKey, () => selection('inPlace', settings.inPlaceKey)),
+    check: register(settings.checkKey, () => selection('check', settings.checkKey)),
     pause: register(settings.pauseKey, togglePause),
     window: register(settings.windowKey, () => openApp()),
   }
@@ -1548,6 +1668,7 @@ function registerShortcuts(): void {
     english: dictate('english', settings.englishKey),
     note: dictate('note', settings.noteKey),
     again: speech?.installed ? register(settings.againKey, () => dictation.typeAgain()) : true,
+    practice: dictate('check', settings.practiceKey),
   }
   const taken = [
     !keysOk.snip && settings.snipKey,
@@ -1555,12 +1676,14 @@ function registerShortcuts(): void {
     !keysOk.translate && settings.translateKey,
     !keysOk.text && settings.textKey,
     !keysOk.inPlace && settings.inPlaceKey,
+    !keysOk.check && settings.checkKey,
     !keysOk.pause && settings.pauseKey,
     !keysOk.window && settings.windowKey,
     !speechKeysOk.dictate && settings.dictateKey,
     !speechKeysOk.english && settings.englishKey,
     !speechKeysOk.note && settings.noteKey,
     !speechKeysOk.again && settings.againKey,
+    !speechKeysOk.practice && settings.practiceKey,
   ].filter((k): k is string => !!k)
   // The settings window shows the trouble itself; the balloon is for a start without it.
   if (taken.length > 0 && !(appWin?.isVisible() ?? false)) {
@@ -1577,7 +1700,7 @@ function applyKeyboard(): void {
   keyboardTrouble = undefined
   try {
     // Dictate's keys work only once the engine is installed, here as with Electron's shortcuts; paused, the helper keeps the pause key alone.
-    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '' }, learned.forThread())
+    keyboard.apply(speech?.installed ? settings : { ...settings, dictateKey: '', englishKey: '', noteKey: '', againKey: '', practiceKey: '' }, learned.forThread())
   } catch (error) {
     keyboardTrouble = messageOf(error)
   }
@@ -1706,6 +1829,9 @@ function trayView(): TrayView {
     speech: { installed: speech?.installed ?? false, recording: dictation?.state === 'recording', noteKey: settings.noteKey },
     translator: activeTranslator().state(langCode(settings.native)).status,
     native: settings.native,
+    version: app.getVersion(),
+    build: buildText(),
+    dev: !app.isPackaged,
   }
 }
 
@@ -1882,6 +2008,9 @@ function runTrayCommand(command: TrayCommand): void {
       // An empty translator to type into; nothing to paste back into.
       translateWindow('', screen.getCursorScreenPoint())
       return
+    case 'checkEnglish':
+      checkWindow('', screen.getCursorScreenPoint())
+      return
     case 'listenScreen':
       snip('listen')
       return
@@ -1991,6 +2120,7 @@ function setUpSpeechEngine(): void {
       const t = activeTranslator()
       return translatePlain(text, from, 'en', t.translate, t.direct)
     },
+    check: practice,
     expected: () => myLanguages(settings),
     languageOf: text => languageOf(text, settings.native, languageWords(), myLanguages(settings)),
     balloon,
@@ -2077,13 +2207,16 @@ function start(): void {
     loader: unpacked('vendor', 'bergamot', 'bergamot-translator.js'),
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
   })
-  llm = createLlmTranslators({
+  llmFiles = createLlmFiles({
     root: path.join(localDir(), 'translate'),
-    log: path.join(userDir(), 'translate.log'),
+    // One server for the translation levels and the checker: one model on the card at a time.
+    server: new LlamaServer({ log: path.join(userDir(), 'translate.log') }),
     // A model that does not fit an NVIDIA card goes to llama.cpp's CUDA build, far quicker there than Vulkan.
-    engineFor: level => (translationAdvice(speech?.profile)[level].cuda ? 'cuda' : 'vulkan'),
-    onTimed: levelTimed,
+    engineFor: model => ((model === 'check' ? checkAdvice(speech?.profile) : translationAdvice(speech?.profile)[model]).cuda ? 'cuda' : 'vulkan'),
   })
+  llm = createLlmTranslators({ files: llmFiles, onTimed: levelTimed })
+  checker = createChecker({ files: llmFiles, onTimed: checkTimed })
+  mistakes = new MistakeStore(path.join(userDir(), 'mistakes.json'))
   levelSpeeds = loadLevelSpeeds(deviceFile())
   tray = createTray()
   tray.on('balloon-click', () => balloonClick?.())
@@ -2118,9 +2251,11 @@ function start(): void {
       else if (action === 'english') dictation.press('english', settings.englishKey)
       else if (action === 'note') dictation.press('note', settings.noteKey)
       else if (action === 'again') dictation.typeAgain()
+      else if (action === 'practice') dictation.press('check', settings.practiceKey)
       else if (action === 'select') selection('listen', settings.selectKey)
       else if (action === 'translate') selection('translate', settings.translateKey)
       else if (action === 'inPlace') selection('inPlace', settings.inPlaceKey)
+      else if (action === 'check') selection('check', settings.checkKey)
       else if (action === 'text') snip('translate', settings.textKey)
       else if (action === 'window') openApp()
       else snip('listen', settings.snipKey)
@@ -2203,7 +2338,7 @@ if (!theOnlyOne) {
       ['clipboard', () => stopWatching?.()],
       ['voice', () => natural?.dispose()],
       ['translator', () => translator?.dispose()],
-      ['translation models', () => llm?.dispose()],
+      ['translation models', () => llmFiles?.dispose()],
       ['keyboard', () => keyboard?.dispose()],
       ['learning', () => learned?.flush()],
     ]

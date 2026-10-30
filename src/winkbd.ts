@@ -332,7 +332,7 @@ export function fullScreenNow(): boolean {
  * A key to press: a virtual key, a character typed as itself whatever the
  * layout, or one half of a key press as the person made it (`again`).
  */
-export type Press = { vk: number } | { char: string } | { again: { vk: number; scan: number; up: boolean } }
+export type Press = { vk: number } | { char: string } | { again: { vk: number; scan: number; up: boolean } } | { release: number }
 
 /** Presses keys in the program in front: marked as Altype's own, unless pressed again for the person. */
 export function press(keys: readonly Press[]): void {
@@ -342,6 +342,8 @@ export function press(keys: readonly Press[]): void {
   for (const key of keys) {
     if ('again' in key) {
       event(key.again.vk, key.again.scan, key.again.up ? KEYEVENTF_KEYUP : 0, false)
+    } else if ('release' in key) {
+      event(key.release, 0, KEYEVENTF_KEYUP)
     } else if ('vk' in key) {
       event(key.vk, 0, 0)
       event(key.vk, 0, KEYEVENTF_KEYUP)

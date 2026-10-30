@@ -7,7 +7,7 @@
 // moment: a word typed in the wrong layout is fixed, translated and read
 // aloud, each step lighting the person's own key; then the line rises into
 // Home's head and the keys drop into their actions), whether the translator
-// and the voice are here, and the six actions with their keys. Back and Esc go
+// and the voice are here, and the actions with their keys. Back and Esc go
 // back through the places visited, as a browser does (from a transcript, to
 // the library first). Everything shown comes from the main process in one
 // `app` message, sent again whenever any of it changes; every change goes back
@@ -15,12 +15,13 @@
 
 import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
-import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
+import type { AppTab, AppView, DiffPart, KeyboardLayout, MistakeEntry, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
 import { LANGUAGES } from '../languages'
 import { translationAdvice, type LevelFit } from '../hardware'
 import { LEVEL_NAMES, myLanguages, RATES, type AppRule, type ThemeMode, type TranslationLevel } from '../settings'
 import type { AppPart } from '../typist'
 import { parseEntry } from '../vocabulary'
+import { changesOf, wordDiff } from '../worddiff'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
@@ -39,21 +40,23 @@ declare global {
 
 const save = (patch: Partial<Settings>) => post({ type: 'saveSettings', patch })
 
-type Action = 'listen' | 'translate' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
-type Page = Action | 'words' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'engine' | 'computer' | 'about' | 'search'
+type Action = 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
+type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'engine' | 'computer' | 'about' | 'search'
 
-const ACTIONS: readonly Action[] = ['listen', 'translate', 'screen', 'dictate', 'transcribe', 'keyboard']
+const ACTIONS: readonly Action[] = ['listen', 'translate', 'check', 'screen', 'dictate', 'transcribe', 'keyboard']
 const isAction = (name: Page): name is Action => (ACTIONS as readonly string[]).includes(name)
 /** Each action's icon, on its Home card and its page. */
-const ICONS: Record<Action, LucideName> = { listen: 'volume-2', translate: 'languages', screen: 'scan', dictate: 'mic', transcribe: 'audio-lines', keyboard: 'keyboard' }
+const ICONS: Record<Action, LucideName> = { listen: 'volume-2', translate: 'languages', check: 'graduation-cap', screen: 'scan', dictate: 'mic', transcribe: 'audio-lines', keyboard: 'keyboard' }
 const TITLES: Record<Page, string> = {
   listen: 'Listen',
   translate: 'Translate',
+  check: 'Check',
   screen: 'Screen',
   dictate: 'Dictate',
   transcribe: 'Transcribe',
   keyboard: 'Keyboard',
   words: 'Words',
+  mistakes: 'Mistakes',
   transcripts: 'Transcripts',
   translations: 'Translations',
   phrases: 'Phrases',
@@ -152,7 +155,12 @@ function keyLines(action: Action, s: Settings): KeyLine[] {
     case 'translate':
       return [
         { label: 'selection', hotkey: s.translateKey, chain: 'translate' },
-        { label: 'paste', hotkey: 'Enter' },
+        { label: 'paste back', hotkey: 'Enter' },
+      ]
+    case 'check':
+      return [
+        { label: 'selection', hotkey: s.checkKey },
+        { label: 'by voice', hotkey: s.practiceKey },
       ]
     case 'screen':
       return [
@@ -197,9 +205,9 @@ function engineCap(v: AppView): string {
   const p = v.speech.pack
   if (p.status === 'installing' && !installed(v)) return `downloading ${Math.round((p.progress ?? 0) * 100)}%`
   if (!installed(v)) return 'downloads once'
-  if (!running(v)) return 'Whisper'
+  if (!running(v)) return 'speech to text'
   const c = v.speech.plan.dictation.chosen
-  return `${c.label} · ${c.device === 'cuda' ? 'graphics card' : 'processor'} · ≈${seconds(c.estimate)}`
+  return `speech to text · on your ${c.device === 'cuda' ? 'graphics card' : 'processor'}`
 }
 
 /** What an action is called, what it runs on, and what it does. */
@@ -207,13 +215,15 @@ function actionText(action: Action, v: AppView): { title: string; cap: string; d
   const title = TITLES[action]
   switch (action) {
     case 'listen':
-      return { title, cap: naturalOn(v) ? 'natural voice' : 'Windows voice', desc: 'Reads English aloud, the translation under it.' }
+      return { title, cap: naturalOn(v) ? 'natural voice' : 'Windows voice', desc: 'Reads English text aloud and shows its translation.' }
     case 'translate':
-      return { title, cap: pairOf(v), desc: 'Your text into English. Enter pastes it back.' }
+      return { title, cap: pairOf(v), desc: 'Translates the selected text; Enter pastes the translation back.' }
+    case 'check':
+      return { title, cap: checkCap(v), desc: 'Marks the mistakes in your English and shows the fix.' }
     case 'screen':
-      return { title, cap: 'Windows OCR', desc: 'Draw a box over words you can’t select.' }
+      return { title, cap: 'text from the screen', desc: 'Draw a box around text you can’t select, then listen or translate.' }
     case 'dictate':
-      return { title, cap: engineCap(v), desc: `Say it and it types. Say it in ${v.settings.native}, get English.` }
+      return { title, cap: engineCap(v), desc: `Speak and it types where the cursor is. Speak ${v.settings.native}, get English.` }
     case 'transcribe':
       return { title, cap: 'files · microphone · Meet', desc: 'Talks and meetings into text, speaker by speaker.' }
     case 'keyboard':
@@ -222,7 +232,7 @@ function actionText(action: Action, v: AppView): { title: string; cap: string; d
         cap: cycleOf(v)
           .map(l => l.short)
           .join(' · '),
-        desc: v.settings.autoFix ? 'Fixes words typed in the wrong layout as you type.' : 'Switches the layout and fixes what was typed wrong.',
+        desc: v.settings.autoFix ? 'Fixes words typed in the wrong layout as you type.' : 'Switches the layout and fixes text typed in the wrong one.',
       }
   }
 }
@@ -244,6 +254,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
     label: 'Library',
     items: [
       { page: 'words', icon: 'book-open', title: 'Words', value: v => many(v.words.length) },
+      { page: 'mistakes', icon: 'list-checks', title: 'Mistakes', value: v => many(v.mistakes.length) },
       { page: 'transcripts', icon: 'file-text', title: 'Transcripts' },
       { page: 'translations', icon: 'clock', title: 'Translations', value: v => many(v.translations.length) },
       { page: 'phrases', icon: 'message-square-text', title: 'Phrases', value: v => many(v.dictation.recent.length) },
@@ -395,10 +406,10 @@ function readiness(v: AppView): (Node | string)[] {
   const sp = v.speech
   const speech: (Node | string)[] = !installed(v)
     ? sp.pack.status === 'installing'
-      ? [' · ', el('b', {}, 'speech'), ` ${Math.round((sp.pack.progress ?? 0) * 100)}%`]
+      ? [', ', el('b', {}, 'speech'), ` ${Math.round((sp.pack.progress ?? 0) * 100)}%`]
       : []
-    : [' · ', el('b', {}, 'speech'), running(v) ? ' ready' : sp.service === 'down' ? ' stopped' : ' starting']
-  return [el('b', {}, pairOf(v)), ` ${translator} · `, ...voice, ...speech, ' · runs on this computer']
+    : [', ', el('b', {}, 'speech'), running(v) ? ' ready' : sp.service === 'down' ? ' stopped' : ' starting']
+  return [el('b', {}, pairOf(v)), ` ${translator}, `, ...voice, ...speech, '. Everything runs on this computer.']
 }
 
 function homeRow(action: Action, v: AppView): HTMLElement {
@@ -431,7 +442,7 @@ function pausedNotice(v: AppView): HTMLElement | null {
     'div',
     { class: 'row notice' },
     lucide('pause'),
-    el('div', { class: 'l' }, 'Altype is paused', el('small', {}, 'its keys and the layout fixing do nothing until it resumes')),
+    el('div', { class: 'l' }, 'Altype is paused', el('small', {}, 'shortcuts and layout fixing are off until you resume')),
     btn('Resume', () => save({ paused: false }), 'primary'),
   )
 }
@@ -888,7 +899,7 @@ const SUBS: Record<SubId, Sub> = {
   model: { title: 'Speech model', body: modelPage, valid: running },
   meet: { title: 'Google Meet', cap: () => 'the Altype extension for Chrome', body: meetPage },
   speakers: { title: 'Who spoke when', cap: () => 'the voices told apart', body: speakerRows, valid: installed },
-  fixing: { title: 'Fixing as I type', cap: () => 'what is set right as you type', body: fixingPage },
+  fixing: { title: 'Fixing as I type', cap: () => 'what else Altype sets right while you type', body: fixingPage },
   program: { title: () => programOpen, body: programPage, valid: () => !!programOpen },
   languages: { title: 'Languages you use', body: languagesPage },
 }
@@ -900,6 +911,7 @@ const subTitle = (id: SubId) => {
 /** A few words by the page's name in the bar. */
 const CAPS: Partial<Record<Page, (v: AppView) => string>> = {
   words: v => (v.words.length ? `${v.words.length} saved · from your cards` : 'none yet · from your cards'),
+  mistakes: () => 'from Check · on this computer',
   transcripts: () => transcriptsCap(),
   translations: () => 'kept 30 days on this computer',
   phrases: () => 'dictated lately · kept 30 days on this computer',
@@ -1030,6 +1042,8 @@ function bodyOf(v: AppView): HTMLElement[] {
       return listenPage(v)
     case 'translate':
       return translatePage(v)
+    case 'check':
+      return checkPage(v)
     case 'screen':
       return screenPage(v)
     case 'dictate':
@@ -1040,6 +1054,8 @@ function bodyOf(v: AppView): HTMLElement[] {
       return keyboardPage(v)
     case 'words':
       return wordsPage(v)
+    case 'mistakes':
+      return mistakesPage(v)
     case 'transcripts':
       return transcriptsBody(v)
     case 'translations':
@@ -1203,20 +1219,37 @@ function tryIt(text: string, how: string): HTMLElement {
 
 // ---------------------------------------------------------------- keys on pages
 
-type KeyName = 'selectKey' | 'snipKey' | 'translateKey' | 'textKey' | 'inPlaceKey' | 'switchKey' | 'fixKey' | 'dictateKey' | 'englishKey' | 'noteKey' | 'againKey' | 'pauseKey' | 'windowKey'
+type KeyName =
+  | 'selectKey'
+  | 'snipKey'
+  | 'translateKey'
+  | 'textKey'
+  | 'inPlaceKey'
+  | 'checkKey'
+  | 'switchKey'
+  | 'fixKey'
+  | 'dictateKey'
+  | 'englishKey'
+  | 'noteKey'
+  | 'againKey'
+  | 'practiceKey'
+  | 'pauseKey'
+  | 'windowKey'
 
 const KEY_USE: Record<KeyName, string> = {
   selectKey: 'listening to the selection',
-  snipKey: 'listening to a piece of the screen',
+  snipKey: 'listening to text on the screen',
   translateKey: 'translating the selection',
-  textKey: 'translating a piece of the screen',
-  inPlaceKey: 'translating in place',
+  textKey: 'translating text on the screen',
+  inPlaceKey: 'replacing the selection with its translation',
+  checkKey: 'checking your English',
   switchKey: 'switching the layout',
   fixKey: 'fixing the layout',
   dictateKey: 'dictating',
   englishKey: 'dictating in English',
   noteKey: 'dictating a note',
   againKey: 'typing the last phrase again',
+  practiceKey: 'checking what you say',
   pauseKey: 'pausing Altype',
   windowKey: 'opening Altype',
 }
@@ -1244,7 +1277,16 @@ function saveKey(name: KeyName, key: string): void {
 
 /** A key of an action, from the settings (see keyRecorder). */
 function keyRow(name: KeyName, label: string, note: string, taken = false, iconName?: LucideName, extra?: HTMLElement | null): HTMLElement {
-  return keyRecorder(name, view?.settings[name] ?? '', key => saveKey(name, key), label, note, taken, iconName, extra)
+  const key = view?.settings[name] ?? ''
+  const menu = menuNote(key)
+  return keyRecorder(name, key, key => saveKey(name, key), label, menu ? `${note}; ${menu}` : note, taken, iconName, extra)
+}
+
+/** Alt or Win alone as a key: Altype keeps it from opening a menu (typist.ts), so the line says where the menu went. */
+function menuNote(key: string): string {
+  if (/^(Left|Right)Alt(\*2)?$/.test(key)) return 'Alt alone no longer opens menus, F10 does'
+  if (/^(Left|Right)Super(\*2)?$/.test(key)) return 'Win alone no longer opens Start, Ctrl+Esc does'
+  return ''
 }
 
 /** A layout's own key, which goes to that layout at once. */
@@ -1382,12 +1424,12 @@ function listenPage(v: AppView): HTMLElement[] {
     grp('Keys'),
     card(
       'copy',
-      'Copied text',
-      ['press Ctrl + C twice, quickly'],
+      'Listen to copied text',
+      ['select it, then press Ctrl + C twice, quickly'],
       el('span', { class: 'kchg' }, caps(COPY_TWICE), el('span', { class: 'tgwrap' }, toggleKnob(s.doubleCopy, doubleCopy => save({ doubleCopy }), 'Ctrl + C twice'))),
     ),
-    keyRow('selectKey', 'Selected text', s.selectKey ? 'Altype copies the selection itself' : 'one key, if you want one', !v.keysOk.select, 'volume-2'),
-    keyRow('snipKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.snip, 'scan'),
+    keyRow('selectKey', 'Listen to the selected text', s.selectKey ? 'select it anywhere, press this key' : 'a single key, instead of Ctrl + C twice', !v.keysOk.select, 'volume-2'),
+    keyRow('snipKey', 'Listen to text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.snip, 'scan'),
     ...voiceRows(v),
     grp('The card'),
     toggleCard('volume-2', 'Read aloud when a card opens', s.autoRead, autoRead => save({ autoRead })),
@@ -1395,7 +1437,7 @@ function listenPage(v: AppView): HTMLElement[] {
     toggleCard('list', 'Listen reads one sentence at a time', s.oneAtATime, oneAtATime => save({ oneAtATime })),
     card(
       'book-open',
-      'Word meanings on',
+      'Show word meanings on',
       [],
       select(
         s.wordHint,
@@ -1408,10 +1450,10 @@ function listenPage(v: AppView): HTMLElement[] {
       ),
     ),
     grp('In the card'),
-    card('play', 'Play or stop · step through sentences', [], el('span', { class: 'kg2' }, caps('Space'), caps('←'), caps('→'))),
-    card('book-open', 'A word: its meanings, its sound, a star to keep it in Words', ['click it'], null),
-    card('languages', 'A sentence: its translation marked', ['click it · ▶ in the margin reads one paragraph'], null),
-    card('x', 'Close, and stop the voice', [], caps('Esc')),
+    card('play', 'Play, stop and step through sentences', [], el('span', { class: 'kg2' }, caps('Space'), caps('←'), caps('→'))),
+    card('book-open', 'Click a word', ['see its meanings, hear it, star it to keep it in Words'], null),
+    card('languages', 'Click a sentence', ['its translation is marked; ▶ in the margin reads one paragraph'], null),
+    card('x', 'Close the card and stop the voice', [], caps('Esc')),
     tryIt('The morning was quiet. A small boat drifted along the river, and two children watched the ducks from the bridge.', how),
   ].filter((n): n is HTMLElement => n !== null)
 }
@@ -1426,51 +1468,59 @@ function translatorChip(v: AppView): [HTMLElement, string] {
   const from = level === 'fast' ? 'Mozilla' : 'Hugging Face'
   switch (v.translator) {
     case 'ready':
-      return [chip('ready'), `${LEVEL_NAMES[level]} · on this computer`]
+      return [chip('ready'), `${LEVEL_NAMES[level]} translation, works offline`]
     case 'absent':
-      return [chip('on first use', 'off'), `downloads once from ${from} on the first translation, then works offline`]
+      return [chip('on first use', 'off'), `downloads from ${from} at the first translation, then works offline`]
     case 'downloading':
-      return [chip('downloading'), `downloading once from ${from}`]
+      return [chip('downloading'), `downloading from ${from}, once`]
     case 'failed':
       return [chip('failed', 'bad'), 'could not download; the next translation tries again']
     case 'unsupported':
-      return [chip('not offered', 'off'), 'Firefox Translations has no offline model for this language yet']
+      return [chip('not offered', 'off'), 'no offline translator for this language yet']
   }
 }
 
 const LEVEL_ABOUT: Record<TranslationLevel, string> = {
-  fast: 'Firefox Translations · at once, though a short phrase may come out word for word',
-  accurate: 'TranslateGemma 4B by Google · reads the phrase as a whole',
-  most: 'TranslateGemma 12B · the best wording, and the slowest',
+  fast: 'Instant; short phrases may come out word for word',
+  accurate: 'Understands the whole sentence',
+  most: 'The best wording, and the slowest',
+}
+
+/** The model behind a level, named last. */
+const LEVEL_MODEL: Record<TranslationLevel, string> = {
+  fast: 'Firefox Translations',
+  accurate: 'TranslateGemma 4B',
+  most: 'TranslateGemma 12B',
 }
 
 const FIT_WHERE: Record<LevelFit['where'], string> = {
-  card: 'on the graphics card',
-  part: 'partly on the graphics card',
-  processor: 'on the processor',
+  card: 'on your graphics card',
+  part: 'partly on your graphics card',
+  processor: 'on your processor',
 }
 
 /** The time expected before any is measured here. */
 const FIT_GUESS: Record<LevelFit['where'], string> = {
-  card: 'a text in a second or two',
+  card: 'about 1–2 s per sentence',
   part: 'possible, but slow here',
-  processor: 'possible, but slow here: half a minute a text or more',
+  processor: 'possible, but slow here: 30 s or more per text',
 }
 
-/** A model partly on an NVIDIA card, through llama.cpp's CUDA build (in its download). */
-const CUDA_WHERE = 'partly on the graphics card, with NVIDIA’s own build (670 MB of the download)'
-const CUDA_GUESS = 'a short text in a few seconds, a long one in 15–20 s'
+/** A model partly on an NVIDIA card runs on llama.cpp's CUDA build, which its download carries. */
+const CUDA_GUESS = 'a few seconds for a short text, 15–20 s for a long one'
+const CUDA_SIZE = 'with NVIDIA’s own build, 670 MB'
 
 /** A sentence slower than this reads as slow. */
 const SLOW_SENTENCE_S = 2
 
+/** The wait for a model loaded again after it was let go, measured here. */
+const startText = (start: number | undefined) => (start !== undefined ? `; it starts in ${seconds(start)} after 10 idle minutes` : '')
+
 /** Where a level runs here and how long it takes: measured, once it has been, else expected. */
 function levelFitText(fit: LevelFit, measured: { sentence: number; start?: number } | undefined): string {
-  const where = fit.cuda ? CUDA_WHERE : FIT_WHERE[fit.where]
-  if (!measured) return `${where} · ${fit.cuda ? CUDA_GUESS : FIT_GUESS[fit.where]}`
-  const start = measured.start !== undefined ? `, ${seconds(measured.start)} to load after 10 idle minutes` : ''
-  const pace = `${seconds(measured.sentence)} a sentence${start}`
-  return `${where} · ${measured.sentence > SLOW_SENTENCE_S ? 'slow here' : 'here'}: ${pace}`
+  const where = FIT_WHERE[fit.where]
+  if (!measured) return fit.cuda ? `${CUDA_GUESS}, ${where}` : fit.where === 'card' ? `${FIT_GUESS.card} ${where}` : `${FIT_GUESS[fit.where]}, ${where}`
+  return `${measured.sentence > SLOW_SENTENCE_S ? 'slow here' : 'here'}: ${seconds(measured.sentence)} per sentence, ${where}${startText(measured.start)}`
 }
 
 /**
@@ -1486,13 +1536,15 @@ function levelRows(v: AppView): HTMLElement[] {
     const t = v.translation[level]
     const fit = level === 'fast' ? undefined : advice[level]
     const fetching = t.status === 'downloading'
+    // What it is, then how it runs here, then what it downloads: a line each.
     const notes: (string | HTMLElement | null)[] = [
-      fit ? `${LEVEL_ABOUT[level]} · ${levelFitText(fit, level === 'fast' ? undefined : v.translationSpeed[level])}` : LEVEL_ABOUT[level],
+      `${LEVEL_ABOUT[level]} (${LEVEL_MODEL[level]})`,
+      fit && level !== 'fast' ? levelFitText(fit, v.translationSpeed[level]) : null,
       t.status === 'failed'
-        ? bad('the download failed · Use tries again')
+        ? bad('the download failed; Use tries again')
         : t.status === 'ready' || fetching
           ? null
-          : `${speechSize(t.size)}, ${level === inUse ? 'downloads with the next translation' : 'downloads when picked'}`,
+          : `${speechSize(t.size)} to download ${level === inUse ? 'with the next translation' : 'when you pick it'}${fit?.cuda ? ` (${CUDA_SIZE})` : ''}`,
       fetching ? bar(t.progress) : null,
     ]
     const label = el('span', {}, LEVEL_NAMES[level], advice.advised === level ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
@@ -1513,17 +1565,17 @@ function translatePage(v: AppView): HTMLElement[] {
   const how = s.translateKey ? `Select it, ${usage(s.translateKey)}.` : 'Set a key above, then select it and press the key.'
   return [
     grp('Keys'),
-    keyRow('translateKey', 'Selected text', s.translateKey ? usage(s.translateKey) : 'one key: Left Ctrl twice, for example', !v.keysOk.translate, 'languages'),
-    keyRow('inPlaceKey', 'Translate in place', 'the selection becomes its translation, no card', !v.keysOk.inPlace, 'wand-sparkles'),
-    keyRow('textKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.text, 'scan'),
-    fixedKey('Paste the translation over the selection', 'Enter'),
+    keyRow('translateKey', 'Translate the selected text', s.translateKey ? `select it anywhere, ${usage(s.translateKey)}` : 'select it anywhere, then press one key, such as Left Ctrl twice', !v.keysOk.translate, 'languages'),
+    keyRow('inPlaceKey', 'Replace the selection with its translation', 'no card', !v.keysOk.inPlace, 'wand-sparkles'),
+    keyRow('textKey', 'Translate text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.text, 'scan'),
+    fixedKey('In the card: paste the translation back', 'Enter'),
     grp('Translation'),
     ...levelRows(v),
     grp('Languages'),
     card('globe', pairOf(v), [note], state),
     languagesCard(v),
     grp('History'),
-    navCard('clock', 'Recent translations', 'kept 30 days on this computer', v.translations.length ? String(v.translations.length) : 'none', () => go('translations'), 'translations'),
+    navCard('clock', 'Recent translations', 'kept for 30 days, on this computer only', v.translations.length ? String(v.translations.length) : 'none', () => go('translations'), 'translations'),
     tryIt(text, how),
   ]
 }
@@ -1551,15 +1603,171 @@ function translationsPage(v: AppView): HTMLElement[] {
   ]
 }
 
+// ---------------------------------------------------------------- check my English
+
+/** Mistakes made by learners whose own language is Russian or Ukrainian: the page's text to try. */
+const TRY_CHECK = 'I want to learn English and can we made tutor option? I dictate or tupe in English and you show my my mistake.'
+
+/** A text slower than this to check reads as slow. */
+const SLOW_CHECK_S = 4
+
+/** Where the checker runs here and how long a text takes: measured, once it has been, else expected. */
+function checkFitText(fit: LevelFit, measured: { text: number; start?: number } | undefined): string {
+  const where = FIT_WHERE[fit.where]
+  if (!measured) return fit.where === 'card' ? `about 1 s per text ${where}` : `possible, but slow here: several seconds per text, ${where}`
+  return `${measured.text > SLOW_CHECK_S ? 'slow here' : 'here'}: ${seconds(measured.text)} per text, ${where}${startText(measured.start)}`
+}
+
+/** What the checker does, for the bar and Home: the language it checks, or its download. */
+function checkCap(v: AppView): string {
+  const t = v.check.state
+  if (t.status === 'downloading') return `downloading ${Math.round(t.progress * 100)}%`
+  return t.status === 'ready' ? `English · notes in ${v.settings.native}` : 'downloads once'
+}
+
+/** The checker's model: Download (with its progress), a cross to remove it, Recommended on a card that holds it, its time here. */
+function checkerRow(v: AppView): HTMLElement {
+  const c = v.check
+  const t = c.state
+  const fetching = t.status === 'downloading'
+  const notes: (string | HTMLElement | null)[] = [
+    `Marks the mistakes and says the main one (${c.name} by Google)`,
+    checkFitText(c.fit, c.speed),
+    t.status === 'failed' ? bad('the download failed; Download tries again') : t.status === 'ready' || fetching ? null : `${speechSize(t.size)} to download, with Download or at your first check`,
+    fetching ? bar(t.progress) : null,
+  ]
+  const label = el('span', {}, 'Checking model', c.fit.where === 'card' ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
+  const control = fetching
+    ? el('span', { class: 'pct' }, `${Math.round(t.progress * 100)}%`)
+    : t.status === 'ready'
+      ? chip('ready', 'lit')
+      : linkBtn('Download', () => post({ type: 'prepareChecker' }))
+  const remove = t.status === 'ready' ? ib('x', `Remove ${c.name} (${speechSize(t.size)})`, () => post({ type: 'removeChecker' })) : null
+  return row(label, notes, control, remove)
+}
+
+function checkPage(v: AppView): HTMLElement[] {
+  const s = v.settings
+  const how = s.checkKey ? `This text has mistakes on purpose. Select it, ${usage(s.checkKey)}, or use Check my English… in the tray menu.` : 'This text has mistakes on purpose. Select it and press your key, or use Check my English… in the tray menu.'
+  return [
+    grp('Keys'),
+    keyRow('checkKey', 'Check the selected text', s.checkKey ? `select it anywhere, ${usage(s.checkKey)}` : 'select it anywhere, then press one key, such as Right Ctrl twice', !v.keysOk.check, 'graduation-cap'),
+    keyRow('practiceKey', 'Check what I say', installed(v) ? 'press, say a phrase in English, press again' : 'needs the speech engine (see Dictate)', !v.speech.keysOk.practice, 'mic'),
+    fixedKey('In the card: paste the corrected text back', 'Enter'),
+    aside('info', 'Speech recognition fixes some mistakes as it writes, so typing shows more of them.'),
+    grp('Model'),
+    checkerRow(v),
+    grp('History'),
+    navCard('list-checks', 'Mistakes', 'what Check found in your texts, repeated ones first', v.mistakes.length ? String(v.mistakes.length) : 'none', () => go('mistakes'), 'mistakes'),
+    tryIt(TRY_CHECK, how),
+  ]
+}
+
+/** The changes of each kept text, worked out once (worddiff.ts). */
+const diffs = new Map<string, DiffPart[]>()
+function partsOf(e: MistakeEntry): DiffPart[] {
+  const key = `${e.text}\u0000${e.corrected}`
+  let parts = diffs.get(key)
+  if (!parts) diffs.set(key, (parts = wordDiff(e.text, e.corrected)))
+  return parts
+}
+
+/** A text with its mistakes, as the card marks them: struck out, then set right. */
+function withMarks(parts: readonly DiffPart[]): Node[] {
+  return parts.flatMap((p, i) =>
+    p.kind === 'same'
+      ? [document.createTextNode(p.text)]
+      : [el(p.kind, {}, p.text), ...(p.kind === 'del' && parts[i + 1]?.kind === 'ins' ? [document.createTextNode(' ')] : [])],
+  )
+}
+
+/** One change on its own: "made → make", "+ a", "about" struck out. */
+function changeText(wrong: string, right: string): HTMLElement {
+  return el('span', { class: 'said marks' }, wrong ? el('del', {}, wrong) : '+', ' ', right ? el('ins', {}, right) : '')
+}
+
+/**
+ * Library › Mistakes: the changes made more than once, most first, then every
+ * checked text that had a mistake, newest first, marked as in the card, with
+ * its note; searched by the words; a cross forgets one, Clear all of them.
+ */
+function mistakesPage(v: AppView): HTMLElement[] {
+  // A mistake repeats when the same words are struck out again ("made" → "make", "make a"); a word only missing, when the same one is put in.
+  const counts = new Map<string, { wrong: string; rights: string[] }>()
+  for (const e of v.mistakes)
+    for (const c of changesOf(partsOf(e))) {
+      const key = c.wrong ? c.wrong.toLowerCase() : `+${c.right.toLowerCase()}`
+      const known = counts.get(key)
+      if (known) known.rights.push(c.right)
+      else counts.set(key, { wrong: c.wrong, rights: [c.right] })
+    }
+  // Shown with its commonest fix, the shortest of equals.
+  const commonest = (rights: string[]) =>
+    rights.slice().sort((a, b) => rights.filter(r => r === b).length - rights.filter(r => r === a).length || a.length - b.length)[0] ?? ''
+  const repeated = [...counts.values()]
+    .filter(c => c.rights.length > 1)
+    .sort((a, b) => b.rights.length - a.rights.length)
+    .slice(0, 12)
+    .map(c => ({ wrong: c.wrong, right: commonest(c.rights), n: c.rights.length }))
+  const list = el('div', {})
+  const fill = () => {
+    // The newest mistakes: this list may outlive the message it was drawn from.
+    const all = view?.mistakes ?? v.mistakes
+    const q = search.trim().toLowerCase()
+    const shown = q ? all.filter(e => `${e.text} ${e.corrected} ${e.note}`.toLowerCase().includes(q)) : all
+    list.replaceChildren(
+      ...(shown.length
+        ? shown.map(e =>
+            el(
+              'div',
+              { class: 'row phrase mistake' },
+              el('div', { class: 'l' }, el('span', { class: 'said marks', title: e.corrected }, ...withMarks(partsOf(e))), el('small', {}, [e.note, whenSaid(e.at, Date.now())].filter(Boolean).join(' · '))),
+              linkBtn('Copy', () => copyText(e.corrected)),
+              ib('x', 'Forget it', () => post({ type: 'forgetMistake', at: e.at })),
+            ),
+          )
+        : [aside('info', all.length ? 'No such mistake.' : 'Nothing yet. The texts Check my English set right are kept here, on this computer.')]),
+    )
+  }
+  fill()
+  return [
+    ...(repeated.length ? [grp('You repeat'), ...repeated.map(c => row(changeText(c.wrong, c.right), [`${c.n} times`]))] : []),
+    grp('Mistakes', v.mistakes.length || undefined, v.mistakes.length ? linkBtn('Clear', () => post({ type: 'clearMistakes' })) : null),
+    ...(v.mistakes.length
+      ? [
+          el(
+            'div',
+            { class: 'tools' },
+            el(
+              'label',
+              { class: 'search' },
+              icon('search'),
+              el('input', {
+                type: 'search',
+                placeholder: 'Search your mistakes',
+                value: search,
+                oninput: event => {
+                  search = (event.target as HTMLInputElement).value
+                  fill()
+                },
+              }),
+            ),
+          ),
+        ]
+      : []),
+    list,
+  ]
+}
+
 function screenPage(v: AppView): HTMLElement[] {
   return [
     grp('Keys'),
-    keyRow('snipKey', 'Listen to a piece of the screen', '', !v.keysOk.snip, 'volume-2'),
-    keyRow('textKey', 'Translate a piece of the screen', '', !v.keysOk.text, 'languages'),
-    grp('How'),
-    card('scan', 'Windows dims the screen; draw a box over the words', [], null),
-    card('type', 'Windows OCR reads them on this computer', ['in the languages Windows can read; add one there'], linkBtn('Languages…', () => post({ type: 'openLanguageSettings' }))),
-    card('spell-check', 'Fix what it misread in the card, then translate', [], null),
+    keyRow('snipKey', 'Listen to text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.snip, 'volume-2'),
+    keyRow('textKey', 'Translate text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.text, 'languages'),
+    grp('How it works'),
+    card('scan', 'Draw a box around the text', ['Windows dims the screen while you draw'], null),
+    card('type', 'Altype reads the text on this computer', ['it reads the languages Windows has installed; add more there (Windows OCR)'], linkBtn('Languages…', () => post({ type: 'openLanguageSettings' }))),
+    card('spell-check', 'Fix misread words in the card', ['then listen or translate'], null),
   ]
 }
 
@@ -1570,7 +1778,7 @@ const pathNote = (path: string) => el('small', { class: 'path', title: path }, e
 /** Where notes go: the knowledge base folder and the folder inside it, the engine's own settings. */
 function kbRows(v: AppView): HTMLElement[] {
   const e = engineSettings(v)
-  if (!running(v) || !e) return [card('folder', 'Folder', [installed(v) ? 'shown once the speech engine runs' : 'chosen once the speech engine is here'], null)]
+  if (!running(v) || !e) return [card('folder', 'Notes folder', [installed(v) ? 'shown once the speech engine runs' : 'chosen once the speech engine is installed'], null)]
   const inbox = el('input', {
     type: 'text',
     class: 'field',
@@ -1581,22 +1789,22 @@ function kbRows(v: AppView): HTMLElement[] {
     onchange: (event: Event) => void saveEngine({ kbInbox: (event.target as HTMLInputElement).value.trim() }),
   })
   return [
-    card('folder', 'Folder', [e.kbDir ? pathNote(e.kbDir) : 'not chosen · notes need one; an Obsidian vault will do'], linkBtn(e.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
-    card('notebook-pen', 'Notes go into', ['a folder inside it · empty: the folder itself'], inbox),
+    card('folder', 'Notes folder', [e.kbDir ? pathNote(e.kbDir) : 'not chosen yet; notes need a folder (an Obsidian vault will do)'], linkBtn(e.kbDir ? 'Change' : 'Choose…', () => void pickKb())),
+    card('notebook-pen', 'Subfolder for notes', ['a folder inside it; leave empty to use the folder itself'], inbox),
   ]
 }
 
 /** The card that opens the words to spell: how many there are. */
 function vocabularyCard(v: AppView): HTMLElement {
   const n = v.settings.vocabulary.length
-  return navCard('spell-check', 'Words to spell', 'names and terms, written as you say them', n ? `${n} ${n === 1 ? 'word' : 'words'}` : 'none yet', () => go('vocabulary'), 'vocabulary')
+  return navCard('spell-check', 'Words to spell', 'names and terms, written the way you want them', n ? `${n} ${n === 1 ? 'word' : 'words'}` : 'none yet', () => go('vocabulary'), 'vocabulary')
 }
 
 /** The card that opens a feature's speech models: the one in use. */
 function modelCard(v: AppView, feature: 'dictation' | 'transcripts'): HTMLElement | null {
   if (!running(v)) return null
   const p = feature === 'dictation' ? v.speech.plan.dictation : v.speech.plan.transcripts
-  const how = feature === 'dictation' ? `a phrase in ≈${seconds(p.chosen.estimate)}` : `an hour in ≈${minutesText(p.chosen.estimate)}`
+  const how = feature === 'dictation' ? `about ${seconds(p.chosen.estimate)} per phrase` : `about ${minutesText(p.chosen.estimate)} per hour of recording`
   return navCard('cpu', 'Speech model', `${how} on this computer`, p.pinned ? p.chosen.label : `Automatic · ${p.chosen.label}`, () => openSub('model'), 'model')
 }
 
@@ -1612,16 +1820,17 @@ function dictatePage(v: AppView): HTMLElement[] {
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
     testOffer(v),
     grp('Keys'),
-    keyRow('dictateKey', 'Dictate', 'types what you say where the cursor is', !k.dictate, 'mic'),
-    keyRow('englishKey', 'Dictate in English', `say it in ${s.native}, English is typed`, !k.english, 'languages'),
-    keyRow('noteKey', 'A note', 'kept in the knowledge base as a .md file', !k.note, 'notebook-pen'),
-    keyRow('againKey', 'Type the last phrase again', 'what was dictated last, where the cursor is', !k.again, 'rotate-cw'),
-    aside('info', 'Tap the key, talk, tap it again. The words show as you speak; Esc throws the phrase away, while it records and while it types.'),
-    grp('Knowledge base'),
+    keyRow('dictateKey', 'Type what I say', 'press, speak, press again; the words appear where the cursor is', !k.dictate, 'mic'),
+    keyRow('englishKey', 'Type what I say, in English', `press, speak ${s.native}, press again; English is typed`, !k.english, 'languages'),
+    keyRow('noteKey', 'Dictate a note', 'saved as a Markdown file in your notes folder', !k.note, 'notebook-pen'),
+    keyRow('againKey', 'Type the last phrase again', 'repeats it where the cursor is', !k.again, 'rotate-cw'),
+    keyRow('practiceKey', 'Check what I say', 'press, say a phrase in English, press again', !k.practice, 'graduation-cap'),
+    aside('info', 'The words appear as you speak. Esc cancels the phrase before it is typed.'),
+    grp('Notes'),
     ...kbRows(v),
     grp('Words and phrases'),
     vocabularyCard(v),
-    navCard('clock', 'Recent phrases', 'what was dictated lately, to copy again', recent.length ? recent[0]?.text ?? '' : 'none yet', () => go('phrases'), 'phrases'),
+    navCard('clock', 'Recent phrases', 'phrases you dictated lately, to copy again', recent.length ? recent[0]?.text ?? '' : 'none yet', () => go('phrases'), 'phrases'),
     modelCard(v, 'dictation'),
     el('p', { class: 'privacy' }, lucide('lock', 's'), 'Speech is recognized on this computer; nothing is sent anywhere.'),
   ].filter((n): n is HTMLElement => n !== null)
@@ -1903,13 +2112,13 @@ function fixingPage(v: AppView): HTMLElement[] {
   const s = v.settings
   return [
     grp('Capitals'),
-    toggleCard('type', 'Two capitals at the start', s.fixTwoCaps, fixTwoCaps => save({ fixTwoCaps }), 'ПРивет → Привет · IDs and URLs stay'),
-    toggleCard('type', 'A word typed with Caps Lock left on', s.fixCapsLock, fixCapsLock => save({ fixCapsLock }), 'пРИВЕТ → Привет, and Caps Lock goes off'),
-    toggleCard('lock', 'Leave words in capitals as typed', s.keepCaps, keepCaps => save({ keepCaps }), 'abbreviations: nothing typed in capitals is fixed'),
+    toggleCard('type', 'Fix two capitals at the start', s.fixTwoCaps, fixTwoCaps => save({ fixTwoCaps }), 'ПРивет → Привет; IDs and URLs stay'),
+    toggleCard('type', 'Fix a word typed with Caps Lock on', s.fixCapsLock, fixCapsLock => save({ fixCapsLock }), 'пРИВЕТ → Привет, and Caps Lock is turned off'),
+    toggleCard('lock', 'Leave words in capitals as typed', s.keepCaps, keepCaps => save({ keepCaps }), 'abbreviations in capitals are never fixed'),
     grp('When'),
-    toggleCard('clock', 'Also after a pause', s.fixOnPause, fixOnPause => save({ fixOnPause }), 'a word that is clearly wrong is fixed a second after the last key'),
-    toggleCard('volume-2', 'A quiet click when a word is fixed', s.fixSound, fixSound => save({ fixSound })),
-    aside('info', 'Short words go with the word after them: z rfr → я как. The first word after you switch the layout yourself is left as you typed it.'),
+    toggleCard('clock', 'Also fix after a pause', s.fixOnPause, fixOnPause => save({ fixOnPause }), 'a clearly wrong word is fixed about a second after you stop typing'),
+    toggleCard('volume-2', 'Play a quiet click when a word is fixed', s.fixSound, fixSound => save({ fixSound })),
+    aside('info', 'Short words are fixed together with the word after them: z rfr → я как. After you switch the layout yourself, the next word is left as typed.'),
   ]
 }
 
@@ -2075,29 +2284,29 @@ function keyboardPage(v: AppView): HTMLElement[] {
     grp('Keys'),
     keyRow(
       'switchKey',
-      'Switch the layout',
-      s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap it alone' : 'to the next of the layouts below',
+      'Switch to the next layout',
+      s.switchKey && usage(s.switchKey).startsWith('tap') ? 'tap the key, nothing else' : 'goes to the next of the layouts listed below',
       false,
       'keyboard',
       onOff(s.switchOn, 'switchOn', 'Switching by keys', !!s.switchKey || ownKeys > 0),
     ),
-    keyRow('fixKey', 'Fix what was typed wrong', 'the words at the end typed in the wrong layout; again: the next layout; or the selection', false, 'rotate-cw', onOff(s.fixKeyOn, 'fixKeyOn', 'The fix key', !!s.fixKey)),
+    keyRow('fixKey', 'Fix the last words', 'retypes words that came out in the wrong layout; press again for the next one', false, 'rotate-cw', onOff(s.fixKeyOn, 'fixKeyOn', 'The fix key', !!s.fixKey)),
     grp('As you type'),
-    toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} on the space · Backspace takes it back`),
-    s.autoFix ? navCard('type', 'Fixing as I type', 'capitals, short words, a pause, a click', null, () => openSub('fixing'), 'fixing') : null,
-    toggleCard('type', 'Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge }), 'a small badge whenever the layout or Caps Lock changes'),
-    toggleCard('keyboard', 'Show the layout in the tray', s.trayLayout, trayLayout => save({ trayLayout }), 'the tray icon becomes a key with the layout on it: en, ru'),
-    toggleCard('monitor', 'Rest on the full screen', s.quietFullScreen, quietFullScreen => save({ quietFullScreen }), 'games, presentations, videos: nothing is fixed or switched'),
+    toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} when you press space; Backspace undoes it`),
+    s.autoFix ? navCard('type', 'Fixing as I type', 'capitals, short words, fixing after a pause', null, () => openSub('fixing'), 'fixing') : null,
+    toggleCard('type', 'Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge }), 'a small badge appears when the layout or Caps Lock changes'),
+    toggleCard('keyboard', 'Show the layout in the tray', s.trayLayout, trayLayout => save({ trayLayout }), 'the tray icon shows the current layout, such as en or ru'),
+    toggleCard('monitor', 'Stay off in full screen', s.quietFullScreen, quietFullScreen => save({ quietFullScreen }), 'games, presentations, videos'),
     grp('Lists'),
-    navCard('keyboard', 'Layouts', ownKeys ? `the ones the keys go through · ${ownKeys} with a key of its own` : 'the ones the keys go through, in order', cycleOf(v).map(l => l.short).join(' · '), () => go('layouts'), 'layouts'),
-    navCard('monitor', 'Programs', 'left out of parts, or with a layout of their own', count(s.apps.length, 'program'), () => go('programs'), 'programs'),
-    navCard('sparkles', 'Learned words', s.learn ? 'from your typing: words it fixes always, words of yours' : 'learning from your typing is off', count(learnedCount, 'word'), () => go('learned'), 'learned'),
-    navCard('lock', 'Kept as typed', 'words never fixed by themselves', count(s.keepWords.length, 'word'), () => go('kept'), 'kept'),
+    navCard('keyboard', 'Layouts', ownKeys ? `the layouts the switch key goes through; ${ownKeys} with a key of their own` : 'the layouts the switch key goes through, in order', cycleOf(v).map(l => l.short).join(' · '), () => go('layouts'), 'layouts'),
+    navCard('monitor', 'Programs', 'turn parts of Altype off in a program, or give it its own layout', count(s.apps.length, 'program'), () => go('programs'), 'programs'),
+    navCard('sparkles', 'Learned words', s.learn ? 'words Altype learned from your typing' : 'learning from your typing is off', count(learnedCount, 'word'), () => go('learned'), 'learned'),
+    navCard('lock', 'Kept as typed', 'words Altype never fixes by itself', count(s.keepWords.length, 'word'), () => go('kept'), 'kept'),
     v.rivals.length ? warn(`${v.rivals.join(' and ')} ${v.rivals.length > 1 ? 'are' : 'is'} running: turn off its layout switching, or words get fixed twice.`) : null,
     v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Altype, so nothing is fixed or switched there.`) : null,
     v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
     othersLine(v),
-    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Altype looks only at the keys of what you are typing and sends nothing anywhere. It keeps only the words it learned, on this computer.'),
+    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Altype reads your keystrokes only to fix the layout, and sends nothing anywhere. It keeps only the words it learned, on this computer.'),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -2196,7 +2405,7 @@ function naturalRow(v: AppView): HTMLElement | null {
   const download = (text: string) => linkBtn(text, () => post({ type: 'downloadNatural' }))
   switch (n.status) {
     case 'absent':
-      return row('Natural voice', [`Kokoro · ${n.size} MB · downloads once, then reads on this computer`], download('Download'))
+      return row('Natural voice', [`${n.size} MB to download, then it reads offline (Kokoro)`], download('Download'))
     case 'failed':
       return row('Natural voice', [bad('The download failed.')], download('Try again'))
     case 'downloading': {
@@ -2326,7 +2535,7 @@ const languageName = (code: string) => LANGUAGES.find(l => l.code === code)?.nam
 
 /** The card that opens the languages the person uses: their names. */
 function languagesCard(v: AppView): HTMLElement {
-  return navCard('globe', 'Languages you use', 'dictation, translation and the screen’s text are read as one of these', myLanguages(v.settings).map(languageName).join(', '), () => go('settings', 'languages'), 'languages')
+  return navCard('globe', 'Languages you use', 'when Altype hears or reads a text, it guesses among these', myLanguages(v.settings).map(languageName).join(', '), () => go('settings', 'languages'), 'languages')
 }
 
 /** The languages the person uses: their own and English always, others added; what dictation, the translator and the screen's text are read as. */
@@ -2358,10 +2567,10 @@ function voiceRows(v: AppView): (HTMLElement | null)[] {
   // The natural voice slower than it speaks here pauses between sentences: said plainly, with the instant Windows voice offered.
   const slow = naturalOn(v) && rtf !== undefined && rtf > 1
   const voiceNote: (string | HTMLElement)[] = !naturalOn(v)
-    ? ['a Windows voice']
+    ? ['reads with a Windows voice']
     : slow
-      ? [`natural · ${v.natural.size} MB, on this computer`, bad('slower than it speaks on this computer: it pauses between sentences · a Windows voice is instant')]
-      : [`natural · ${v.natural.size} MB, on this computer${rtf ? ` · makes speech ${Math.max(1, Math.round(1 / rtf))}× faster than it plays` : ''}`]
+      ? [`natural voice, ${v.natural.size} MB on this computer`, bad('it prepares speech slower than it plays, so it pauses between sentences; a Windows voice is instant')]
+      : [`natural voice, ${v.natural.size} MB on this computer${rtf ? ` · prepares speech ${Math.max(1, Math.round(1 / rtf))}× faster than it plays` : ''}`]
   return [
     grp('Voice'),
     card('volume-2', 'Voice', voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, '').replace(/ Desktop$/, '')}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), voice => save({ voice }))),
@@ -2369,7 +2578,7 @@ function voiceRows(v: AppView): (HTMLElement | null)[] {
     card(
       'play',
       'Speed',
-      ['of the reading'],
+      ['how fast it reads'],
       seg(
         s.rate,
         RATES.map(r => [r, String(r)]),
@@ -2388,7 +2597,7 @@ function settingsPage(v: AppView): HTMLElement[] {
     card(
       'languages',
       'Your language',
-      ['what Altype translates into and reads from'],
+      ['Altype translates into it and shows word meanings in it'],
       select(
         s.native,
         v.languages.map(l => [l.name, `${l.native} · ${l.name}`]),
@@ -2412,20 +2621,20 @@ function settingsPage(v: AppView): HTMLElement[] {
       ),
     ),
     toggleCard('power', 'Start with Windows', s.startWithWindows, startWithWindows => save({ startWithWindows })),
-    toggleCard('pause', 'Pause Altype', s.paused, paused => save({ paused }), 'every key and reaction off until it is turned back on · also in the tray'),
-    keyRow('pauseKey', 'Pause or resume by a key', 'works while paused too', !v.keysOk.pause, 'pause'),
-    keyRow('windowKey', 'Open Altype by a key', 'this window, from anywhere', !v.keysOk.window, 'house'),
+    toggleCard('pause', 'Pause Altype', s.paused, paused => save({ paused }), 'all shortcuts and fixing stop until you turn it back on; also in the tray menu'),
+    keyRow('pauseKey', 'Pause or resume with a key', 'works while paused too', !v.keysOk.pause, 'pause'),
+    keyRow('windowKey', 'Open this window with a key', 'from any program', !v.keysOk.window, 'house'),
     card(
       'rotate-cw',
-      `Version ${v.version}`,
-      [u.status === 'failed' ? bad(updateText(u)) : updateText(u)],
+      `Version ${v.version}${v.dev ? ' dev' : ''}`,
+      [v.dev ? `built ${v.build}; ${updateText(u)}` : u.status === 'failed' ? bad(updateText(u)) : updateText(u)],
       linkBtn('Check for updates', () => post({ type: 'checkUpdates' }), u.status === 'dev' || u.status === 'checking' || u.status === 'downloading'),
     ),
-    toggleCard('sparkles', 'Test versions', s.betaUpdates, betaUpdates => save({ betaUpdates }), 'new things before a release; a release still comes'),
+    toggleCard('sparkles', 'Get test versions', s.betaUpdates, betaUpdates => save({ betaUpdates }), 'try new features before they are released'),
     card(
       'file-text',
       'Settings file',
-      ['keep your settings, take them to another computer, or start over'],
+      ['back up your settings, move them to another computer, or start over'],
       el(
         'span',
         { class: 'kchg' },
@@ -2448,18 +2657,19 @@ function aboutPage(v: AppView): HTMLElement[] {
       { class: 'about' },
       el('div', { class: 'mk' }, el('span', { class: 'key bigkey' }, 'alt'), el('span', { class: 'bigwm' }, 'altype')),
       el('p', { class: 'tag' }, 'Your language. ', el('span', {}, 'Your shortcut.')),
-      el('p', { class: 'ver' }, `Version ${v.version}${update ? ` · ${update}` : ''} · free and open source, MIT`),
+      // A run from source says when it was built, so it is never taken for the last release.
+      el('p', { class: 'ver' }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : update ? ` · ${update}` : ''} · free and open source, MIT`),
       el(
         'dl',
         { class: 'facts' },
         ...fact('made by', 'Yevhen Peshynskyi · Design automation engineer', el('br'), link('https://ikstro.com', 'ikstro.com')),
         ...fact(
-          'on this computer',
-          'Firefox Translations by Mozilla · TranslateGemma by Google (Gemma Terms of Use), run by llama.cpp · Kokoro-82M by hexgrad, eSpeak NG · Windows OCR · WikDict, from Wiktionary · FrequencyWords by Hermit Dave ',
+          'runs offline',
+          'Firefox Translations by Mozilla · TranslateGemma by Google (Gemma Terms of Use) and Gemma 4 by Google (Apache 2.0), run by llama.cpp · Kokoro-82M by hexgrad, eSpeak NG · Windows OCR · WikDict, from Wiktionary · FrequencyWords by Hermit Dave ',
           el('span', { class: 'q' }, '— your text is never sent anywhere'),
         ),
         ...fact('made with', 'Inter and JetBrains Mono (SIL OFL) · Electron · VS Code icons'),
-        ...fact('uses the network', `Updates, and each part once: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
+        ...fact('goes online only for', `updates, and a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
         ...fact(
           'links',
           link('https://github.com/ikstro/altype/releases', 'Releases and what changed'),

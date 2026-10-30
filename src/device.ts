@@ -170,7 +170,8 @@ export async function probeDevice(): Promise<DeviceProfile> {
 export type VoiceSpeed = { rtf: number; n: number }
 /** How fast an accurate translation level works here, in seconds: a sentence on a model already loaded, and loading it; the latest few of each. */
 export type LevelSpeed = { sentence: number[]; start: number[] }
-export type LevelSpeeds = Partial<Record<'accurate' | 'most', LevelSpeed>>
+/** The accurate levels' seconds a sentence; Check my English's (`check`) seconds a text, in `sentence` too. */
+export type LevelSpeeds = Partial<Record<'accurate' | 'most' | 'check', LevelSpeed>>
 type DeviceFile = { profile?: DeviceProfile; voice?: VoiceSpeed; translate?: LevelSpeeds }
 
 function readDeviceFile(file: string): DeviceFile {
@@ -227,7 +228,7 @@ const LEVEL_KEPT = 9
 export function loadLevelSpeeds(file: string): LevelSpeeds {
   const t = readDeviceFile(file).translate
   const out: LevelSpeeds = {}
-  for (const level of ['accurate', 'most'] as const) {
+  for (const level of ['accurate', 'most', 'check'] as const) {
     const s = t?.[level]
     if (s && Array.isArray(s.sentence) && Array.isArray(s.start)) out[level] = s
   }

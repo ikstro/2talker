@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { build, context } from 'esbuild'
@@ -14,8 +15,26 @@ for (const file of ['codicon.css', 'codicon.ttf']) {
 
 const node = { bundle: true, platform: 'node', format: 'cjs', target: 'node22', sourcemap: true, logLevel: 'info' }
 
+/** When and from what this build was made: shown beside the version, so a run from source says it is today's. */
+function buildStamp() {
+  const git = args => {
+    try {
+      return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    } catch {
+      return ''
+    }
+  }
+  return { at: new Date().toISOString(), commit: git(['rev-parse', '--short', 'HEAD']), changed: git(['status', '--porcelain']) !== '' }
+}
+
 /** @type {import('esbuild').BuildOptions} */
-const main = { ...node, entryPoints: ['src/main.ts'], external: ['electron', 'koffi', 'electron-updater'], outfile: 'dist/main.js' }
+const main = {
+  ...node,
+  entryPoints: ['src/main.ts'],
+  external: ['electron', 'koffi', 'electron-updater'],
+  outfile: 'dist/main.js',
+  define: { ALTYPE_BUILD: JSON.stringify(buildStamp()) },
+}
 
 /** @type {import('esbuild').BuildOptions} */
 const preload = { ...node, entryPoints: ['src/preload.ts'], external: ['electron'], outfile: 'dist/preload.js', sourcemap: false }

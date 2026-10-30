@@ -62,6 +62,8 @@ export type Settings = {
   textKey: string
   /** Translate the selection in place: the translation pasted over it, no card. */
   inPlaceKey: string
+  /** Check my English: the selection's mistakes in the card, set right, Paste over it (checker.ts). */
+  checkKey: string
   /** The keyboard: a key (hotkey.ts) that switches the layout to the next of `layouts`; empty for none. `switchOn` turns it and the layouts' own keys off without forgetting them. */
   switchKey: string
   switchOn: boolean
@@ -108,6 +110,8 @@ export type Settings = {
   noteKey: string
   /** Types the last dictated phrase again where the cursor is (dictationlog.ts); empty for none. */
   againKey: string
+  /** Practice: a phrase spoken in English, checked in the card (Check my English) instead of typed. */
+  practiceKey: string
   /**
    * Where the dictation badge sits: its bottom centre from the bottom centre of
    * the work area of the screen being typed in, in CSS pixels, as the person
@@ -174,6 +178,7 @@ export const DEFAULTS: Settings = {
   translateKey: '',
   textKey: 'Control+Alt+T',
   inPlaceKey: '',
+  checkKey: '',
   switchKey: '',
   switchOn: true,
   layouts: [],
@@ -198,6 +203,7 @@ export const DEFAULTS: Settings = {
   englishKey: '',
   noteKey: 'Control+Alt+N',
   againKey: '',
+  practiceKey: '',
   dictationBadge: { dx: 0, dy: 0 },
   vocabulary: [],
   translationLevel: 'fast',
@@ -308,6 +314,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     translateKey: key(r.translateKey, DEFAULTS.translateKey),
     textKey: key(r.textKey, DEFAULTS.textKey),
     inPlaceKey: key(r.inPlaceKey, DEFAULTS.inPlaceKey),
+    checkKey: key(r.checkKey, DEFAULTS.checkKey),
     switchKey: key(r.switchKey, DEFAULTS.switchKey),
     switchOn: flag(r.switchOn, DEFAULTS.switchOn),
     layouts: strings(r.layouts, s => s.trim().toUpperCase()).filter(s => /^[0-9A-F]{8}$/.test(s)),
@@ -333,6 +340,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     englishKey: key(r.englishKey, DEFAULTS.englishKey),
     noteKey: key(r.noteKey, DEFAULTS.noteKey),
     againKey: key(r.againKey, DEFAULTS.againKey),
+    practiceKey: key(r.practiceKey, DEFAULTS.practiceKey),
     dictationBadge: badgeOffset(r.dictationBadge),
     vocabulary: vocabularyLines(r.vocabulary),
     translationLevel: r.translationLevel === 'accurate' || r.translationLevel === 'most' ? r.translationLevel : 'fast',

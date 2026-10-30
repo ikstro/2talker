@@ -57,6 +57,8 @@ export function markRare(containers: readonly Element[], common: ReadonlySet<str
     for (const part of field ? [container] : sentences) {
       const walker = document.createTreeWalker(part, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        // A word Check my English struck out is wrong, not rare.
+        if (node.parentElement?.closest('del')) continue
         const text = (node as Text).data
         for (const [start, end] of rareSpans(text, common, field)) {
           const range = document.createRange()

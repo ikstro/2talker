@@ -52,6 +52,7 @@
   var LUCIDE = {
     "volume-2": '<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" /> <path d="M16 9a5 5 0 0 1 0 6" /> <path d="M19.364 18.364a9 9 0 0 0 0-12.728" />',
     "languages": '<path d="m5 8 6 6" /> <path d="m4 14 6-6 2-3" /> <path d="M2 5h12" /> <path d="M7 2h1" /> <path d="m22 22-5-10-5 10" /> <path d="M14 18h6" />',
+    "graduation-cap": '<path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z" /> <path d="M22 10v6" /> <path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5" />',
     "scan": '<path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" />',
     "mic": '<path d="M12 19v3" /> <path d="M19 10v2a7 7 0 0 1-14 0v-2" /> <rect x="9" y="2" width="6" height="13" rx="3" />',
     "audio-lines": '<path d="M2 10v3" /> <path d="M6 6v11" /> <path d="M10 3v18" /> <path d="M14 8v7" /> <path d="M18 5v13" /> <path d="M22 10v3" />',
@@ -59,6 +60,7 @@
     "file-text": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" />',
     "notebook-pen": '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /> <path d="M2 6h4" /> <path d="M2 10h4" /> <path d="M2 14h4" /> <path d="M2 18h4" /> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" />',
     "book-open": '<path d="M12 5v16" /> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" />',
+    "list-checks": '<path d="M13 5h8" /> <path d="M13 12h8" /> <path d="M13 19h8" /> <path d="m3 17 2 2 4-4" /> <path d="m3 7 2 2 4-4" />',
     "house": '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />',
     "info": '<circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" />',
     "settings": '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" />',
@@ -154,6 +156,22 @@
     );
     return row;
   }
+  function pauseButton(paused) {
+    return el(
+      "button",
+      {
+        class: paused ? "fb paused" : "fb",
+        "data-nav": true,
+        "data-id": "paused",
+        role: "switch",
+        "aria-checked": String(paused),
+        title: paused ? "Keys and Ctrl+C twice are off" : "Every key and reaction off until resumed",
+        onclick: () => post({ type: "saveSettings", patch: { paused: !paused } })
+      },
+      lucide(paused ? "play" : "pause", "s"),
+      paused ? "Resume" : "Pause"
+    );
+  }
   function group(label, ...rows) {
     return el("section", { class: "sec" }, el("div", { class: "grp" }, label), ...rows);
   }
@@ -173,7 +191,8 @@
   function render(v) {
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.id : void 0;
     const openApp = () => post({ type: "tray", command: "open" });
-    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Altype", onclick: openApp }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype"));
+    const version = el("span", { class: "ver", title: `Built ${v.build}` }, v.dev ? `${v.version} dev` : v.version);
+    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Altype", onclick: openApp }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype"), version);
     const open = el("button", { class: "open", "data-nav": true, "data-id": "open", onclick: openApp }, "Open");
     const panel = el(
       "div",
@@ -184,20 +203,27 @@
         command("listenCopied", "volume-2", "Listen to the copied text", "listenCopied", v.keys.listenCopied),
         command("translateCopied", "languages", "Translate the copied text", "translateCopied"),
         command("typeToTranslate", "type", "Type to translate\u2026", "typeToTranslate"),
+        command("checkEnglish", "graduation-cap", "Check my English\u2026", "checkEnglish"),
         command("listenScreen", "scan", "Listen to a screen snip", "listenScreen", v.keys.snipListen),
         command("translateScreen", "scan", "Translate a screen snip", "translateScreen", v.keys.snipTranslate),
         v.speech.installed ? command("note", "notebook-pen", v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey) : null,
         v.speech.installed ? command("transcripts", "file-text", "Transcripts", "transcripts") : null
       ),
       group(
-        "Keyboard",
+        "Quick settings",
         toggle("autoFix", "spell-check", "Fix the layout as I type", v.autoFix),
         v.keys.switch ? toggle("switchOn", "keyboard", `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
         toggle("layoutBadge", "type", "Show the layout by the cursor", v.layoutBadge),
-        toggle("trayLayout", "keyboard", "Show the layout in the tray", v.trayLayout)
+        toggle("trayLayout", "keyboard", "Show the layout in the tray", v.trayLayout),
+        toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)
       ),
-      group("Listen", toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)),
-      group("Altype", toggle("paused", "pause", "Pause Altype", v.paused), command("settings", "settings", "Settings", "settings"), command("quit", "power", "Quit", "quit"))
+      el(
+        "footer",
+        { class: "foot" },
+        pauseButton(v.paused),
+        el("button", { class: "fb", "data-nav": true, "data-id": "settings", onclick: () => post({ type: "tray", command: "settings" }) }, lucide("settings", "s"), "Settings"),
+        el("button", { class: "fb", "data-nav": true, "data-id": "quit", onclick: () => post({ type: "tray", command: "quit" }) }, lucide("power", "s"), "Quit")
+      )
     );
     root.replaceChildren(panel);
     if (focused) focusRow(root.querySelector(`[data-id="${focused}"]`));

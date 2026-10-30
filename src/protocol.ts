@@ -1,7 +1,7 @@
 // Messages between the main process and the card, the small window that
 // shows one picked text or one snipped piece of the screen at a time.
 import type { DictationEntry } from './dictationlog'
-import type { DeviceProfile } from './hardware'
+import type { DeviceProfile, LevelFit } from './hardware'
 import type { WordTime } from './kokoro'
 import type { Gloss } from './lemma'
 import type { NaturalState } from './natural'
@@ -11,22 +11,25 @@ import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
 import type { TranslationEntry } from './translationlog'
 import type { TranslatorState } from './translator'
+import type { MistakeEntry } from './mistakes'
 import type { Learned } from './typist'
+import type { DiffPart } from './worddiff'
 import type { SavedWord } from './words'
 
 /** The word dictionary for the person's language: here, none for the language, coming, failed, or not downloaded yet. */
 export type DictionaryStatus = 'ready' | 'none' | 'downloading' | 'failed' | 'absent'
 
-export type { Choice, DeviceProfile, DictationEntry, Feature, FeaturePlan, Gloss, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechPlan, SpeechResult, WordTime }
+export type { Choice, DeviceProfile, DictationEntry, DiffPart, Feature, FeaturePlan, Gloss, MistakeEntry, NaturalState, SavedWord, Settings, SpeechHealth, SpeechPackState, SpeechPart, SpeechPlan, SpeechResult, WordTime }
 
 /**
  * What the card is for, and where the text came from. To listen to it, in
  * English with its translation under it: `selection` (copied or selected in
  * any program), `screenshot` (read from a snipped piece of the screen). To
  * translate it, shown as it is with its translation, From and To, like
- * DeepL: `translate` (selected), `text` (read from the screen).
+ * DeepL: `translate` (selected), `text` (read from the screen). To check the
+ * person's own English, its mistakes marked and set right: `check`.
  */
-export type CardKind = 'selection' | 'screenshot' | 'translate' | 'text'
+export type CardKind = 'selection' | 'screenshot' | 'translate' | 'text' | 'check'
 
 /** The translation under a text shown as it is (a `translate` or `text` card), asked for with `translateText`. */
 export type TextResult =
@@ -40,6 +43,20 @@ export type TextResult =
    * text's sentences in order, as translated, for the card to find in its field.
    */
   | { status: 'ready'; text: string; from: string; to: string; html: string; sentences: string[] }
+  | { status: 'failed'; message: string }
+
+/** Check my English's answer under the person's text (a `check` card), asked for with `checkText`. */
+export type CheckResult =
+  | { status: 'none' }
+  | { status: 'checking' }
+  /** The checker's model is downloading, once. */
+  | { status: 'downloading'; progress: number; size: number }
+  /**
+   * `text`: the text checked; `corrected`: it set right (Copy, Paste; the
+   * same text when it was right); `parts`: what changed, word by word
+   * (worddiff.ts); `note`: the main mistake in the person's language, or "".
+   */
+  | { status: 'ready'; text: string; corrected: string; parts: DiffPart[]; note: string }
   | { status: 'failed'; message: string }
 
 /** The card's lower half: the translation, or what keeps it. */
@@ -67,6 +84,8 @@ export type CardState =
    */
   /** `mine`: the languages the person uses, put first in From and To. */
   | { status: 'text'; text: string; from: string; to: string; languages: string[]; mine?: string[]; result: TextResult; canPaste?: boolean }
+  /** Check my English: the person's text as it is (editable) and what the checker (`model`, its name) says of it; `canPaste` as a text's. */
+  | { status: 'check'; text: string; result: CheckResult; model: string; canPaste?: boolean }
   /** The snipped piece of the screen holds no text. */
   | { status: 'empty' }
   /** Windows has no text recognition installed for any language the card could use. */
@@ -97,8 +116,8 @@ export type WordHintMode = 'shift' | 'hover' | 'off'
 
 export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
 
-/** The app window's places: Home (always first), its action pages, and Words, Settings, About; 'howto' is the old name of Home. */
-export type AppTab = 'home' | 'listen' | 'translate' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'transcripts' | 'settings' | 'about' | 'howto'
+/** The app window's places: Home (always first), its action pages, and Words, Mistakes, Settings, About; 'howto' is the old name of Home. */
+export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'settings' | 'about' | 'howto'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -151,13 +170,17 @@ export type SpeechView = {
   /** The speed test: offered now (the person has not agreed, and something is still unmeasured), agreed once, models it would measure. */
   test: { offer: boolean; agreed: boolean; runs: number }
   /** The dictation keys are registered (false: another program holds one). */
-  keysOk: { dictate: boolean; note: boolean; english: boolean; again: boolean }
+  keysOk: { dictate: boolean; note: boolean; english: boolean; again: boolean; practice: boolean }
 }
 
 /** Everything the app window shows, sent whole whenever any of it changes. */
 export type AppView = {
   settings: Settings
   version: string
+  /** When this copy was built, and from which commit ("30 Oct, 07:12 (ff17ba8, changed)"). */
+  build: string
+  /** A run from source, not an installed copy. */
+  dev: boolean
   natural: NaturalState
   hostVoices: HostVoice[]
   /** The languages a person may name as their own: English name and own name. */
@@ -165,7 +188,7 @@ export type AppView = {
   words: SavedWord[]
   update: UpdateStatus
   /** Each shortcut is registered (false: another program holds it). */
-  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean; inPlace: boolean; pause: boolean; window: boolean }
+  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean; inPlace: boolean; check: boolean; pause: boolean; window: boolean }
   /** What Altype learned from the person's typing (learning.ts): words fixed always, words of theirs. */
   learned: { alwaysFix: Learned[]; myWords: Learned[] }
   /** A program that runs as administrator was in front lately: its keys never reach Altype. */
@@ -197,6 +220,14 @@ export type AppView = {
   translationSpeed: Partial<Record<Exclude<TranslationLevel, 'fast'>, { sentence: number; start?: number }>>
   /** The word dictionary for the person's language. */
   dictionary: { status: DictionaryStatus }
+  /**
+   * Check my English: its model (`name`, the download's state as a
+   * translator's, without `unsupported`), how it fits this computer, and its
+   * seconds here once measured: a text, and loading the model after it was let go.
+   */
+  check: { name: string; state: TranslatorState; fit: LevelFit; speed?: { text: number; start?: number } }
+  /** The mistakes checked texts had, newest first (mistakes.ts). */
+  mistakes: MistakeEntry[]
 }
 
 /** What the tray's panel shows, sent whole whenever any of it changes. */
@@ -215,10 +246,13 @@ export type TrayView = {
   /** The translator between English and the person's language (as `AppView.translator`). */
   translator: AppView['translator']
   native: string
+  version: string
+  build: string
+  dev: boolean
 }
 
 /** What the tray's panel can do; each puts the panel away first. */
-export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'open' | 'quit'
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'checkEnglish' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -269,8 +303,8 @@ export type ToView =
   | { type: 'naturalAudio'; id: number; index: number; samples: Float32Array; words: WordTime[] }
   | { type: 'naturalFailed'; id: number; message: string }
 
-/** What a dictated phrase becomes: typed where the cursor is, typed in English, or a note in the knowledge base. */
-export type DictationMode = 'type' | 'english' | 'note'
+/** What a dictated phrase becomes: typed where the cursor is, typed in English, a note in the knowledge base, or English checked in the card (practice). */
+export type DictationMode = 'type' | 'english' | 'note' | 'check'
 
 export type ToHost =
   | { type: 'lookup'; word: string }
@@ -298,8 +332,10 @@ export type ToHost =
   | { type: 'retry' }
   /** Translate a text card's text (as it stands, maybe edited) from one language into another, by codes. */
   | { type: 'translateText'; id: number; text: string; from: string; to: string }
+  /** Check a check card's English (as it stands, maybe edited). */
+  | { type: 'checkText'; id: number; text: string }
   | { type: 'copyText'; text: string }
-  /** Paste a translation over the selection it was made from, in the window it was selected in. */
+  /** Paste a translation (or a checked text set right) over the selection it was made from, in the window it was selected in. */
   | { type: 'pasteText'; id: number; text: string }
   /** Put a word into the notebook, with the sentence it was met in, or take it out. */
   | { type: 'saveWord'; word: string; sentence: string }
@@ -330,6 +366,12 @@ export type ToHost =
   /** The translation level picked on the Translate page: saved, and its models downloaded; a level's model deleted (Fast in its place when it was in use). */
   | { type: 'translationLevel'; level: TranslationLevel }
   | { type: 'removeTranslation'; level: Exclude<TranslationLevel, 'fast'> }
+  /** Check my English's model: downloaded now (Use), or deleted. */
+  | { type: 'prepareChecker' }
+  | { type: 'removeChecker' }
+  /** Forget one kept mistake (by its time), or all of them. */
+  | { type: 'forgetMistake'; at: string }
+  | { type: 'clearMistakes' }
   | { type: 'prepareDictionary' }
   /** Run the speed test (the person agreed), or not now. */
   | { type: 'testSpeech' }

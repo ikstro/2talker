@@ -100,10 +100,12 @@ export class KeyboardHelper {
         ['translate', s.translateKey],
         ['text', s.textKey],
         ['inPlace', s.inPlaceKey],
+        ['check', s.checkKey],
         ['dictate', s.dictateKey],
         ['english', s.englishKey],
         ['note', s.noteKey],
         ['again', s.againKey],
+        ['practice', s.practiceKey],
         ['pause', s.pauseKey],
         ['window', s.windowKey],
       ] as const) {

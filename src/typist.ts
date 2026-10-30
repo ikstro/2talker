@@ -42,7 +42,7 @@ import {
 import type { Press } from './winkbd'
 
 /** What a key does: switch or fix the layout here, or go to one layout; the others are the main process's. */
-export type KeyAction = 'switch' | 'fix' | 'layout' | 'select' | 'snip' | 'translate' | 'text' | 'inPlace' | 'dictate' | 'english' | 'note' | 'again' | 'pause' | 'window'
+export type KeyAction = 'switch' | 'fix' | 'layout' | 'select' | 'snip' | 'translate' | 'text' | 'inPlace' | 'check' | 'dictate' | 'english' | 'note' | 'again' | 'practice' | 'pause' | 'window'
 
 /** The parts of the keyboard helper a program can be left out of: fixing as one types, the switch and layout keys, the badge, every key of Altype's. */
 export type AppPart = 'fix' | 'switch' | 'badge' | 'keys'
@@ -138,6 +138,8 @@ export type TypistEnv = {
   press(keys: readonly Press[]): void
   /** Calls `typeFix` once the hook has answered. */
   later(): void
+  /** Once the hook has answered, presses a key that types nothing and lets go of `vk` (Alt or Win), so no menu opens. */
+  mask(vk: number): void
   /** Asks whether the field with the keyboard in this window is a password; the answer comes later, to `fieldIs`. */
   askField(front: Front): void
   /** Whether a program fills the screen now (a game, a presentation). */
@@ -165,6 +167,8 @@ const MOVES = new Set([0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, VK_DELETE
 
 /** Keys that type nothing, which programs press to keep Alt or Win from opening a menu (0xE8 is AutoHotkey's, 0xFF PowerToys'). */
 export const MASK_KEYS: ReadonlySet<number> = new Set([0x07, 0xe8, 0xff])
+/** Alt and Win, left and right: tapped alone, they open a program's menu or Start. */
+const MENU_KEYS: ReadonlySet<number> = new Set([0xa4, 0xa5, 0x5b, 0x5c])
 
 /** Caps Lock is asked of Windows again when the last answer is older than this (Windows may turn it off on Shift). */
 const CAPS_FRESH_MS = 1000
@@ -355,7 +359,11 @@ export class Typist {
     const mod = modOf(vk)
     if (!down) {
       this.held.delete(vk)
-      if (mod) this.onModifierUp(vk)
+      // An Alt or Win tap that is one of Altype's keys: its key-up is let go later, after a key that types nothing (VS Code's menu bar took the focus from its chat).
+      if (mod && this.onModifierUp(vk)) {
+        this.env.mask(vk)
+        return true
+      }
       return this.swallowed.delete(vk)
     }
     const repeat = this.held.has(vk)
@@ -520,18 +528,25 @@ export class Typist {
     }
   }
 
-  private onModifierUp(vk: number): void {
+  /** True: the tap was Alt or Win as a key of Altype's, to be let go behind a key that types nothing. */
+  private onModifierUp(vk: number): boolean {
     const t = this.tap
     this.tap = undefined
-    if (t && t.vk === vk && this.chord.clean && this.env.now() - t.since <= TAP_MS) this.onTap(vk, t.since)
-    else this.lastTap = undefined
-    if ([...this.held].some(k => modOf(k))) return
+    let mask = false
+    if (t && t.vk === vk && this.chord.clean && this.env.now() - t.since <= TAP_MS) {
+      // A double's first tap too: it cannot know yet whether a second comes.
+      const bound = this.keyOf('tap', vk) ?? this.keyOf('double', vk)
+      mask = MENU_KEYS.has(vk) && !!bound && this.allowed(bound)
+      this.onTap(vk, t.since)
+    } else this.lastTap = undefined
+    if ([...this.held].some(k => modOf(k))) return mask
     const { mods, clean } = this.chord
     if (clean && mods.size >= 2) {
       const chord = this.keys.find(({ spec }) => spec.kind === 'chord' && sameMods(mods, spec.mods))
       if (chord) this.act(chord)
     }
     this.chord = { mods: new Set(), clean: false }
+    return mask
   }
 
   /**

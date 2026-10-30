@@ -197,7 +197,7 @@ export function packWork(v: AppView): HTMLElement | undefined {
   const pct = Math.round((p.progress ?? 0) * 100)
   const parts = (p.installing ?? []).filter(x => !p.parts.includes(x))
   const name = parts.includes('speakers') && p.parts.includes('core') ? 'Downloading the speakers part' : 'Downloading the speech engine'
-  return row(name, [`${what} · the window can be closed, it goes on`, bar(p.progress ?? 0)], el('span', { class: 'pct' }, `${pct}%`))
+  return row(name, [`${what}; you can close this window, the download goes on`, bar(p.progress ?? 0)], el('span', { class: 'pct' }, `${pct}%`))
 }
 
 /**
@@ -226,15 +226,15 @@ export function engineRows(v: AppView, feature: string): HTMLElement[] {
       row(
         `${feature} needs the speech engine`,
         [
-          failed ? bad(`The download stopped: ${s.pack.message ?? 'unknown error'}`) : `≈${size(mb)} download · ${size(keeps)} on the disk with ${first.model} · then works offline`,
-          short ? bad(`Needs ≈${size(needs)} free; ${s.disk.drive} has ${size(s.disk.freeMb)}`) : s.disk.freeMb > 0 ? `${size(s.disk.freeMb)} free on ${s.disk.drive}` : null,
+          failed ? bad(`The download stopped: ${s.pack.message ?? 'unknown error'}`) : `${size(mb)} to download, then it works offline; ${size(keeps)} on the disk (with the ${first.model} model)`,
+          short ? bad(`Needs ${size(needs)} free; ${s.disk.drive} has ${size(s.disk.freeMb)}`) : s.disk.freeMb > 0 ? `${size(s.disk.freeMb)} free on ${s.disk.drive}` : null,
         ],
         download,
       ),
       s.pack.nvidia
         ? row(
             'Use the graphics card',
-            [`${card ? cardText(card) : 'NVIDIA'} · ≈${size(s.download.gpu)} more · a phrase in ≈${seconds(s.firstModel.cuda.phrase)}, not ≈${seconds(s.firstModel.cpu.phrase)}`],
+            [`${size(s.download.gpu)} more to download; a phrase takes about ${seconds(s.firstModel.cuda.phrase)} instead of ${seconds(s.firstModel.cpu.phrase)} (${card ? cardText(card) : 'NVIDIA'})`],
             toggleKnob(withGpu, on => ((withGpu = on), redraw()), 'Use the graphics card'),
           )
         : null,
@@ -242,7 +242,7 @@ export function engineRows(v: AppView, feature: string): HTMLElement[] {
   }
   if (work) return [work]
   if (s.service === 'starting' || s.service === 'off') return [row('The speech engine is starting…', [], null)]
-  if (s.service === 'down') return [row('The speech engine does not run', [bad(s.trouble ?? 'it stopped')], linkBtn('Restart', () => post({ type: 'restartSpeech' })))]
+  if (s.service === 'down') return [row('The speech engine is not running',[bad(s.trouble ?? 'it stopped')], linkBtn('Restart', () => post({ type: 'restartSpeech' })))]
   return []
 }
 
@@ -330,8 +330,8 @@ export function testOffer(v: AppView): HTMLElement | null {
     el(
       'div',
       { class: 'ot' },
-      el('b', {}, 'Test this computer and pick the speech models for it?'),
-      el('small', {}, `Each downloaded model runs once on a short clip, about ${t.runs > 1 ? 'a minute or two' : 'a minute'}, in the background. Until then the times here are first guesses.`),
+      el('b', {}, 'Test your computer to pick the best speech models?'),
+      el('small', {}, `Each downloaded model runs once on a short clip, about ${t.runs > 1 ? 'a minute or two' : 'a minute'}, in the background. Until then the times shown are guesses.`),
       el('span', { class: 'acts' }, btn('Run the test', () => post({ type: 'testSpeech' }), 'primary'), linkBtn('Not now', () => post({ type: 'declineSpeechTest' }))),
     ),
   )

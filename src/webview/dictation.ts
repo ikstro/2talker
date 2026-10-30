@@ -18,7 +18,7 @@ const host = window.tutorHost
 const root = document.getElementById('badge')!
 // Windows 11 draws the badge's frame itself: the page's border stays, unseen.
 document.documentElement.classList.toggle('dwm', new URLSearchParams(location.search).get('frame') === 'dwm')
-const TITLES: Record<DictationMode, string> = { type: 'Dictate', english: 'Dictate in English', note: 'A note' }
+const TITLES: Record<DictationMode, string> = { type: 'Dictate', english: 'Dictate in English', note: 'A note', check: 'Practice English' }
 
 type Recorder = PhraseRecorder | ChunkRecorder | StreamRecorder
 let recorder: Recorder | undefined
@@ -183,7 +183,7 @@ async function stop(): Promise<void> {
   recorder = undefined
   if (!r) return
   const behind = dot?.classList.contains('behind')
-  show('busy', said ? wordsOf(said) : null, el('span', { class: 'spin' }), el('span', { class: 'what' }, mode === 'note' ? 'Saving the note…' : behind ? 'Catching up…' : 'Typing…'))
+  show('busy', said ? wordsOf(said) : null, el('span', { class: 'spin' }), el('span', { class: 'what' }, mode === 'note' ? 'Saving the note…' : behind ? 'Catching up…' : mode === 'check' ? 'Checking…' : 'Typing…'))
   busy = r
   try {
     if (r instanceof ChunkRecorder) host.post({ type: 'dictationNote', id: await r.finish() })

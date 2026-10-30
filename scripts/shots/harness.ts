@@ -6,6 +6,7 @@ import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { englishHtml, textOutHtml, translationHtml } from '../../src/render'
 import { splitText, translateLines, translatePairs, type Translate } from '../../src/translate'
+import { wordDiff } from '../../src/worddiff'
 import { appView, trayView } from './view'
 
 import { resolve } from 'node:path'
@@ -179,6 +180,23 @@ async function cardShots(theme: 'dark' | 'light'): Promise<void> {
   level(5, { status: 'ready', text: 'Swap the chest and lightning buttons.', from: 'ru', to: 'en', html: textOutHtml([{ prefix: '', pairs: [{ src: chest, out: 'Swap the chest and lightning buttons.' }] }]), sentences: [chest] })
   await fit()
   await shot(w, `card-${theme}-accurate-done`)
+
+  // Check my English: the owner's sentence checked, its mistakes marked and the main one said in Russian; then a right one.
+  const mine = 'I want to learn English and can we made tutor option? I dictate or tupe in English and you show my my mistake.'
+  const right = 'I want to learn English, and can we make a tutor option? I dictate or type in English and you show me my mistakes.'
+  const check = (id: number, text: string, result: unknown) => card(id, 'check', { status: 'check', text, result, model: 'Gemma 4 E4B', canPaste: true })
+  check(6, mine, { status: 'downloading', progress: 0.3, size: 5155 })
+  await fit()
+  await shot(w, `card-${theme}-check-downloading`)
+  check(7, mine, { status: 'ready', text: mine, corrected: right, parts: wordDiff(mine, right), note: 'made → make: после can глагол стоит в начальной форме.' })
+  await fit()
+  await shot(w, `card-${theme}-check`)
+  check(8, 'I agree with you.', { status: 'ready', text: 'I agree with you.', corrected: 'I agree with you.', parts: wordDiff('I agree with you.', 'I agree with you.'), note: '' })
+  await fit()
+  await shot(w, `card-${theme}-check-clean`)
+  check(9, '', { status: 'none' })
+  await fit()
+  await shot(w, `card-${theme}-check-empty`)
   w.destroy()
 }
 
@@ -223,11 +241,12 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
   } else if (theme === 'dark') {
     await page('listen')
     await page('translate')
+    await page('check')
     await page('screen')
     await page('dictate', ['model'])
     await page('transcribe', ['meet', 'model', 'speakers'])
     await page('keyboard', ['fixing'])
-    for (const name of ['words', 'transcripts', 'translations', 'phrases', 'vocabulary', 'kept', 'learned', 'programs', 'layouts']) await page(name)
+    for (const name of ['words', 'mistakes', 'transcripts', 'translations', 'phrases', 'vocabulary', 'kept', 'learned', 'programs', 'layouts']) await page(name)
     await page('settings', ['languages'])
     for (const name of ['engine', 'computer', 'about']) await page(name)
     await focused('kept')

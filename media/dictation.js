@@ -297,7 +297,7 @@
   var host = window.tutorHost;
   var root = document.getElementById("badge");
   document.documentElement.classList.toggle("dwm", new URLSearchParams(location.search).get("frame") === "dwm");
-  var TITLES = { type: "Dictate", english: "Dictate in English", note: "A note" };
+  var TITLES = { type: "Dictate", english: "Dictate in English", note: "A note", check: "Practice English" };
   var recorder;
   var mode = "type";
   var starting = Promise.resolve();
@@ -426,7 +426,7 @@
     recorder = void 0;
     if (!r) return;
     const behind = dot?.classList.contains("behind");
-    show("busy", said ? wordsOf(said) : null, el("span", { class: "spin" }), el("span", { class: "what" }, mode === "note" ? "Saving the note\u2026" : behind ? "Catching up\u2026" : "Typing\u2026"));
+    show("busy", said ? wordsOf(said) : null, el("span", { class: "spin" }), el("span", { class: "what" }, mode === "note" ? "Saving the note\u2026" : behind ? "Catching up\u2026" : mode === "check" ? "Checking\u2026" : "Typing\u2026"));
     busy = r;
     try {
       if (r instanceof ChunkRecorder) host.post({ type: "dictationNote", id: await r.finish() });

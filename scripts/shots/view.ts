@@ -67,7 +67,9 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
       noteKey: 'Control+Alt+N',
       ...over,
     },
-    version: '0.8.0',
+    version: '0.10.0',
+    build: '30 Oct, 07:12 (ff17ba8, changed)',
+    dev: true,
     natural: { status: 'ready', progress: 1, size: 170, dismissed: false, rtf: 0.3 },
     hostVoices: [{ name: 'Microsoft Zira Desktop', lang: 'en-US' }],
     languages: LANGUAGES.map(l => ({ name: l.name, native: l.native })),
@@ -76,7 +78,7 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
       { id: 2, word: 'ducks', base: 'duck', senses: [['noun', 'утка']], sentence: 'Two children watched the ducks from the bridge.', addedAt: new Date(now - 86400e3 * 3).toISOString() },
     ],
     update: { status: 'none' },
-    keysOk: { snip: true, select: true, translate: true, text: true, inPlace: true, pause: true, window: true },
+    keysOk: { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, pause: true, window: true },
     learned: { alwaysFix: [{ word: 'vs', lang: 'ru' }], myWords: [{ word: 'altype', lang: 'en' }, { word: 'пешинский', lang: 'ru' }] },
     elevatedApp: 'taskmgr.exe',
     translations: [
@@ -127,7 +129,7 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
       device: i9,
       plan,
       test: { offer: false, agreed: true, runs: 1 },
-      keysOk: { dictate: true, note: true, english: true, again: true },
+      keysOk: { dictate: true, note: true, english: true, again: true, practice: true },
     },
     dictation: {
       recent: [
@@ -140,6 +142,13 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
     translation: { fast: { status: 'ready', progress: 1, size: 84 }, accurate: { status: 'downloading', progress: 0.42, size: 2527 }, most: { status: 'absent', progress: 0, size: 7301 } },
     translationSpeed: { most: { sentence: 2.2, start: 7.1 } },
     dictionary: { status: 'ready' },
+    check: { name: 'Gemma 4 E4B', state: { status: 'ready', progress: 1, size: 5155 }, fit: { where: 'card', slow: false, cuda: false }, speed: { text: 0.7, start: 3.2 } },
+    // "can … made" twice: it shows under You repeat.
+    mistakes: [
+      { at: new Date(now - 120e3).toISOString(), text: 'I want to learn English and can we made tutor option?', corrected: 'I want to learn English, and can we make a tutor option?', note: 'made → make: после can глагол стоит в начальной форме.' },
+      { at: new Date(now - 3600e3).toISOString(), text: 'I dictate or tupe in English and you show my my mistake?', corrected: 'I dictate or type in English and you show me my mistakes?', note: 'my → me: после show нужно объектное местоимение me.' },
+      { at: new Date(now - 86400e3).toISOString(), text: 'Yes, we can made it tomorow.', corrected: 'Yes, we can make it tomorrow.', note: 'made → make: после can глагол стоит в начальной форме.' },
+    ],
   }
 }
 
@@ -155,6 +164,9 @@ export function trayView(over: Partial<TrayView> = {}): TrayView {
     speech: { installed: true, recording: false, noteKey: 'Control+Alt+N' },
     translator: 'ready',
     native: 'Russian',
+    version: '0.10.0',
+    build: '30 Oct, 07:12 (ff17ba8, changed)',
+    dev: true,
     ...over,
   }
 }

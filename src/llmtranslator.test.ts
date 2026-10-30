@@ -7,7 +7,8 @@ import * as path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { LlamaServer, LlamaTarget } from './llama'
-import { createLlmTranslators, llmPaths, promptFor, type LlmEngine, type LlmLevel, type LlmManifest } from './llmtranslator'
+import { createLlmFiles, llmPaths, type LlmEngine, type LlmManifest, type LlmModel } from './llmfiles'
+import { createLlmTranslators, promptFor, type LlmLevel } from './llmtranslator'
 
 const sha = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 
@@ -36,7 +37,7 @@ describe('createLlmTranslators', () => {
   }
 
   /** Both builds as zips (CUDA's in two, as llama.cpp publishes it), two small models, the fake web serving them; Most accurate on CUDA. */
-  function setup(engineFor: (level: LlmLevel) => LlmEngine = level => (level === 'most' ? 'cuda' : 'vulkan')) {
+  function setup(engineFor: (model: LlmModel) => LlmEngine = model => (model === 'most' ? 'cuda' : 'vulkan')) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-'))
     const src = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-src-'))
     dirs.push(root, src)
@@ -45,7 +46,15 @@ describe('createLlmTranslators', () => {
     const cudart = zipOf(src, 'cudart', { 'cudart64_12.dll': 'rt' })
     const small = Buffer.from('small model'.repeat(100))
     const big = Buffer.from('big model'.repeat(300))
-    const web: Record<string, Buffer> = { 'https://x/vulkan.zip': vulkan, 'https://x/cuda.zip': cuda, 'https://x/cudart.zip': cudart, 'https://x/small.gguf': small, 'https://x/big.gguf': big }
+    const checking = Buffer.from('check model'.repeat(200))
+    const web: Record<string, Buffer> = {
+      'https://x/vulkan.zip': vulkan,
+      'https://x/cuda.zip': cuda,
+      'https://x/cudart.zip': cudart,
+      'https://x/small.gguf': small,
+      'https://x/big.gguf': big,
+      'https://x/check.gguf': checking,
+    }
     const pinned = (url: string) => ({ url, size: web[url]!.length, sha256: sha(web[url]!) })
     const manifest: LlmManifest = {
       engine: {
@@ -55,6 +64,7 @@ describe('createLlmTranslators', () => {
       models: {
         accurate: { name: 'TranslateGemma 4B', file: 'small.gguf', ...pinned('https://x/small.gguf') },
         most: { name: 'TranslateGemma 12B', file: 'big.gguf', ...pinned('https://x/big.gguf') },
+        check: { name: 'Gemma 4 E4B', file: 'check.gguf', ...pinned('https://x/check.gguf') },
       },
       languages: { en: 'English', ru: 'Russian', uk: 'Ukrainian' },
     }
@@ -88,8 +98,9 @@ describe('createLlmTranslators', () => {
     })
     const timed: { level: LlmLevel; sentence: number; start?: number }[] = []
     const onTimed = (level: LlmLevel, t: { sentence: number; start?: number }) => timed.push({ level, ...t })
-    const llm = createLlmTranslators({ root, log: path.join(root, 'llama.log'), open, manifest, engineFor, server: server as unknown as LlamaServer, fetch: post as unknown as typeof fetch, onTimed })
-    return { root, llm, open, server, asked, timed, manifest, paths: llmPaths(root, manifest) }
+    const files = createLlmFiles({ root, open, manifest, engineFor, server: server as unknown as LlamaServer })
+    const llm = createLlmTranslators({ files, fetch: post as unknown as typeof fetch, onTimed })
+    return { root, llm, files, open, server, asked, timed, manifest, paths: llmPaths(root, manifest) }
   }
 
   it('is absent until picked, downloads the engine and the model, then translates directly', async () => {
@@ -150,16 +161,20 @@ describe('createLlmTranslators', () => {
   })
 
   it('removes a model with its server stopped, and each engine once no model left needs it', async () => {
-    const { llm, server, paths } = setup()
+    const { llm, files, server, paths } = setup()
     await llm.accurate.prepare('ru', () => undefined)
     await llm.most.prepare('ru', () => undefined)
+    await files.prepare('check', () => undefined)
     await llm.most.translate(['Hi.'], 'en', 'ru')
-    await llm.remove('most')
+    await files.remove('most')
     expect(server.stop).toHaveBeenCalled()
     expect(llm.most.state('ru')).toMatchObject({ status: 'absent' })
     expect(fs.existsSync(paths.engineDir('cuda'))).toBe(false)
     expect(llm.accurate.state('ru')).toMatchObject({ status: 'ready' })
-    await llm.remove('accurate')
+    // The checker still needs Vulkan's build.
+    await files.remove('accurate')
+    expect(fs.existsSync(paths.engineDir('vulkan'))).toBe(true)
+    await files.remove('check')
     expect(fs.existsSync(paths.engineDir('vulkan'))).toBe(false)
   })
 })
