@@ -358,15 +358,6 @@ export class Typist {
     this.dictating = on
   }
 
-  /**
-   * Full screen and no dictation running: no key of Krya's at all. A dictation
-   * started before a picture or a video went full screen (Telegram's viewer)
-   * must still stop with its key, so then the keys are read and only the
-   * dictation's act (`allowed`).
-   */
-  private keysQuiet(): boolean {
-    return !this.dictating && this.quiet()
-  }
 
   // ---------------------------------------------------------------- keys
 
@@ -399,9 +390,20 @@ export class Typist {
     }
     const repeat = this.held.has(vk)
     this.held.add(vk)
-    if (this.keysQuiet()) {
+    if (this.quiet()) {
       // A game or a presentation: no key of Krya's, no fixing; modifiers are still followed, so none seems held after.
+      // But a dictation started before the full screen must still stop with its key: its taps and keys are read, and only they act (`allowed`); nothing typed is fixed.
+      if (this.dictating && mod) {
+        if (!repeat) this.onModifierDown(vk)
+        return false
+      }
       this.spoilTap()
+      const hotkey = this.dictating ? this.hotkeyOf(vk, this.heldMods()) : undefined
+      if (hotkey && this.allowed(hotkey)) {
+        this.swallowed.add(vk)
+        if (!repeat) this.act(hotkey)
+        return true
+      }
       this.resetRun()
       this.last = 'none'
       return false
@@ -454,7 +456,7 @@ export class Typist {
     if (event === 'x-down') {
       this.spoilTap()
       const mods = this.heldMods()
-      const hit = this.keysQuiet() ? undefined : this.keys.find(k => k.spec.kind === 'mouse' && k.spec.button === button && sameMods(mods, k.spec.mods))
+      const hit = this.quiet() && !this.dictating ? undefined : this.keys.find(k => k.spec.kind === 'mouse' && k.spec.button === button && sameMods(mods, k.spec.mods))
       if (hit && this.allowed(hit)) {
         this.swallowedButtons.add(button)
         this.act(hit)
