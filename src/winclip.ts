@@ -69,22 +69,6 @@ export function ctrlHeld(): boolean {
   return held(VK_CONTROL)
 }
 
-/** AutoHotkey's key that types nothing (typist.ts MASK_KEYS). */
-const VK_MASK = 0xe8
-
-/**
- * A shortcut with Alt or Win in it, just pressed: a key that types nothing,
- * pressed while they are still down, so letting them go opens no menu.
- * Without it, an Alt let go last (the shortcut's letter is Windows', the
- * program never sees it) is Alt tapped alone to Chrome: its menu takes the
- * focus, and the Ctrl+C that follows copies nothing from the page.
- */
-export function maskMenu(): void {
-  if (![VK_MENU, VK_LWIN, VK_RWIN].some(held)) return
-  keybd_event(VK_MASK, 0, 0, MAIN_KEYS)
-  keybd_event(VK_MASK, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
-}
-
 /**
  * Presses Ctrl+C in the program in front, as the person would: once the
  * shortcut's own keys are let go (an Alt still down would make it Ctrl+Alt+C),
