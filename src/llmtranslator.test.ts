@@ -8,17 +8,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { LlamaServer, LlamaTarget } from './llama'
 import { createLlmFiles, llmPaths, type LlmEngine, type LlmManifest, type LlmModel } from './llmfiles'
-import { createLlmTranslators, promptFor, type LlmLevel } from './llmtranslator'
+import { createLlmTranslators, translatePrompt } from './llmtranslator'
 
 const sha = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 
-describe('promptFor', () => {
-  it('writes TranslateGemma chat template, by the languages names', () => {
-    expect(promptFor('  Кнопки сундука и молнии поменять местами. ', 'ru', 'en')).toBe(
-      '<start_of_turn>user\nYou are a professional Russian (ru) to English (en) translator. Your goal is to accurately convey the meaning and nuances of the original Russian text while adhering to English grammar, vocabulary, and cultural sensitivities.\n' +
-        'Produce only the English translation, without any additional explanations or commentary. Please translate the following Russian text into English:\n\n\nКнопки сундука и молнии поменять местами.<end_of_turn>\n<start_of_turn>model\n',
+describe('translatePrompt', () => {
+  it('names the languages and keeps names, links and the tone', () => {
+    expect(translatePrompt('ru', 'en')).toBe(
+      'You translate from Russian into English. Reply with the translation only, nothing before or after it. ' +
+        'Keep names, @handles, e-mail addresses, links, numbers, code and product names exactly as they are. Keep the tone of the original.',
     )
-    expect(promptFor('Hej', 'nb', 'uk')).toContain('Norwegian Bokmål (nb) to Ukrainian (uk)')
+    expect(translatePrompt('nb', 'uk')).toContain('from Norwegian Bokmål into Ukrainian')
   })
 })
 
@@ -46,14 +46,12 @@ describe('createLlmTranslators', () => {
     const cudart = zipOf(src, 'cudart', { 'cudart64_12.dll': 'rt' })
     const small = Buffer.from('small model'.repeat(100))
     const big = Buffer.from('big model'.repeat(300))
-    const checking = Buffer.from('check model'.repeat(200))
     const web: Record<string, Buffer> = {
       'https://x/vulkan.zip': vulkan,
       'https://x/cuda.zip': cuda,
       'https://x/cudart.zip': cudart,
       'https://x/small.gguf': small,
       'https://x/big.gguf': big,
-      'https://x/check.gguf': checking,
     }
     const pinned = (url: string) => ({ url, size: web[url]!.length, sha256: sha(web[url]!) })
     const manifest: LlmManifest = {
@@ -62,9 +60,8 @@ describe('createLlmTranslators', () => {
         cuda: { name: 'cuda', files: [pinned('https://x/cuda.zip'), pinned('https://x/cudart.zip')] },
       },
       models: {
-        accurate: { name: 'TranslateGemma 4B', file: 'small.gguf', ...pinned('https://x/small.gguf') },
-        most: { name: 'TranslateGemma 12B', file: 'big.gguf', ...pinned('https://x/big.gguf') },
-        check: { name: 'Gemma 4 E4B', file: 'check.gguf', ...pinned('https://x/check.gguf') },
+        accurate: { name: 'Gemma 4 E4B', file: 'small.gguf', ...pinned('https://x/small.gguf') },
+        most: { name: 'Gemma 4 12B', file: 'big.gguf', ...pinned('https://x/big.gguf') },
       },
       languages: { en: 'English', ru: 'Russian', uk: 'Ukrainian' },
     }
@@ -73,7 +70,7 @@ describe('createLlmTranslators', () => {
       if (!body) throw new Error('HTTP 404')
       for (let i = 0; i < body.length; i += 512) yield new Uint8Array(body.subarray(i, i + 512))
     })())
-    const asked: { target: LlamaTarget; prompt: string }[] = []
+    const asked: { target: LlamaTarget; system: string; text: string }[] = []
     let serving: LlamaTarget | undefined
     const server = {
       get model() {
@@ -91,13 +88,13 @@ describe('createLlmTranslators', () => {
       dispose: vi.fn(),
     }
     const post = vi.fn(async (_url: string, init: RequestInit) => {
-      const { prompt } = JSON.parse(String(init.body)) as { prompt: string }
-      asked.push({ target: serving!, prompt })
-      const text = prompt.split('\n\n\n')[1]?.split('<end_of_turn>')[0] ?? ''
-      return new Response(JSON.stringify({ content: ` [${text}]\n` }), { status: 200 })
+      const { messages } = JSON.parse(String(init.body)) as { messages: { content: string }[] }
+      const [system, user] = messages
+      asked.push({ target: serving!, system: system!.content, text: user!.content })
+      return new Response(JSON.stringify({ choices: [{ message: { content: ` [${user!.content}]\n` } }] }), { status: 200 })
     })
-    const timed: { level: LlmLevel; sentence: number; start?: number }[] = []
-    const onTimed = (level: LlmLevel, t: { sentence: number; start?: number }) => timed.push({ level, ...t })
+    const timed: { level: LlmModel; sentence: number; start?: number }[] = []
+    const onTimed = (level: LlmModel, t: { sentence: number; start?: number }) => timed.push({ level, ...t })
     const files = createLlmFiles({ root, open, manifest, engineFor, server: server as unknown as LlamaServer })
     const llm = createLlmTranslators({ files, fetch: post as unknown as typeof fetch, onTimed })
     return { root, llm, files, open, server, asked, timed, manifest, paths: llmPaths(root, manifest) }
@@ -122,7 +119,7 @@ describe('createLlmTranslators', () => {
     expect(out).toEqual(['[Привет.]', '', '[Как дела?]'])
     expect(asked).toHaveLength(2)
     expect(asked[0]?.target).toEqual({ exe: paths.exe('vulkan'), model: paths.model('accurate'), allLayers: false })
-    expect(asked[0]?.prompt).toContain('Russian (ru) to Ukrainian (uk)')
+    expect(asked[0]).toMatchObject({ system: translatePrompt('ru', 'uk'), text: 'Привет.' })
     // Timed by its two sentences; the first waited for the model to load, the next did not.
     await llm.accurate.translate(['Да.'], 'ru', 'en')
     expect(timed.map(t => [t.level, t.start !== undefined])).toEqual([
@@ -149,7 +146,7 @@ describe('createLlmTranslators', () => {
     await Promise.all([llm.accurate.prepare('ru', () => undefined), llm.accurate.prepare('uk', () => undefined)])
     expect(open).toHaveBeenCalledTimes(2)
     manifest.models.most.sha256 = '0'.repeat(64)
-    await expect(llm.most.prepare('ru', () => undefined)).rejects.toThrow('TranslateGemma 12B did not arrive whole')
+    await expect(llm.most.prepare('ru', () => undefined)).rejects.toThrow('Gemma 4 12B did not arrive whole')
     expect(llm.most.state('ru')).toMatchObject({ status: 'failed' })
   })
 
@@ -164,17 +161,26 @@ describe('createLlmTranslators', () => {
     const { llm, files, server, paths } = setup()
     await llm.accurate.prepare('ru', () => undefined)
     await llm.most.prepare('ru', () => undefined)
-    await files.prepare('check', () => undefined)
     await llm.most.translate(['Hi.'], 'en', 'ru')
     await files.remove('most')
     expect(server.stop).toHaveBeenCalled()
     expect(llm.most.state('ru')).toMatchObject({ status: 'absent' })
     expect(fs.existsSync(paths.engineDir('cuda'))).toBe(false)
     expect(llm.accurate.state('ru')).toMatchObject({ status: 'ready' })
-    // The checker still needs Vulkan's build.
     await files.remove('accurate')
-    expect(fs.existsSync(paths.engineDir('vulkan'))).toBe(true)
-    await files.remove('check')
     expect(fs.existsSync(paths.engineDir('vulkan'))).toBe(false)
+  })
+
+  it('finds the model files an older Krya left, never its own or one downloading, and deletes them when told', async () => {
+    const { files, root, paths } = setup()
+    await files.prepare('accurate', () => undefined)
+    const models = path.join(root, 'models')
+    const old = path.join(models, '7f7357c14abd-translategemma-4b-it-Q4_K_M.gguf')
+    fs.writeFileSync(old, 'old')
+    fs.writeFileSync(`${paths.model('most')}.part`, 'half')
+    expect(files.unused()).toEqual([old])
+    files.removeUnused()
+    expect(fs.readdirSync(models).sort()).toEqual([path.basename(paths.model('accurate')), `${path.basename(paths.model('most'))}.part`].sort())
+    expect(files.state('accurate')).toMatchObject({ status: 'ready' })
   })
 })

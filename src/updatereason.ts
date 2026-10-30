@@ -11,7 +11,7 @@ export function updateFailure(error: unknown): UpdateStatus {
   const text = error instanceof Error ? error.message : String(error)
   // GitHub answers 404 for the releases of a private repository.
   if (code === 404 || /\b404\b/.test(text)) return { status: 'unavailable', message: 'updates are off while the releases are private' }
-  if (OFFLINE.test(text)) return { status: 'unavailable', message: 'no connection to GitHub; Altype tries again later' }
+  if (OFFLINE.test(text)) return { status: 'unavailable', message: 'no connection to GitHub; Krya tries again later' }
   const line = (text.split('\n')[0] ?? '').trim()
   return { status: 'failed', message: line.length > 140 ? `${line.slice(0, 139)}…` : line }
 }

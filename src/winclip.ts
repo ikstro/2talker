@@ -26,7 +26,7 @@ export function handleOf(window: BrowserWindow): bigint {
 export function watchClipboard(window: BrowserWindow, onChange: () => void): () => void {
   const hwnd = handleOf(window)
   window.hookWindowMessage(WM_CLIPBOARDUPDATE, () => onChange())
-  if (!AddClipboardFormatListener(hwnd)) throw new Error('Windows did not let Altype watch the clipboard')
+  if (!AddClipboardFormatListener(hwnd)) throw new Error('Windows did not let Krya watch the clipboard')
   return () => {
     RemoveClipboardFormatListener(hwnd)
     // On quitting, the window may be gone already.
@@ -37,7 +37,7 @@ export function watchClipboard(window: BrowserWindow, onChange: () => void): () 
 const WM_RENDERFORMAT = 0x0305
 const WM_RENDERALLFORMATS = 0x0306
 
-/** The window owns Altype's promised text (winclipboard.ts): `onRead` when a program asks for it, `onGoing` when the window goes first. */
+/** The window owns Krya's promised text (winclipboard.ts): `onRead` when a program asks for it, `onGoing` when the window goes first. */
 export function watchRendering(window: BrowserWindow, onRead: () => void, onGoing: () => void): () => void {
   // Called within Windows' message: the text must be handed over before the hook returns.
   window.hookWindowMessage(WM_RENDERFORMAT, () => onRead())

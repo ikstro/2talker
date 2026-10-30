@@ -1,11 +1,12 @@
 /* Dictate's badge: one panel at the bottom of the screen being typed in. The
    phrase on top, as it is heard; one status line under it, which is also the
    handle to move the badge by. The window is as tall as the panel
-   (dictation.ts in the page posts its height), so the border is its edge. */
+   (dictation.ts in the page posts its height) and see-through: the pill, its
+   16 px corners and its 1 px edge are drawn here, on Windows 10 and 11 alike. */
 
 * { box-sizing: border-box; }
 
-html, body { margin: 0; height: 100%; overflow: hidden; background: var(--surface); }
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
 body { font: 400 var(--t-body) / 1.45 var(--font); color: var(--text); user-select: none; cursor: default; -webkit-font-smoothing: antialiased; }
 
 .badge {
@@ -13,13 +14,13 @@ body { font: 400 var(--t-body) / 1.45 var(--font); color: var(--text); user-sele
   max-height: 180px;
   padding: 10px 14px 9px;
   border: 1px solid var(--border);
-  background: var(--surface);
+  border-radius: var(--r-xl);
+  /* The app's own ground, as the window's. */
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
-/* Windows 11 draws the frame itself (?frame=dwm): the border stays, unseen, so the size holds. */
-html.dwm .badge { border-color: transparent; }
 
 /* The phrase as it stands: whole, wrapping, the latest words in view; six
    lines at most (the window's 180 px), whole lines, the earlier ones fading
@@ -30,6 +31,9 @@ html.dwm .badge { border-color: transparent; }
   max-height: calc(1.45em * 6);
   overflow-y: auto;
   scrollbar-width: none;
+  /* A step under the app's text, and lighter (Inter is variable: any weight). */
+  font-size: var(--t-small);
+  font-weight: 350;
   color: var(--text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -52,15 +56,17 @@ html.dwm .badge { border-color: transparent; }
 .time { font: 500 var(--t-small) / 1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .time.fetch { font-family: var(--font); }
 
-.dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
+.dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--rec); animation: blink 1s step-end infinite; }
 /* The voice is ahead of the engine: amber until it catches up. */
-.dot.behind { background: var(--orange); }
-@keyframes pulse { 50% { opacity: 0.35; } }
+.dot.behind { background: var(--amber); }
+/* Recording: on half a second, off half a second, as a recorder's light. */
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
 
 /* The last three seconds of sound, newest at the right (dictation.ts draws it). */
 canvas.wave { flex: 1; min-width: 0; height: 16px; margin-left: 6px; }
 
-.spin { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+.spin { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--mark); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .check { color: var(--green); font-weight: 700; }

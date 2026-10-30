@@ -1,4 +1,4 @@
-/* Altype's colors (GitHub Light / Dark Dimmed), as in the app's theme.css. */
+/* Krya's colors (GitHub Light / Dark Dimmed), as in the app's theme.css. */
 :root { --bg: #ffffff; --raised: #f6f8fa; --border: #d0d7de; --text: #1f2328; --strong: #0e1116; --muted: #656d76; --accent: #0969da; --on-accent: #fff; --red: #cf222e; --green: #1a7f37; }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #22272e; --raised: #2d333b; --border: #444c56; --text: #adbac7; --strong: #cdd9e5; --muted: #768390; --accent: #6cb6ff; --on-accent: #1c2128; --red: #e5534b; --green: #8ddb8c; }

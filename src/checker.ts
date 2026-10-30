@@ -1,15 +1,16 @@
-// Check my English: Google's Gemma 4 E4B (llmfiles.ts, run by llama.cpp's
-// server) corrects the person's English and says the main mistake in a short
+// Check my English: the person's local model (Gemma 4 E4B or 12B, the one
+// that translates too; llmfiles.ts, run by llama.cpp's server) corrects their English and says the main mistake in a short
 // line of their own language. The answer is forced into JSON by llama.cpp's
 // json_schema; what changed is marked by worddiff.ts, never by the model.
 // Each line is checked on its own, four at a time: given two paragraphs, the
 // model once answered with the first alone. An answer that loses much of its
 // line is not taken. Measured on 44 texts (2026-10-30): 31 of 32 mistakes
 // caught, none of 11 right texts changed, 0.7 s a text on the RTX 2080 SUPER,
-// about 5 s on the i9. Telling the note to put grammar before a typo cost a
+// about 5 s on the i9; the 12B barely better at 2 s. TranslateGemma could not
+// check: it translated the instructions. Telling the note to put grammar before a typo cost a
 // caught mistake ("How it works?") and wrote one note in English: not kept.
 
-import { LLM_LANGUAGES, mapLimit, type LlmFiles, type ModelState } from './llmfiles'
+import { LLM_LANGUAGES, mapLimit, type LlmFiles, type LlmModel, type ModelState } from './llmfiles'
 
 const PARALLEL = 4
 /** A long text on the processor may take minutes. */
@@ -57,9 +58,11 @@ export function lostWords(text: string, corrected: string): boolean {
 
 export type CheckerOptions = {
   files: LlmFiles
+  /** The model in use (the settings' `model`), asked at each check. */
+  model: () => LlmModel
   fetch?: typeof fetch
   /** A check done: its seconds, and the seconds it waited for the model to load, when it did. */
-  onTimed?: (timed: { text: number; start?: number }) => void
+  onTimed?: (model: LlmModel, timed: { text: number; start?: number }) => void
 }
 
 export type Checker = {
@@ -109,16 +112,17 @@ export function createChecker(o: CheckerOptions): Checker {
   }
 
   return {
-    state: () => files.state('check'),
-    prepare: onProgress => files.prepare('check', onProgress),
+    state: () => files.state(o.model()),
+    prepare: onProgress => files.prepare(o.model(), onProgress),
     async check(text, native) {
       if (!text.trim()) return { corrected: text, note: '' }
-      const target = files.target('check')
+      const model = o.model()
+      const target = files.target(model)
       const began = Date.now()
       return files.server.run(target, async (base, loaded) => {
         const ready = Date.now()
         const outs = await mapLimit(text.split('\n'), PARALLEL, line => one(base, line, native))
-        o.onTimed?.({ text: (Date.now() - ready) / 1000, ...(loaded ? { start: (ready - began) / 1000 } : {}) })
+        o.onTimed?.(model, { text: (Date.now() - ready) / 1000, ...(loaded ? { start: (ready - began) / 1000 } : {}) })
         const notes = [...new Set(outs.map(out => out.note).filter(Boolean))]
         return { corrected: outs.map(out => out.corrected).join('\n'), note: notes.slice(0, 3).join(' ') }
       })

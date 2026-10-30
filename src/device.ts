@@ -13,6 +13,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 
 import { vendorOf, type DeviceProfile, type Gpu } from './hardware'
+import type { LlmModel } from './settings'
 
 export { mainCard, nvidiaCard, vendorOf, type DeviceProfile, type Gpu, type GpuVendor } from './hardware'
 
@@ -161,18 +162,19 @@ export async function probeDevice(): Promise<DeviceProfile> {
   try {
     profile = parseWindows(await powershell(), base)
   } catch (error) {
-    console.warn('Altype: could not ask Windows about this computer', error)
+    console.warn('Krya: could not ask Windows about this computer', error)
   }
   return withNvidia(profile, parseNvidiaSmi(await nvidiaSmi()))
 }
 
 /** How fast the natural voice makes speech here: seconds per second of sound, over `n` sentences. */
 export type VoiceSpeed = { rtf: number; n: number }
-/** How fast an accurate translation level works here, in seconds: a sentence on a model already loaded, and loading it; the latest few of each. */
-export type LevelSpeed = { sentence: number[]; start: number[] }
-/** The accurate levels' seconds a sentence; Check my English's (`check`) seconds a text, in `sentence` too. */
-export type LevelSpeeds = Partial<Record<'accurate' | 'most' | 'check', LevelSpeed>>
-type DeviceFile = { profile?: DeviceProfile; voice?: VoiceSpeed; translate?: LevelSpeeds }
+/** How fast a local model works here, in seconds, the latest few of each: a sentence translated and a text checked on the model already loaded, and loading it. */
+export type ModelSpeed = { sentence: number[]; text: number[]; start: number[] }
+export type ModelSpeeds = Partial<Record<LlmModel, ModelSpeed>>
+/** Until 0.10.1: TranslateGemma's levels, and the checker (Gemma 4 E4B, Accurate now) with its seconds a text in `sentence`. */
+type OldSpeeds = Partial<Record<'accurate' | 'most' | 'check', { sentence: number[]; start: number[] }>>
+type DeviceFile = { profile?: DeviceProfile; voice?: VoiceSpeed; models?: ModelSpeeds; translate?: OldSpeeds }
 
 function readDeviceFile(file: string): DeviceFile {
   try {
@@ -187,7 +189,7 @@ function writeDeviceFile(file: string, changes: DeviceFile): void {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify({ ...readDeviceFile(file), ...changes }, null, 2))
   } catch (error) {
-    console.warn('Altype: could not save device.json', error)
+    console.warn('Krya: could not save device.json', error)
   }
 }
 
@@ -201,7 +203,7 @@ export function loadProfile(file: string): DeviceProfile | undefined {
 export function saveProfile(file: string, profile: DeviceProfile): void {
   const old = readDeviceFile(file)
   const same = old.profile && fingerprint(old.profile) === fingerprint(profile)
-  writeDeviceFile(file, same ? { profile } : { profile, voice: undefined, translate: undefined })
+  writeDeviceFile(file, same ? { profile } : { profile, voice: undefined, models: undefined, translate: undefined })
 }
 
 export function loadVoiceSpeed(file: string): VoiceSpeed | undefined {
@@ -225,24 +227,32 @@ export function nextVoiceSpeed(old: VoiceSpeed | undefined, took: number, second
 /** Seconds of each kind kept: the median of the latest few, so one slow first run (Vulkan preparing its shaders) does not decide. */
 const LEVEL_KEPT = 9
 
-export function loadLevelSpeeds(file: string): LevelSpeeds {
-  const t = readDeviceFile(file).translate
-  const out: LevelSpeeds = {}
-  for (const level of ['accurate', 'most', 'check'] as const) {
-    const s = t?.[level]
-    if (s && Array.isArray(s.sentence) && Array.isArray(s.start)) out[level] = s
+const numbers = (v: unknown): number[] => (Array.isArray(v) ? v.filter((n): n is number => typeof n === 'number') : [])
+
+/** The models' speeds; a file from 0.10.1 gives its checker's (the same Gemma 4 E4B as Accurate), never TranslateGemma's. */
+export function loadModelSpeeds(file: string): ModelSpeeds {
+  const f = readDeviceFile(file)
+  const out: ModelSpeeds = {}
+  if (!f.models) {
+    const check = f.translate?.check
+    if (check) out.accurate = { sentence: [], text: numbers(check.sentence), start: numbers(check.start) }
+    return out
+  }
+  for (const model of ['accurate', 'most'] as const) {
+    const s = f.models[model]
+    if (s) out[model] = { sentence: numbers(s.sentence), text: numbers(s.text), start: numbers(s.start) }
   }
   return out
 }
 
-export function saveLevelSpeeds(file: string, speeds: LevelSpeeds): void {
-  writeDeviceFile(file, { translate: speeds })
+export function saveModelSpeeds(file: string, speeds: ModelSpeeds): void {
+  writeDeviceFile(file, { models: speeds, translate: undefined })
 }
 
-/** A translation timed: seconds a sentence, and the seconds it waited for the model to load, when it did. */
-export function nextLevelSpeed(old: LevelSpeed | undefined, timed: { sentence: number; start?: number }): LevelSpeed {
+/** A translation or a check timed: seconds a sentence or a text, and the seconds it waited for the model to load, when it did. */
+export function nextModelSpeed(old: ModelSpeed | undefined, timed: { sentence?: number; text?: number; start?: number }): ModelSpeed {
   const keep = (list: number[], value: number | undefined) => (value === undefined || value <= 0 ? list : [...list, value].slice(-LEVEL_KEPT))
-  return { sentence: keep(old?.sentence ?? [], timed.sentence), start: keep(old?.start ?? [], timed.start) }
+  return { sentence: keep(old?.sentence ?? [], timed.sentence), text: keep(old?.text ?? [], timed.text), start: keep(old?.start ?? [], timed.start) }
 }
 
 export function median(values: readonly number[]): number | undefined {

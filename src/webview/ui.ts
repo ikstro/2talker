@@ -29,12 +29,12 @@ export function card(name: LucideName, label: string | HTMLElement, notes: Note[
 }
 
 /** A card that opens a page of its own: its value on the right (green with a check when `ok`), then a chevron. */
-export function navCard(name: LucideName | null, title: string, note: Note, value: string | null, onOpen: () => void, id = '', ok = false): HTMLButtonElement {
+export function navCard(name: LucideName | null, title: string, note: Note | Note[], value: string | null, onOpen: () => void, id = '', ok = false): HTMLButtonElement {
   return el(
     'button',
     { class: 'row navc', 'data-sub': id || undefined, onclick: onOpen },
     name ? lucide(name) : null,
-    el('div', { class: 'l' }, title, ...notesOf([note])),
+    el('div', { class: 'l' }, title, ...notesOf(Array.isArray(note) ? note : [note])),
     value ? el('span', { class: ok ? 'v ok' : 'v' }, ok ? lucide('check', 's') : null, value) : null,
     lucide('chevron-right', 'chev'),
   )

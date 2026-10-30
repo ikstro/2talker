@@ -154,7 +154,7 @@ def test_parakeet_takes_short_pieces():
     # Three pieces in the text (previews, shown meanwhile, are not in it), none longer than its speech and pause.
     assert len(out["text"].split()) == 3
     assert max(c["seconds"] for c in r.calls) < 3
-    # Parakeet does not say the language: Altype finds it from the text.
+    # Parakeet does not say the language: Krya finds it from the text.
     assert out["language"] == "" and out["sure"] == 0
 
 

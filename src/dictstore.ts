@@ -86,6 +86,14 @@ export class DictionaryStore {
     return fs.existsSync(this.cacheFile(code)) ? 'ready' : 'off'
   }
 
+  /** The downloaded dictionaries deleted; the next word downloads its language's again (the bundled ones stay). */
+  clear(): void {
+    if ([...this.states.values()].some(s => s.status === 'downloading')) return
+    this.states.clear()
+    fs.rmSync(this.options.cacheDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    this.options.onChange?.('')
+  }
+
   private async download(code: string): Promise<void> {
     try {
       const gz = await this.options.fetchGz(dictionaryUrl(code))

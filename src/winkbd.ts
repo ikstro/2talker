@@ -82,9 +82,9 @@ const FULL_SCREEN_STATES = new Set([2, 3, 4])
 const INPUT_KEYBOARD = 1
 const KEYEVENTF_KEYUP = 0x0002
 const KEYEVENTF_UNICODE = 0x0004
-/** Keys Altype presses itself carry this, so the keyboard thread lets them by. */
+/** Keys Krya presses itself carry this, so the keyboard thread lets them by. */
 export const OWN_KEYS = 0x2a7a
-/** Keys the person pressed while a fix was being typed, pressed again after it: theirs, not Altype's. */
+/** Keys the person pressed while a fix was being typed, pressed again after it: theirs, not Krya's. */
 export const REPLAY_KEYS = 0x2a7b
 /** The main process's Ctrl+C and Ctrl+V (winclip.ts): another program's keys to the thread, but never "a program pressing keys by itself". */
 export const MAIN_KEYS = 0x2a7c
@@ -151,7 +151,7 @@ export function layoutOf(tid: number): bigint {
   return BigInt.asIntN(64, BigInt(GetKeyboardLayout(tid) as number | bigint))
 }
 
-/** Brings a window to the front, with the keyboard; Windows allows it while Altype's own window is in front. */
+/** Brings a window to the front, with the keyboard; Windows allows it while Krya's own window is in front. */
 export function focusWindow(hwnd: bigint): boolean {
   return !!SetForegroundWindow(hwnd)
 }
@@ -334,7 +334,7 @@ export function fullScreenNow(): boolean {
  */
 export type Press = { vk: number } | { char: string } | { again: { vk: number; scan: number; up: boolean } } | { release: number }
 
-/** Presses keys in the program in front: marked as Altype's own, unless pressed again for the person. */
+/** Presses keys in the program in front: marked as Krya's own, unless pressed again for the person. */
 export function press(keys: readonly Press[]): void {
   const inputs: unknown[] = []
   const event = (vk: number, scan: number, flags: number, own = true) =>

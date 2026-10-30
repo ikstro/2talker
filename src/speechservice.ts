@@ -1,6 +1,6 @@
 // The speech engine as a running service: engine/app.py under the Python the
 // speech pack installed, on 127.0.0.1:<port>. Started once a part is
-// installed, started again when it falls over, stopped with Altype. One
+// installed, started again when it falls over, stopped with Krya. One
 // already answering on the port (run by hand) is used as it is. Every feature
 // and every other app (the Chrome extension) speaks to it over HTTP.
 
@@ -18,7 +18,7 @@ export type SpeechServiceState = 'off' | 'starting' | 'ready' | 'down'
 
 export type SpeechTestState = { state: 'idle' | 'waiting' | 'running' | 'done' | 'failed'; done: number; total: number; current: string; message: string; at: string }
 
-/** The engine's /health, as much of it as Altype reads (the optional parts come from engines of 0.2 on). */
+/** The engine's /health, as much of it as Krya reads (the optional parts come from engines of 0.2 on). */
 export type SpeechHealth = {
   version: string
   device: 'cuda' | 'cpu' | null

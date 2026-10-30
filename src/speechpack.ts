@@ -4,8 +4,8 @@
 //   gpu       the same on an NVIDIA card          (offered when the system has one)
 //   speakers  who spoke when                      (Transcribe's speakers, meetings)
 // uv, Astral's Python manager, is downloaded once (pinned, SHA-256 checked) and
-// installs a Python of its own and the packages into %LOCALAPPDATA%\Altype\speech,
-// outside the app's folder, so an update of Altype keeps them. The download
+// installs a Python of its own and the packages into %LOCALAPPDATA%\Krya\speech,
+// outside the app's folder, so an update of Krya keeps them. The download
 // cache goes when an install is done; the environment stays.
 
 import { spawn } from 'node:child_process'
@@ -94,7 +94,7 @@ export function normalizeParts(parts: SpeechPart[]): SpeechPart[] {
 export type Run = (exe: string, args: string[], env: Record<string, string>) => { exit: Promise<number>; output: () => string }
 
 export type SpeechPackOptions = {
-  /** %LOCALAPPDATA%\Altype\speech */
+  /** %LOCALAPPDATA%\Krya\speech */
   root: string
   /** The engine's source: app.py, pyproject.toml, uv.lock. */
   engineDir: string
@@ -168,7 +168,7 @@ export class SpeechPack {
     }
   }
 
-  /** Altype was updated with other packages for the engine: the same parts are installed again (quick, mostly kept). */
+  /** Krya was updated with other packages for the engine: the same parts are installed again (quick, mostly kept). */
   get stale(): boolean {
     const m = this.marker()
     return !!m && m.lock !== this.lockHash()
@@ -193,7 +193,7 @@ export class SpeechPack {
       this.set('installing', 'packages', 0)
       await this.sync(parts, extras)
       fs.writeFileSync(path.join(this.o.root, 'installed.json'), JSON.stringify({ parts, lock: this.lockHash(), extras } satisfies Marker))
-      // Only Altype's own cache goes; a shared one stays as its owner keeps it.
+      // Only Krya's own cache goes; a shared one stays as its owner keeps it.
       fs.rmSync(path.join(this.o.root, 'cache'), { recursive: true, force: true })
       this.installing = undefined
       this.set(this.marker() ? 'ready' : 'failed', undefined, 1)

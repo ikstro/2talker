@@ -1,4 +1,4 @@
-// Altype's keys, written like Electron's accelerators and recorded from key
+// Krya's keys, written like Electron's accelerators and recorded from key
 // presses in the settings. Beyond a key with modifiers ("Control+Alt+K",
 // which Electron's shortcuts hold), the keyboard thread (kbd-worker.ts)
 // matches what Electron cannot: a modifier tapped alone ("LeftControl") or

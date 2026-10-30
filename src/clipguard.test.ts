@@ -32,7 +32,7 @@ describe('ClipboardGuard', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  test('a paste: Altype’s text goes in, what the person had comes back after', async () => {
+  test('a paste: Krya’s text goes in, what the person had comes back after', async () => {
     const clip = fakeClipboard()
     const guard = new ClipboardGuard(clip.backend, noWait)
     guard.hold()
@@ -44,7 +44,7 @@ describe('ClipboardGuard', () => {
     expect(guard.isOurs()).toBe(true)
   })
 
-  test('two actions close together keep the first snapshot, not Altype’s own text', async () => {
+  test('two actions close together keep the first snapshot, not Krya’s own text', async () => {
     const clip = fakeClipboard()
     const guard = new ClipboardGuard(clip.backend, noWait)
     guard.hold()
@@ -79,7 +79,7 @@ describe('ClipboardGuard', () => {
     expect(clip.state.writes).toBe(0)
   })
 
-  test('a copy Altype pressed is claimed and taken back', async () => {
+  test('a copy Krya pressed is claimed and taken back', async () => {
     const clip = fakeClipboard()
     const guard = new ClipboardGuard(clip.backend, noWait)
     guard.hold()

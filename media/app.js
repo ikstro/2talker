@@ -252,7 +252,7 @@
     const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
     return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
   }
-  var LEVEL_VRAM_MB = { accurate: 3500, most: 9e3, check: 3500 };
+  var LEVEL_VRAM_MB = { accurate: 3500, most: 9e3 };
   function cudaReady(g) {
     if (!g) return false;
     if (g.computeCap && g.computeCap < 5) return false;
@@ -273,6 +273,71 @@
   // src/settings.ts
   var RATES = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
   var LEVEL_NAMES = { fast: "Fast", accurate: "Accurate", most: "Most accurate" };
+  var DEFAULTS = {
+    native: "Russian",
+    languages: [],
+    voice: "",
+    rate: 1,
+    autoRead: true,
+    oneAtATime: false,
+    wordHint: "shift",
+    rareWords: true,
+    theme: "system",
+    cardWidth: 440,
+    cardHeight: 0,
+    doubleCopy: true,
+    selectKey: "",
+    snipKey: "Control+Alt+S",
+    translateKey: "",
+    textKey: "Control+Alt+T",
+    inPlaceKey: "",
+    checkKey: "",
+    typeKey: "",
+    typeCheckKey: "",
+    switchKey: "",
+    switchOn: true,
+    layouts: [],
+    layoutKeys: {},
+    autoFix: false,
+    fixTwoCaps: true,
+    fixCapsLock: true,
+    keepCaps: false,
+    fixOnPause: false,
+    fixSound: false,
+    learn: true,
+    fixKey: "",
+    fixKeyOn: true,
+    apps: [],
+    keepWords: [],
+    layoutBadge: false,
+    trayLayout: false,
+    quietFullScreen: true,
+    pauseKey: "",
+    windowKey: "",
+    dictateKey: "Control+Alt+D",
+    englishKey: "",
+    noteKey: "Control+Alt+N",
+    againKey: "",
+    practiceKey: "",
+    dictationBadge: { dx: 0, dy: 0 },
+    vocabulary: [],
+    translationLevel: "fast",
+    model: "accurate",
+    speechPrefer: "accuracy",
+    dictationModel: "",
+    transcriptsModel: "",
+    speakersDevice: "auto",
+    speechTestAgreed: false,
+    speechTestDeclinedKey: "",
+    speechTestDeclinedAt: 0,
+    startWithWindows: true,
+    betaUpdates: false,
+    naturalDismissed: false,
+    introSeen: false,
+    paused: false,
+    setupDone: true
+  };
+  var keptForm = (text) => text.trim().toLowerCase();
   function myLanguages(s) {
     return [...new Set([findLanguage(s.native)?.code ?? "", "en", ...s.languages].filter(Boolean))];
   }
@@ -422,6 +487,27 @@
     for (const c of [...node.classList]) if (c.startsWith("codicon-")) node.classList.remove(c);
     node.classList.add(`codicon-${name}`);
   }
+  function html(markup) {
+    const template = document.createElement("template");
+    template.innerHTML = markup;
+    return template.content;
+  }
+
+  // src/webview/brand.ts
+  function logo() {
+    return el(
+      "span",
+      { class: "logo", "aria-label": "Krya" },
+      el("span", {}, "Krya"),
+      el("span", { class: "duck", "aria-hidden": "true" }, "(", el("span", { class: "eye" }, "'"), ")>")
+    );
+  }
+  function tile(px) {
+    const svg = html(
+      `<svg class="tile" width="${px}" height="${px}" viewBox="0 0 256 256" aria-hidden="true"><rect x="16" y="16" width="224" height="224" rx="52" fill="#141414"/><g transform="translate(-4 -2)" fill="none" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><path stroke="#FFFFFF" d="M118 58C92 58 84 68 84 88V96C84 108 78 114 62 114C78 114 84 120 84 132V174C84 194 92 202 118 202"/><path stroke="#FFD60A" d="M166 86L202 114L166 142"/></g><circle cx="132" cy="96" r="13" fill="#FFFFFF"/></svg>`
+    ).firstElementChild;
+    return svg;
+  }
 
   // src/webview/glyphs.ts
   var GLYPHS = {
@@ -483,6 +569,8 @@
     "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />',
     "external-link": '<path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
     "rotate-cw": '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" />',
+    "rotate-ccw": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" />',
+    "database": '<ellipse cx="12" cy="5" rx="9" ry="3" /> <path d="M3 5V19A9 3 0 0 0 21 19V5" /> <path d="M3 12A9 3 0 0 0 21 12" />',
     "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />',
     "pause": '<rect x="14" y="3" width="5" height="18" rx="1" /> <rect x="5" y="3" width="5" height="18" rx="1" />',
     "power": '<path d="M12 2v10" /> <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />',
@@ -508,6 +596,11 @@
     "wand-sparkles": '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" /> <path d="m14 7 3 3" /> <path d="M5 6v4" /> <path d="M19 14v4" /> <path d="M10 2v2" /> <path d="M7 8H3" /> <path d="M21 16h-4" /> <path d="M11 3H9" />',
     "thumbs-up": '<path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /> <path d="M7 10v12" />',
     "loader": '<path d="M12 2v4" /> <path d="m16.2 7.8 2.9-2.9" /> <path d="M18 12h4" /> <path d="m16.2 16.2 2.9 2.9" /> <path d="M12 18v4" /> <path d="m4.9 19.1 2.9-2.9" /> <path d="M2 12h4" /> <path d="m4.9 4.9 2.9 2.9" />',
+    "pencil-line": '<path d="M13 21h8" /> <path d="m15 5 4 4" /> <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />',
+    "monitor-speaker": '<path d="M5.5 20H8" /> <path d="M17 9h.01" /> <rect width="10" height="16" x="12" y="4" rx="2" /> <path d="M8 6H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4" /> <circle cx="17" cy="15" r="1" />',
+    "scan-text": '<path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" /> <path d="M7 8h8" /> <path d="M7 12h10" /> <path d="M7 16h6" />',
+    "text-cursor": '<path d="M17 22h-1a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4h1" /> <path d="M7 22h1a4 4 0 0 0 4-4" /> <path d="M7 2h1a4 4 0 0 1 4 4" />',
+    "panel-bottom": '<rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M3 15h18" />',
     "plus": '<path d="M5 12h14" /> <path d="M12 5v14" />',
     "x": '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
     "minus": '<path d="M5 12h14" />',
@@ -545,7 +638,7 @@
       "button",
       { class: "row navc", "data-sub": id || void 0, onclick: onOpen },
       name ? lucide(name) : null,
-      el("div", { class: "l" }, title, ...notesOf([note])),
+      el("div", { class: "l" }, title, ...notesOf(Array.isArray(note) ? note : [note])),
       value ? el("span", { class: ok ? "v ok" : "v" }, ok ? lucide("check", "s") : null, value) : null,
       lucide("chevron-right", "chev")
     );
@@ -692,7 +785,7 @@
 
   // engine/models.json
   var models_default = {
-    about: "The speech models Altype can use, read by the engine (asr.py) and by Altype (src/speechplan.ts). rank: how accurate, higher is better. phrase: seconds to recognize a 7 s phrase as Dictate does; rtf: seconds per second of a long recording as Transcribe does (words with their times). Both are first guesses, measured on an i9-9900K (cpu, int8) and an RTX 2080 SUPER (cuda, float16) on 2026-10-28, until this computer is tested. Whisper pads every phrase to a 30 s window, so a phrase costs one window whatever its length; turbo's decoder is light, so on long recordings it is nearly as quick as small. ramMb: memory on the processor; vramMb: on the card, per compute type. Parakeet (NVIDIA's TDT 0.6B v3 through onnx-asr, int8, on the processor) costs what the sound lasts, not a window: a 7 s phrase in 0.3 s on the i9, Russian as good as turbo on the card in a test on a LibriVox reading; it dictates in its 25 languages. devices and features: where and for what a model is used.",
+    about: "The speech models Krya can use, read by the engine (asr.py) and by Krya (src/speechplan.ts). rank: how accurate, higher is better. phrase: seconds to recognize a 7 s phrase as Dictate does; rtf: seconds per second of a long recording as Transcribe does (words with their times). Both are first guesses, measured on an i9-9900K (cpu, int8) and an RTX 2080 SUPER (cuda, float16) on 2026-10-28, until this computer is tested. Whisper pads every phrase to a 30 s window, so a phrase costs one window whatever its length; turbo's decoder is light, so on long recordings it is nearly as quick as small. ramMb: memory on the processor; vramMb: on the card, per compute type. Parakeet (NVIDIA's TDT 0.6B v3 through onnx-asr, int8, on the processor) costs what the sound lasts, not a window: a 7 s phrase in 0.3 s on the i9, Russian as good as turbo on the card in a test on a LibriVox reading; it dictates in its 25 languages. devices and features: where and for what a model is used.",
     speakers: {
       cpu: {
         rtf: 0.8
@@ -1401,7 +1494,7 @@
 
   // src/webview/setup.ts
   var STEPS = ["Your language", "This computer", "What you need", "Download"];
-  var CAPS = ["English is what Altype teaches", "what speech can run on here", "advised for this computer", "one button, then it goes on by itself"];
+  var CAPS = ["English is what Krya teaches", "what speech can run on here", "advised for this computer", "one button, then it goes on by itself"];
   var step = 1;
   var choice;
   var started = false;
@@ -1466,7 +1559,7 @@
     const own = card(
       "languages",
       "Your language",
-      ["what Altype translates into and listens for; English is the language it teaches"],
+      ["what Krya translates into and listens for; English is the language it teaches"],
       select(
         s.native,
         v.languages.map((l) => [l.name, `${l.native} \xB7 ${l.name}`]),
@@ -1578,7 +1671,7 @@
       advised(toggleCard("audio-lines", "Transcribe meetings and files", c.transcribe, flip("transcribe"), `${r.transcribe.why} \xB7 ${transcribeModel.label} ${transcribeModel.downloaded ? "here" : sizeText(transcribeModel.mb)}${c.dictate ? "" : ` + the speech engine ${sizeText(engineMb)}`}`), r.transcribe),
       c.transcribe ? advised(toggleCard("users", "Who spoke when", c.speakers, flip("speakers"), `${r.speakers.why} \xB7 ${sizeText(s.speakers.sizes[speakersWhere(c, v)].download)}`), r.speakers) : null,
       c.transcribe && c.speakers ? speakersOnCard(v, h, c) : null,
-      grp("Altype"),
+      grp("Krya"),
       advised(toggleCard("power", "Start with Windows", c.startWithWindows, flip("startWithWindows"), r.startWithWindows.why), r.startWithWindows),
       grp("All of it"),
       total,
@@ -1978,6 +2071,7 @@
     try {
       await r.start();
       tx.recorder = r;
+      post({ type: "micRecording", on: true });
     } catch (error) {
       toast(micTrouble(error), void 0, true);
     }
@@ -1986,6 +2080,7 @@
   async function stopMic() {
     const r = tx.recorder;
     tx.recorder = void 0;
+    post({ type: "micRecording", on: false });
     redrawPage();
     if (!r) return;
     try {
@@ -1999,6 +2094,7 @@
   async function cancelMic() {
     const r = tx.recorder;
     tx.recorder = void 0;
+    post({ type: "micRecording", on: false });
     redrawPage();
     await r?.cancel();
   }
@@ -2640,6 +2736,7 @@
     layouts: "Layouts",
     settings: "Settings",
     engine: "Speech engine",
+    storage: "Storage",
     computer: "This computer",
     about: "About",
     search: "Search"
@@ -2682,20 +2779,17 @@
   function keyLines(action, s) {
     switch (action) {
       case "listen":
-        if (s.doubleCopy && s.selectKey)
-          return [
-            { label: "copy", hotkey: COPY_TWICE, chain: "listen" },
-            { label: "selection", hotkey: s.selectKey }
-          ];
-        return [{ label: "selection", hotkey: s.doubleCopy ? COPY_TWICE : s.selectKey, chain: "listen" }];
+        return [{ label: "selection", hotkey: s.selectKey || (s.doubleCopy ? COPY_TWICE : ""), chain: "listen" }];
       case "translate":
         return [
           { label: "selection", hotkey: s.translateKey, chain: "translate" },
+          ...s.typeKey ? [{ label: "type", hotkey: s.typeKey }] : [],
           { label: "paste back", hotkey: "Enter" }
         ];
       case "check":
         return [
           { label: "selection", hotkey: s.checkKey },
+          ...s.typeCheckKey ? [{ label: "type", hotkey: s.typeCheckKey }] : [],
           { label: "by voice", hotkey: s.practiceKey }
         ];
       case "screen":
@@ -2717,8 +2811,8 @@
         ];
     }
   }
-  function keysOf(action, s, chained = false) {
-    return keyLines(action, s).flatMap((k) => [el("span", { class: "kl" }, k.label), caps(k.hotkey, chained ? k.chain : void 0)]);
+  function keysOf(action, s, chained = false, setOnly = false) {
+    return keyLines(action, s).filter((k) => !setOnly || k.hotkey).flatMap((k) => [el("span", { class: "kl" }, k.label), caps(k.hotkey, chained ? k.chain : void 0)]);
   }
   function cycleOf(v) {
     const chosen = v.settings.layouts.map((id) => v.layouts.find((l) => l.id === id)).filter((l) => !!l);
@@ -2785,10 +2879,11 @@
       ]
     },
     {
-      label: "Altype",
+      label: "Krya",
       items: [
         { page: "settings", icon: "settings", title: "Settings" },
         { page: "engine", icon: "hard-drive", title: "Speech engine" },
+        { page: "storage", icon: "database", title: "Storage", value: (v) => v.storage?.parts.length ? size(downloadsMb(v.storage)) : "" },
         { page: "computer", icon: "cpu", title: "This computer" },
         { page: "about", icon: "info", title: "About" }
       ]
@@ -2828,7 +2923,8 @@
   var side = el(
     "aside",
     { class: "side" },
-    el("div", { class: "brand" }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype")),
+    // The text logo; a narrow sidebar has room for the icon only.
+    el("div", { class: "brand" }, logo(), tile(28)),
     el("label", { class: "find", title: "Search settings (Ctrl+F)" }, lucide("search", "s"), findField, el("span", { class: "key" }, "Ctrl F")),
     tree
   );
@@ -2851,7 +2947,7 @@
   var pTitle = el("div", { class: "ptitle" });
   var pCap = el("span", { class: "pcap" });
   var pKeys = el("div", { class: "pkeys" });
-  var barMark = el("div", { class: "brand bb" }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype"));
+  var barMark = el("div", { class: "brand bb" }, logo());
   var top = el("header", { class: "top" }, barMark, pBack, pTitle, pCap, el("span", { class: "gap" }), pKeys, winButtons);
   var home = el("main", { class: "home" });
   var pBody = el("div", { class: "pbody" });
@@ -2926,9 +3022,9 @@
     if (!v.settings.paused) return null;
     return el(
       "div",
-      { class: "row notice" },
+      { class: "row notice paused" },
       lucide("pause"),
-      el("div", { class: "l" }, "Altype is paused", el("small", {}, "shortcuts and layout fixing are off until you resume")),
+      el("div", { class: "l" }, "Krya is paused", el("small", {}, "shortcuts and layout fixing are off until you resume")),
       btn("Resume", () => save({ paused: false }), "primary")
     );
   }
@@ -3234,6 +3330,7 @@
     findField.value = place?.name === "search" ? finding : "";
     if (place?.name === "transcripts" && was?.name !== "transcripts") enterTranscripts();
     if (place?.name === "programs" && !place.sub) askRunningApps();
+    if (place?.name === "storage" && was?.name !== "storage") post({ type: "storage" });
     root.classList.toggle("page-open", !!place);
     fillHeader();
     updateNav();
@@ -3263,9 +3360,9 @@
   }
   var SUBS = {
     model: { title: "Speech model", body: modelPage, valid: running },
-    meet: { title: "Google Meet", cap: () => "the Altype extension for Chrome", body: meetPage },
+    meet: { title: "Google Meet", cap: () => "the Krya extension for Chrome", body: meetPage },
     speakers: { title: "Who spoke when", cap: () => "the voices told apart", body: speakerRows, valid: installed },
-    fixing: { title: "Fixing as I type", cap: () => "what else Altype sets right while you type", body: fixingPage },
+    fixing: { title: "Fixing as I type", cap: () => "what else Krya sets right while you type", body: fixingPage },
     program: { title: () => programOpen, body: programPage, valid: () => !!programOpen },
     languages: { title: "Languages you use", body: languagesPage }
   };
@@ -3284,7 +3381,8 @@
     learned: () => "on this computer only",
     programs: () => "left out of parts, or with a layout of their own",
     layouts: () => "in the order the keys go through them",
-    about: (v) => `Altype ${v.version}`
+    storage: (v) => v.storage?.measuring ? "measuring\u2026" : v.storage ? `${size(v.storage.freeMb)} free on ${v.storage.drive}` : "what Krya keeps on this computer",
+    about: (v) => `Krya ${v.version}`
   };
   var sliding = [];
   function slideBody(dir) {
@@ -3329,7 +3427,7 @@
     }
     pTitle.replaceChildren(TITLES[name]);
     pCap.textContent = isAction(name) ? actionText(name, v).cap : name === "search" ? searchCap(v) : CAPS2[name]?.(v) ?? "";
-    const keys = isAction(name) ? keysOf(name, v.settings) : [];
+    const keys = isAction(name) ? keysOf(name, v.settings, false, true) : [];
     const next = el("div", {}, ...keys);
     if (next.innerHTML !== pKeys.innerHTML) pKeys.replaceChildren(...next.childNodes);
   }
@@ -3421,6 +3519,8 @@
         return settingsPage(v);
       case "engine":
         return enginePage(v);
+      case "storage":
+        return storagePage(v);
       case "computer":
         return computerPage(v);
       case "about":
@@ -3444,6 +3544,7 @@
     { name: "settings" },
     { name: "settings", sub: "languages" },
     { name: "engine" },
+    { name: "storage" },
     { name: "computer" }
   ];
   var lineTitle = (row2) => (row2.querySelector(":scope > .l")?.firstChild?.textContent ?? "").trim();
@@ -3539,6 +3640,8 @@
     textKey: "translating text on the screen",
     inPlaceKey: "replacing the selection with its translation",
     checkKey: "checking your English",
+    typeKey: "typing a text to translate",
+    typeCheckKey: "typing a text to check",
     switchKey: "switching the layout",
     fixKey: "fixing the layout",
     dictateKey: "dictating",
@@ -3546,12 +3649,12 @@
     noteKey: "dictating a note",
     againKey: "typing the last phrase again",
     practiceKey: "checking what you say",
-    pauseKey: "pausing Altype",
-    windowKey: "opening Altype"
+    pauseKey: "pausing Krya",
+    windowKey: "opening Krya"
   };
   function keyTakenBy(key, self) {
     const s = view?.settings;
-    if (!s) return void 0;
+    if (!s || !key) return void 0;
     const other = Object.keys(KEY_USE).find((n) => n !== self && s[n] === key);
     if (other) return KEY_USE[other];
     const layout = Object.entries(s.layoutKeys).find(([id, k]) => id !== self && k === key)?.[0];
@@ -3569,7 +3672,7 @@
   function keyRow(name, label, note, taken = false, iconName, extra) {
     const key = view?.settings[name] ?? "";
     const menu = menuNote(key);
-    return keyRecorder(name, key, (key2) => saveKey(name, key2), label, menu ? `${note}; ${menu}` : note, taken, iconName, extra);
+    return keyRecorder(name, key, (key2) => saveKey(name, key2), label, menu ? `${note}; ${menu}` : note, taken, iconName, extra, DEFAULTS[name]);
   }
   function menuNote(key) {
     if (/^(Left|Right)Alt(\*2)?$/.test(key)) return "Alt alone no longer opens menus, F10 does";
@@ -3595,7 +3698,7 @@
     };
     return keyRecorder(l.id, keys()[l.id] ?? "", saveIt, label, note, false, "keyboard");
   }
-  function keyRecorder(id, current, saveKeyAs, label, note, taken = false, iconName, extra) {
+  function keyRecorder(id, current, saveKeyAs, label, note, taken = false, iconName, extra, byDefault = "") {
     const name = id;
     const recorder = new HotkeyRecorder();
     let waiting2;
@@ -3665,12 +3768,25 @@
       },
       lucide("x", "s")
     ) : null;
+    const restore = byDefault && current !== byDefault ? el(
+      "button",
+      {
+        class: "kx",
+        title: `Back to ${hotkeyLabel(byDefault)}`,
+        "aria-label": `${label}: back to ${hotkeyLabel(byDefault)}`,
+        onclick: () => {
+          keyTrouble = void 0;
+          saveKeyAs(byDefault);
+        }
+      },
+      lucide("rotate-ccw", "s")
+    ) : null;
     const trouble = keyTrouble?.name === name ? keyTrouble.text : "";
     const notes = typeof note === "string" ? [note] : note;
     const node = row(
       label,
       [...notes, taken && current ? bad("Taken by another program; choose another.") : null, trouble ? bad(trouble) : null],
-      el("span", { class: "kchg" }, field, clear, linkBtn(current ? "Change" : "Set", () => field.click()), extra ?? null)
+      el("span", { class: "kchg" }, field, clear, restore, linkBtn(current ? "Change" : "Set", () => field.click()), extra ?? null)
     );
     if (iconName) node.prepend(lucide(iconName));
     return node;
@@ -3678,16 +3794,16 @@
   var fixedKey = (label, hotkey, note) => row(label, [note], caps(hotkey));
   function listenPage(v) {
     const s = v.settings;
-    const how = s.doubleCopy ? "Select this text, press Ctrl + C twice." : s.selectKey ? `Select this text, press ${said(s.selectKey)}.` : "Turn on Ctrl + C twice or set a key above, then select this text.";
+    const how = s.selectKey ? `Select this text, ${usage(s.selectKey)}.` : s.doubleCopy ? "Select this text, press Ctrl + C twice." : "Set a key above or turn on Ctrl + C twice, then select this text.";
     return [
       grp("Keys"),
+      keyRow("selectKey", "Listen to the selected text", "select text anywhere, then press the key", !v.keysOk.select, "volume-2"),
       card(
         "copy",
-        "Listen to copied text",
-        ["select it, then press Ctrl + C twice, quickly"],
+        "Also on Ctrl + C twice",
+        ["select text, then press Ctrl + C twice, quickly; works with no key set too"],
         el("span", { class: "kchg" }, caps(COPY_TWICE), el("span", { class: "tgwrap" }, toggleKnob(s.doubleCopy, (doubleCopy) => save({ doubleCopy }), "Ctrl + C twice")))
       ),
-      keyRow("selectKey", "Listen to the selected text", s.selectKey ? "select it anywhere, press this key" : "a single key, instead of Ctrl + C twice", !v.keysOk.select, "volume-2"),
       keyRow("snipKey", "Listen to text on the screen", "for text you can\u2019t select: draw a box around it", !v.keysOk.snip, "scan"),
       ...voiceRows(v),
       grp("The card"),
@@ -3741,10 +3857,14 @@
     accurate: "Understands the whole sentence",
     most: "The best wording, and the slowest"
   };
+  var CHECK_ABOUT = {
+    accurate: "Catches nearly every mistake, quickly",
+    most: "A little more careful, and slower"
+  };
   var LEVEL_MODEL = {
     fast: "Firefox Translations",
-    accurate: "TranslateGemma 4B",
-    most: "TranslateGemma 12B"
+    accurate: "Gemma 4 E4B",
+    most: "Gemma 4 12B"
   };
   var FIT_WHERE = {
     card: "on your graphics card",
@@ -3760,8 +3880,9 @@
   var CUDA_SIZE = "with NVIDIA\u2019s own build, 670 MB";
   var SLOW_SENTENCE_S = 2;
   var startText = (start3) => start3 !== void 0 ? `; it starts in ${seconds(start3)} after 10 idle minutes` : "";
-  function levelFitText(fit, measured) {
+  function levelFitText(fit, speed) {
     const where2 = FIT_WHERE[fit.where];
+    const measured = speed?.sentence === void 0 ? void 0 : { sentence: speed.sentence, start: speed.start };
     if (!measured) return fit.cuda ? `${CUDA_GUESS}, ${where2}` : fit.where === "card" ? `${FIT_GUESS.card} ${where2}` : `${FIT_GUESS[fit.where]}, ${where2}`;
     return `${measured.sentence > SLOW_SENTENCE_S ? "slow here" : "here"}: ${seconds(measured.sentence)} per sentence, ${where2}${startText(measured.start)}`;
   }
@@ -3774,13 +3895,14 @@
       const fetching = t.status === "downloading";
       const notes = [
         `${LEVEL_ABOUT[level]} (${LEVEL_MODEL[level]})`,
-        fit && level !== "fast" ? levelFitText(fit, v.translationSpeed[level]) : null,
+        fit && level !== "fast" ? levelFitText(fit, v.modelSpeed[level]) : null,
+        level !== "fast" && inUse === "fast" && level === v.settings.model ? "Check my English uses it" : null,
         t.status === "failed" ? bad("the download failed; Use tries again") : t.status === "ready" || fetching ? null : `${size(t.size)} to download ${level === inUse ? "with the next translation" : "when you pick it"}${fit?.cuda ? ` (${CUDA_SIZE})` : ""}`,
         fetching ? bar(t.progress) : null
       ];
       const label = el("span", {}, LEVEL_NAMES[level], advice.advised === level ? el("span", { class: "chip good" }, lucide("check", "s"), "Recommended") : null);
       const control = fetching ? el("span", { class: "pct" }, `${Math.round(t.progress * 100)}%`) : level === inUse ? chip("in use", "lit") : linkBtn("Use", () => post({ type: "translationLevel", level }));
-      const remove2 = level !== "fast" && t.status === "ready" ? ib("x", `Remove ${LEVEL_NAMES[level]} (${size(t.size)})`, () => post({ type: "removeTranslation", level })) : null;
+      const remove2 = level !== "fast" && t.status === "ready" ? ib("x", `Remove ${LEVEL_NAMES[level]} (${size(t.size)})`, () => post({ type: "removeModel", model: level })) : null;
       return row(label, notes, control, remove2);
     });
   }
@@ -3792,11 +3914,13 @@
     return [
       grp("Keys"),
       keyRow("translateKey", "Translate the selected text", s.translateKey ? `select it anywhere, ${usage(s.translateKey)}` : "select it anywhere, then press one key, such as Left Ctrl twice", !v.keysOk.translate, "languages"),
+      keyRow("typeKey", "Type a text to translate", "an empty card by the pointer, from any program; also in the tray menu", !v.keysOk.type, "type"),
       keyRow("inPlaceKey", "Replace the selection with its translation", "no card", !v.keysOk.inPlace, "wand-sparkles"),
       keyRow("textKey", "Translate text on the screen", "for text you can\u2019t select: draw a box around it", !v.keysOk.text, "scan"),
       fixedKey("In the card: paste the translation back", "Enter"),
       grp("Translation"),
       ...levelRows(v),
+      aside("info", "Accurate and Most accurate also check your English: the one you pick here is the one Check uses."),
       grp("Languages"),
       card("globe", pairOf(v), [note], state),
       languagesCard(v),
@@ -3828,42 +3952,48 @@ ${e.translation}` }, e.translation),
   }
   var TRY_CHECK = "I want to learn English and can we made tutor option? I dictate or tupe in English and you show my my mistake.";
   var SLOW_CHECK_S = 4;
-  function checkFitText(fit, measured) {
+  function checkFitText(fit, speed) {
     const where2 = FIT_WHERE[fit.where];
-    if (!measured) return fit.where === "card" ? `about 1 s per text ${where2}` : `possible, but slow here: several seconds per text, ${where2}`;
-    return `${measured.text > SLOW_CHECK_S ? "slow here" : "here"}: ${seconds(measured.text)} per text, ${where2}${startText(measured.start)}`;
+    if (speed?.text === void 0) return fit.where === "card" ? `about 1 s per text ${where2}` : `possible, but slow here: several seconds per text, ${where2}`;
+    return `${speed.text > SLOW_CHECK_S ? "slow here" : "here"}: ${seconds(speed.text)} per text, ${where2}${startText(speed.start)}`;
   }
   function checkCap(v) {
-    const t = v.check.state;
+    const t = v.models[v.settings.model];
     if (t.status === "downloading") return `downloading ${Math.round(t.progress * 100)}%`;
     return t.status === "ready" ? `English \xB7 notes in ${v.settings.native}` : "downloads once";
   }
-  function checkerRow(v) {
-    const c = v.check;
-    const t = c.state;
-    const fetching = t.status === "downloading";
-    const notes = [
-      `Marks the mistakes and says the main one (${c.name} by Google)`,
-      checkFitText(c.fit, c.speed),
-      t.status === "failed" ? bad("the download failed; Download tries again") : t.status === "ready" || fetching ? null : `${size(t.size)} to download, with Download or at your first check`,
-      fetching ? bar(t.progress) : null
-    ];
-    const label = el("span", {}, "Checking model", c.fit.where === "card" ? el("span", { class: "chip good" }, lucide("check", "s"), "Recommended") : null);
-    const control = fetching ? el("span", { class: "pct" }, `${Math.round(t.progress * 100)}%`) : t.status === "ready" ? chip("ready", "lit") : linkBtn("Download", () => post({ type: "prepareChecker" }));
-    const remove2 = t.status === "ready" ? ib("x", `Remove ${c.name} (${size(t.size)})`, () => post({ type: "removeChecker" })) : null;
-    return row(label, notes, control, remove2);
+  function checkModelRows(v) {
+    const advice = translationAdvice(v.speech.device);
+    const inUse = v.settings.model;
+    return ["accurate", "most"].map((model) => {
+      const t = v.models[model];
+      const fetching = t.status === "downloading";
+      const notes = [
+        `${CHECK_ABOUT[model]} (${LEVEL_MODEL[model]})`,
+        checkFitText(advice[model], v.modelSpeed[model]),
+        t.status === "failed" ? bad("the download failed; Use tries again") : t.status === "ready" || fetching ? null : `${size(t.size)} to download ${model === inUse ? "with Download or at your first check" : "when you pick it"}${advice[model].cuda ? ` (${CUDA_SIZE})` : ""}`,
+        fetching ? bar(t.progress) : null
+      ];
+      const label = el("span", {}, LEVEL_NAMES[model], advice.advised === model ? el("span", { class: "chip good" }, lucide("check", "s"), "Recommended") : null);
+      const control = fetching ? el("span", { class: "pct" }, `${Math.round(t.progress * 100)}%`) : model !== inUse ? linkBtn("Use", () => post({ type: "useModel", model })) : t.status === "ready" ? chip("in use", "lit") : linkBtn("Download", () => post({ type: "useModel", model }));
+      const remove2 = t.status === "ready" ? ib("x", `Remove ${LEVEL_NAMES[model]} (${size(t.size)})`, () => post({ type: "removeModel", model })) : null;
+      return row(label, notes, control, remove2);
+    });
   }
   function checkPage(v) {
     const s = v.settings;
-    const how = s.checkKey ? `This text has mistakes on purpose. Select it, ${usage(s.checkKey)}, or use Check my English\u2026 in the tray menu.` : "This text has mistakes on purpose. Select it and press your key, or use Check my English\u2026 in the tray menu.";
+    const typed = s.typeCheckKey ? `${usage(s.typeCheckKey)} and type it` : "use Check my English\u2026 in the tray menu";
+    const how = s.checkKey ? `This text has mistakes on purpose. Select it, ${usage(s.checkKey)}, or ${typed}.` : `This text has mistakes on purpose. Select it and press your key, or ${typed}.`;
     return [
       grp("Keys"),
       keyRow("checkKey", "Check the selected text", s.checkKey ? `select it anywhere, ${usage(s.checkKey)}` : "select it anywhere, then press one key, such as Right Ctrl twice", !v.keysOk.check, "graduation-cap"),
+      keyRow("typeCheckKey", "Type a text to check", "an empty card by the pointer, from any program; also in the tray menu", !v.keysOk.typeCheck, "type"),
       keyRow("practiceKey", "Check what I say", installed(v) ? "press, say a phrase in English, press again" : "needs the speech engine (see Dictate)", !v.speech.keysOk.practice, "mic"),
       fixedKey("In the card: paste the corrected text back", "Enter"),
       aside("info", "Speech recognition fixes some mistakes as it writes, so typing shows more of them."),
       grp("Model"),
-      checkerRow(v),
+      ...checkModelRows(v),
+      aside("info", "The same model translates when Translate is set to Accurate or Most accurate."),
       grp("History"),
       navCard("list-checks", "Mistakes", "what Check found in your texts, repeated ones first", v.mistakes.length ? String(v.mistakes.length) : "none", () => go("mistakes"), "mistakes"),
       tryIt(TRY_CHECK, how)
@@ -3946,7 +4076,7 @@ ${e.translation}` }, e.translation),
       keyRow("textKey", "Translate text on the screen", "for text you can\u2019t select: draw a box around it", !v.keysOk.text, "languages"),
       grp("How it works"),
       card("scan", "Draw a box around the text", ["Windows dims the screen while you draw"], null),
-      card("type", "Altype reads the text on this computer", ["it reads the languages Windows has installed; add more there (Windows OCR)"], linkBtn("Languages\u2026", () => post({ type: "openLanguageSettings" }))),
+      card("type", "Krya reads the text on this computer", ["it reads the languages Windows has installed; add more there (Windows OCR)"], linkBtn("Languages\u2026", () => post({ type: "openLanguageSettings" }))),
       card("spell-check", "Fix misread words in the card", ["then listen or translate"], null)
     ];
   }
@@ -4007,7 +4137,7 @@ ${e.translation}` }, e.translation),
     const s = v.settings;
     const wordOf = (line) => parseEntry(line).word.toLowerCase();
     const word = liveField("word", "Word, as it should be written", "Word to spell", (key) => key === "Enter" ? add() : clear());
-    const heard2 = liveField("heard", "Heard as (optional): \u0430\u043B\u044C\u0442\u0430\u0439\u043F, all type", "What it is heard as", (key) => key === "Enter" ? add() : clear());
+    const heard2 = liveField("heard", "Heard as (optional): \u043A\u0440\u044F, \u043A\u0440\u0430\u044F", "What it is heard as", (key) => key === "Enter" ? add() : clear());
     const clear = () => {
       word.value = "";
       heard2.value = "";
@@ -4123,13 +4253,13 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     const ext = extensionSeen(v);
     const stale = extensionStale(v);
     const value = !ext ? "set up in Chrome" : stale ? `Reload in Chrome \xB7 v${ext.version} \u2192 v${v.speech.extensionShipped}` : `Installed \xB7 v${ext.version}`;
-    return navCard("video", "Google Meet", "record a call in Chrome with the Altype extension", value, () => openSub("meet"), "meet", !!ext && !stale);
+    return navCard("video", "Google Meet", "record a call in Chrome with the Krya extension", value, () => openSub("meet"), "meet", !!ext && !stale);
   }
   function meetPage(v) {
     const dir = v.speech.extensionDir;
     const ext = extensionSeen(v);
     const offer = engineRows(v, "Google Meet");
-    const status = !ext ? card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null) : extensionStale(v) ? card("rotate-cw", `Chrome runs v${ext.version}; Altype has v${v.speech.extensionShipped}`, ["press Reload on the extension\u2019s card in Chrome: Open in Chrome goes straight to it"], btn("Open in Chrome", () => openChrome(extensionsPage(v)), "primary")) : card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY));
+    const status = !ext ? card("video", "Not set up yet", [running(v) ? "three steps in Chrome, once; this line says when the extension is in" : "the speech engine must run for the extension to work"], null) : extensionStale(v) ? card("rotate-cw", `Chrome runs v${ext.version}; Krya has v${v.speech.extensionShipped}`, ["press Reload on the extension\u2019s card in Chrome: Open in Chrome goes straight to it"], btn("Open in Chrome", () => openChrome(extensionsPage(v)), "primary")) : card("circle-check", `Installed in Chrome \xB7 v${ext.version}`, [el("small", { class: "ok" }, `seen ${ago(ext.seen)} \xB7 the call\u2019s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY));
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
       grp("Chrome extension"),
@@ -4142,10 +4272,10 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         [pathNote(dir), "Ctrl+V into the folder picker\u2019s address line, then Select folder"],
         el("span", { class: "kchg" }, linkBtn("Show the folder", () => post({ type: "showInFolder", path: dir })), btn([lucide("copy", "s"), "Copy path"], () => copyText(dir), "primary"))
       ),
-      card("mic", "3 \xB7 In a meeting: the Altype icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone \xB7 the transcript appears in Transcripts"], caps(MEET_KEY)),
+      card("mic", "3 \xB7 In a meeting: the Krya icon \u2192 Record, or the key", ["the call\u2019s sound and your microphone \xB7 the transcript appears in Transcripts"], caps(MEET_KEY)),
       grp("If something is off"),
       card("keyboard", "The key does nothing", ["set it at chrome://extensions/shortcuts"], btn("Open in Chrome", () => openChrome("chrome://extensions/shortcuts"))),
-      card("rotate-cw", "After Altype updates, press Reload on the extension", ["Chrome keeps the old copy until then"], btn("Open in Chrome", () => openChrome(extensionsPage(v))))
+      card("rotate-cw", "After Krya updates, press Reload on the extension", ["Chrome keeps the old copy until then"], btn("Open in Chrome", () => openChrome(extensionsPage(v))))
     ].filter((n) => n !== null);
   }
   function speakersCard(v) {
@@ -4284,10 +4414,10 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           },
           `program-${a.exe}`
         )
-      ) : [aside("info", "None yet. Add a program above: Altype leaves out what you choose there, or switches to its own layout when it comes to the front.")]
+      ) : [aside("info", "None yet. Add a program above: Krya leaves out what you choose there, or switches to its own layout when it comes to the front.")]
     ].filter((n) => n !== null);
   }
-  var APP_PART_NAMES = { fix: "fixing as you type", switch: "the switch keys", badge: "the badge", keys: "every key of Altype" };
+  var APP_PART_NAMES = { fix: "fixing as you type", switch: "the switch keys", badge: "the badge", keys: "every key of Krya" };
   function programNote(v, a) {
     const off = a.off.length ? `left out: ${a.off.map((p) => APP_PART_NAMES[p]).join(", ")}` : "";
     const layout = a.layout ? `starts in ${v.layouts.find((l) => l.id === a.layout)?.name ?? a.layout}` : "";
@@ -4300,11 +4430,11 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     const change = (next) => save({ apps: apps().map((a) => a.exe === rule.exe ? { ...a, ...next } : a) });
     const part = (p, iconName, label, note) => toggleCard(iconName, label, !rule.off.includes(p), (on) => change({ off: on ? rule.off.filter((x) => x !== p) : [...rule.off, p] }), note);
     return [
-      grp("Here, Altype"),
+      grp("Here, Krya"),
       part("fix", "spell-check", "Fixes words as you type", "off: words stay as typed; the fix key still works"),
       part("switch", "keyboard", "Switches the layout by its keys", "the switch key and the layouts' own keys"),
       part("badge", "type", "Shows the layout by the cursor", "the badge"),
-      part("keys", "circle-alert", "Hears its keys at all", "off: none of Altype's keys works here, but the pause key"),
+      part("keys", "circle-alert", "Hears its keys at all", "off: none of Krya's keys works here, but the pause key"),
       grp("Layout"),
       card(
         "globe",
@@ -4332,10 +4462,10 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       grp("Fixed always", alwaysFix.length || void 0),
       ...alwaysFix.length ? alwaysFix.map((w) => item("alwaysFix", w, `into ${name(w.lang)}`)) : [aside("info", "A word you fix by hand twice (the fix key, or erased and typed again in the other layout) is fixed by itself from then on.")],
       grp("Your words", myWords.length || void 0),
-      ...myWords.length ? myWords.map((w) => item("myWords", w, `${name(w.lang)} \xB7 never fixed, and fixed into`)) : [aside("info", "A word in no dictionary that you type right three times becomes yours: Altype leaves it as typed, and fixes it into when it is typed in the wrong layout. Until then only an unreadable fingerprint of it is kept.")],
+      ...myWords.length ? myWords.map((w) => item("myWords", w, `${name(w.lang)} \xB7 never fixed, and fixed into`)) : [aside("info", "A word in no dictionary that you type right three times becomes yours: Krya leaves it as typed, and fixes it into when it is typed in the wrong layout. Until then only an unreadable fingerprint of it is kept.")],
       grp("Never fixed"),
       navCard("lock", "Kept as typed", "words never fixed by themselves", String(v.settings.keepWords.length || "none"), () => go("kept"), "kept"),
-      alwaysFix.length || myWords.length ? card("trash-2", "Forget all", ["what Altype learned goes; Kept as typed stays"], linkBtn("Forget", () => post({ type: "forgetLearned" }))) : null
+      alwaysFix.length || myWords.length ? card("trash-2", "Forget all", ["what Krya learned goes; Kept as typed stays"], linkBtn("Forget", () => post({ type: "forgetLearned" }))) : null
     ].filter((n) => n !== null);
   }
   function keptPage(v) {
@@ -4348,13 +4478,13 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       items: s.keepWords,
       count: "Words",
       empty: "None yet. Add a word above, or press Backspace right after a fix you did not want.",
-      normalize: (text) => text.trim().toLowerCase(),
+      normalize: keptForm,
       add: (word) => save({ keepWords: [...words(), word] }),
       remove: (word) => save({ keepWords: words().filter((w) => w !== word) })
     });
   }
   function othersLine(v) {
-    const presses = "presses keys by itself; Altype ignores those.";
+    const presses = "presses keys by itself; Krya ignores those.";
     const text = v.keyboardApps.length ? `Also using the keyboard: ${v.keyboardApps.join(", ")}.${v.foreignKeys ? ` One of them ${presses}` : ""}` : v.foreignKeys ? `A program ${presses}` : "";
     return text ? aside("info", text) : null;
   }
@@ -4391,14 +4521,14 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       toggleCard("monitor", "Stay off in full screen", s.quietFullScreen, (quietFullScreen) => save({ quietFullScreen }), "games, presentations, videos"),
       grp("Lists"),
       navCard("keyboard", "Layouts", ownKeys ? `the layouts the switch key goes through; ${ownKeys} with a key of their own` : "the layouts the switch key goes through, in order", cycleOf(v).map((l) => l.short).join(" \xB7 "), () => go("layouts"), "layouts"),
-      navCard("monitor", "Programs", "turn parts of Altype off in a program, or give it its own layout", count(s.apps.length, "program"), () => go("programs"), "programs"),
-      navCard("sparkles", "Learned words", s.learn ? "words Altype learned from your typing" : "learning from your typing is off", count(learnedCount, "word"), () => go("learned"), "learned"),
-      navCard("lock", "Kept as typed", "words Altype never fixes by itself", count(s.keepWords.length, "word"), () => go("kept"), "kept"),
+      navCard("monitor", "Programs", "turn parts of Krya off in a program, or give it its own layout", count(s.apps.length, "program"), () => go("programs"), "programs"),
+      navCard("sparkles", "Learned words", s.learn ? "words Krya learned from your typing" : "learning from your typing is off", count(learnedCount, "word"), () => go("learned"), "learned"),
+      navCard("lock", "Kept as typed", "words Krya never fixes by itself", count(s.keepWords.length, "word"), () => go("kept"), "kept"),
       v.rivals.length ? warn(`${v.rivals.join(" and ")} ${v.rivals.length > 1 ? "are" : "is"} running: turn off its layout switching, or words get fixed twice.`) : null,
-      v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Altype, so nothing is fixed or switched there.`) : null,
+      v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Krya, so nothing is fixed or switched there.`) : null,
       v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
       othersLine(v),
-      el("p", { class: "privacy" }, lucide("lock", "s"), "Altype reads your keystrokes only to fix the layout, and sends nothing anywhere. It keeps only the words it learned, on this computer.")
+      el("p", { class: "privacy" }, lucide("lock", "s"), "Krya reads your keystrokes only to fix the layout, and sends nothing anywhere. It keeps only the words it learned, on this computer.")
     ].filter((n) => n !== null);
   }
   var matches = (w, q) => `${w.word} ${w.base} ${w.sentence} ${w.senses.map((s) => s[1]).join(" ")}`.toLowerCase().includes(q);
@@ -4506,7 +4636,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       case "downloading":
         return "downloading an update\u2026";
       case "ready":
-        return `version ${u.version} is ready: it installs when Altype quits`;
+        return `version ${u.version} is ready: it installs when Krya quits`;
       case "unavailable":
         return u.message;
       case "failed":
@@ -4596,9 +4726,91 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     if (first) first.prepend(lucide("monitor"));
     return [grp("Hardware"), ...rows, testOffer(v), card("cpu", "Graphics card", [cardNote(v)], null)].filter((n) => n !== null);
   }
+  var STORED = {
+    fast: { icon: "languages", title: "Fast translation", note: "the models for your languages (Firefox Translations)" },
+    voice: { icon: "volume-2", title: "Natural voice", note: "reads English aloud (Kokoro)" },
+    dict: { icon: "book-open", title: "Word meanings", note: "the dictionary for your language (Wiktionary)" },
+    accurate: { icon: "languages", title: "Accurate model", note: "translates and checks your English (Gemma 4 E4B)" },
+    most: { icon: "languages", title: "Most accurate model", note: "translates and checks your English (Gemma 4 12B)" },
+    unused: { icon: "database", title: "Models no longer used", note: "an older Krya\u2019s translation models; nothing uses them now (TranslateGemma)" },
+    llama: { icon: "cpu", title: "The models\u2019 runner", note: "runs the models above; goes with the last of them (llama.cpp)" },
+    speech: { icon: "audio-lines", title: "Speech engine", note: "Dictate and Transcribe: the program and its speech models" },
+    yours: { icon: "file-text", title: "Your settings and lists", note: "words, mistakes, what Krya learned, logs" },
+    transcripts: { icon: "folder", title: "Transcripts", note: "yours: the text and a small copy of the sound" }
+  };
+  var DOWNLOADED = ["fast", "voice", "dict", "accurate", "most", "unused", "llama", "speech"];
+  var downloadsMb = (s) => s.parts.filter((p) => DOWNLOADED.includes(p.id)).reduce((mb, p) => mb + p.bytes / 1e6, 0);
+  function storagePage(v) {
+    const s = v.storage;
+    if (!s?.parts.length) return [aside("loader", "Measuring what Krya keeps\u2026")];
+    const busy3 = {
+      fast: v.translation.fast.status === "downloading",
+      voice: v.natural.status === "downloading",
+      dict: v.dictionary.status === "downloading",
+      accurate: v.models.accurate.status === "downloading",
+      most: v.models.most.status === "downloading"
+    };
+    const remove2 = {
+      fast: () => post({ type: "removeDownload", part: "fast" }),
+      voice: () => post({ type: "removeDownload", part: "voice" }),
+      dict: () => post({ type: "removeDownload", part: "dict" }),
+      accurate: () => post({ type: "removeModel", model: "accurate" }),
+      most: () => post({ type: "removeModel", model: "most" }),
+      unused: () => post({ type: "removeDownload", part: "unused" })
+    };
+    const mb = (p) => p.bytes / 1e6;
+    const where2 = (p) => p.away ? pathNote(p.path) : null;
+    const line = (p) => {
+      const { icon: name, title, note } = STORED[p.id];
+      if (p.id === "speech") {
+        const shared = p.shared / 1e6;
+        const freed = shared >= 100 ? `; removing it frees ${size(mb(p) - shared)}, as ${size(shared)} of its files are shared with other Python tools here` : "";
+        return navCard(name, title, [`${note}${freed}`, where2(p)], size(mb(p)), () => go("engine"), "storage-speech");
+      }
+      const x = remove2[p.id];
+      const control = x && !busy3[p.id] ? ib("x", `Remove; it downloads again when needed`, x) : null;
+      const open2 = DOWNLOADED.includes(p.id) ? null : linkBtn("Open", () => post({ type: "openPath", path: p.path }));
+      return card(name, title, [note, where2(p)], el("span", { class: "kchg" }, el("span", { class: "v num" }, size(mb(p))), control, open2));
+    };
+    const got = s.parts.filter((p) => DOWNLOADED.includes(p.id) && p.bytes > 0);
+    const own = s.parts.filter((p) => p.id === "yours" || p.id === "transcripts");
+    return [
+      oldNotice(s),
+      grp("Downloads"),
+      card(
+        "database",
+        `Everything Krya downloads: ${size(downloadsMb(s))}`,
+        [`${got.some((p) => p.away) ? "in Krya\u2019s folder, but for the parts that say where they are" : "in one folder"} \xB7 ${size(s.freeMb)} free on ${s.drive}`, pathNote(s.root)],
+        linkBtn("Open folder", () => post({ type: "openPath", path: s.root }))
+      ),
+      ...got.length ? got.map(line) : [aside("info", "Nothing downloaded yet: each part downloads when you first use it.")],
+      grp("Yours"),
+      ...own.map(line)
+    ].filter((n) => n !== null);
+  }
+  function oldNotice(s) {
+    const away = s.parts.filter((p) => p.away);
+    if (!s.old || !away.length) return null;
+    const total = size(away.reduce((sum, p) => sum + p.bytes / 1e6, 0));
+    const inOld = away.every((p) => p.path.toLowerCase().startsWith(s.old.dir.toLowerCase()));
+    const names = away.map((p) => STORED[p.id].title).join(", ");
+    return el(
+      "div",
+      { class: "row notice old" },
+      lucide("folder"),
+      el(
+        "div",
+        { class: "l" },
+        inOld ? `${total} still in the old Altype folder` : `${total} still outside Krya\u2019s folder`,
+        el("small", {}, `${names}: Krya uses them from there. Moving stops the speech engine and the model, then starts Krya again`),
+        s.old.why ? el("small", { class: "bad" }, `Not moved: ${s.old.why}`) : null
+      ),
+      s.old.moving ? el("span", { class: "v" }, "Moving\u2026") : btn("Move to Krya", () => post({ type: "moveToKrya" }), "primary")
+    );
+  }
   var languageName = (code) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
   function languagesCard(v) {
-    return navCard("globe", "Languages you use", "when Altype hears or reads a text, it guesses among these", myLanguages(v.settings).map(languageName).join(", "), () => go("settings", "languages"), "languages");
+    return navCard("globe", "Languages you use", "when Krya hears or reads a text, it guesses among these", myLanguages(v.settings).map(languageName).join(", "), () => go("settings", "languages"), "languages");
   }
   function languagesPage(v) {
     const s = v.settings;
@@ -4615,7 +4827,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       ),
       grp("Languages", used.length),
       card("globe", languageName(used[0] ?? ""), ["your language \xB7 changed in Settings"], null),
-      card("globe", "English", ["always: the language Altype teaches"], null),
+      card("globe", "English", ["always: the language Krya teaches"], null),
       ...s.languages.map((code) => card("globe", languageName(code), [], ib("x", `Remove ${languageName(code)}`, () => save({ languages: mine().filter((c) => c !== code) }))))
     ];
   }
@@ -4650,7 +4862,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       card(
         "languages",
         "Your language",
-        ["Altype translates into it and shows word meanings in it"],
+        ["Krya translates into it and shows word meanings in it"],
         select(
           s.native,
           v.languages.map((l) => [l.name, `${l.native} \xB7 ${l.name}`]),
@@ -4658,7 +4870,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         )
       ),
       languagesCard(v),
-      grp("Altype"),
+      grp("Krya"),
       card(
         "monitor",
         "Theme",
@@ -4674,9 +4886,10 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         )
       ),
       toggleCard("power", "Start with Windows", s.startWithWindows, (startWithWindows) => save({ startWithWindows })),
-      toggleCard("pause", "Pause Altype", s.paused, (paused) => save({ paused }), "all shortcuts and fixing stop until you turn it back on; also in the tray menu"),
+      toggleCard("pause", "Pause Krya", s.paused, (paused) => save({ paused }), "all shortcuts and fixing stop until you turn it back on; also in the tray menu"),
       keyRow("pauseKey", "Pause or resume with a key", "works while paused too", !v.keysOk.pause, "pause"),
       keyRow("windowKey", "Open this window with a key", "from any program", !v.keysOk.window, "house"),
+      card("rotate-ccw", "Reset all keys", ["every shortcut back to how it came; \u21BA by a key brings back just that one"], linkBtn("Reset keys", () => post({ type: "resetKeys" }))),
       card(
         "rotate-cw",
         `Version ${v.version}${v.dev ? " dev" : ""}`,
@@ -4684,18 +4897,15 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         linkBtn("Check for updates", () => post({ type: "checkUpdates" }), u.status === "dev" || u.status === "checking" || u.status === "downloading")
       ),
       toggleCard("sparkles", "Get test versions", s.betaUpdates, (betaUpdates) => save({ betaUpdates }), "try new features before they are released"),
+      grp("Backup"),
       card(
         "file-text",
-        "Settings file",
-        ["back up your settings, move them to another computer, or start over"],
-        el(
-          "span",
-          { class: "kchg" },
-          linkBtn("Export", () => post({ type: "exportSettings" })),
-          linkBtn("Import", () => post({ type: "importSettings" })),
-          linkBtn("Reset", () => post({ type: "resetSettings" }))
-        )
-      )
+        "Back up or move to another computer",
+        ["settings, words, mistakes, what Krya learned from your typing, recent translations and phrases, in one file; models download again"],
+        el("span", { class: "kchg" }, linkBtn("Export", () => post({ type: "exportBackup" })), linkBtn("Import", () => post({ type: "importBackup" })))
+      ),
+      aside("info", "Import replaces your settings with the backup\u2019s and adds its words and history to yours; nothing of yours is removed."),
+      card("rotate-ccw", "Reset all settings", ["keys, switches and lists back to how they came; your words and history stay"], linkBtn("Reset", () => post({ type: "resetSettings" })))
     ].filter((n) => n !== null);
   }
   function aboutPage(v) {
@@ -4705,8 +4915,8 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       el(
         "div",
         { class: "about" },
-        el("div", { class: "mk" }, el("span", { class: "key bigkey" }, "alt"), el("span", { class: "bigwm" }, "altype")),
-        el("p", { class: "tag" }, "Your language. ", el("span", {}, "Your shortcut.")),
+        el("div", { class: "mk" }, tile(88), logo()),
+        el("p", { class: "tag" }, "Talk to the duck."),
         // A run from source says when it was built, so it is never taken for the last release.
         el("p", { class: "ver" }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : update ? ` \xB7 ${update}` : ""} \xB7 free and open source, MIT`),
         el(
@@ -4715,18 +4925,18 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           ...fact("made by", "Yevhen Peshynskyi \xB7 Design automation engineer", el("br"), link("https://ikstro.com", "ikstro.com")),
           ...fact(
             "runs offline",
-            "Firefox Translations by Mozilla \xB7 TranslateGemma by Google (Gemma Terms of Use) and Gemma 4 by Google (Apache 2.0), run by llama.cpp \xB7 Kokoro-82M by hexgrad, eSpeak NG \xB7 Windows OCR \xB7 WikDict, from Wiktionary \xB7 FrequencyWords by Hermit Dave ",
+            "Firefox Translations by Mozilla \xB7 Gemma 4 by Google (Apache 2.0), run by llama.cpp \xB7 Kokoro-82M by hexgrad, eSpeak NG \xB7 Windows OCR \xB7 WikDict, from Wiktionary \xB7 FrequencyWords by Hermit Dave ",
             el("span", { class: "q" }, "\u2014 your text is never sent anywhere")
           ),
           ...fact("made with", "Inter and JetBrains Mono (SIL OFL) \xB7 Electron \xB7 VS Code icons"),
           ...fact("goes online only for", `updates, and a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
           ...fact(
             "links",
-            link("https://github.com/ikstro/altype/releases", "Releases and what changed"),
+            link("https://github.com/ikstro/krya/releases", "Releases and what changed"),
             " \xB7 ",
-            link("https://github.com/ikstro/altype", "Source on GitHub"),
+            link("https://github.com/ikstro/krya", "Source on GitHub"),
             " \xB7 ",
-            link("https://github.com/ikstro/altype/blob/main/NOTICE", "Licenses")
+            link("https://github.com/ikstro/krya/blob/main/NOTICE", "Licenses")
           )
         )
       )

@@ -1,4 +1,4 @@
-// Writes the word lists Altype ships, from FrequencyWords by Hermit Dave
+// Writes the word lists Krya ships, from FrequencyWords by Hermit Dave
 // (OpenSubtitles 2018, CC BY-SA 4.0; see NOTICE):
 //   - media/layout/<code>.txt: the most frequent words of each language the
 //     layout fixer knows (src/layoutfix.ts), most frequent first, one a line,
@@ -33,7 +33,7 @@ const ALPHABETS = {
   fa: /^[ء-غف-يپچژکگی]+$/,
   ka: /^[ა-ჺ]+$/,
 }
-/** Languages written in Latin, Cyrillic or Arabic letters, by Altype's code; FrequencyWords calls Norwegian `no`. */
+/** Languages written in Latin, Cyrillic or Arabic letters, by Krya's code; FrequencyWords calls Norwegian `no`. */
 const SHARED = ['en', 'es', 'de', 'fr', 'it', 'pt', 'pl', 'cs', 'nl', 'sv', 'nb', 'da', 'fi', 'tr', 'ro', 'hu', 'hr', 'sr', 'vi', 'id', 'ru', 'uk', 'bg', 'ar', 'fa']
 const SOURCE = { nb: 'no' }
 

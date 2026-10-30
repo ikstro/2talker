@@ -389,7 +389,7 @@ function translating(): string {
 /** 1.4 of 84 MB; 1.2 of 2.5 GB. */
 const amount = (mb: number, of: number) => (of >= 1000 ? `${(mb / 1000).toFixed(1)} of ${(of / 1000).toFixed(1)} GB` : `${mb.toFixed(1)} of ${of} MB`)
 
-/** A first use: the translator for a pair (Fast), the level's model or the checker's comes once, with how much of it is in and what happens meanwhile. */
+/** A first use: the translator for a pair (Fast), or the local model (a level's, the checker's: the same one) comes once, with how much of it is in and what happens meanwhile. */
 function downloading(pair: string, progress: number, size: number, meanwhile = ''): HTMLElement {
   const level = state.card?.level ?? 'fast'
   const s = state.card?.state
@@ -404,7 +404,7 @@ function downloading(pair: string, progress: number, size: number, meanwhile = '
     el(
       'div',
       { class: 'download-head' },
-      el('b', {}, model ? `Checker, ${model}` : level === 'fast' ? `Translator, ${pair}` : `${LEVEL_NAMES[level]} translator`),
+      el('b', {}, model ? `${model} model` : level === 'fast' ? `Translator, ${pair}` : `${LEVEL_NAMES[level]} model`),
       el('span', { class: 'kl' }, amount(done * size, size)),
     ),
     el('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(done * 100) }, bar),
@@ -488,7 +488,7 @@ function renderState(): void {
     case 'empty':
       stateView.replaceChildren(
         el('p', { class: 'empty-title' }, 'No text here'),
-        el('p', { class: 'empty-text' }, 'The piece of the screen holds no text Altype can read. Snip a piece with words in it.'),
+        el('p', { class: 'empty-text' }, 'The piece of the screen holds no text Krya can read. Snip a piece with words in it.'),
       )
       return
     case 'no-ocr':

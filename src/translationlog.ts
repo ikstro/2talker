@@ -52,6 +52,18 @@ export class TranslationLog {
     this.save()
   }
 
+  /** Translations from a backup: one not here is added, past the cap and the age dropped as always; how many stayed. */
+  merge(list: readonly unknown[]): number {
+    const key = (e: TranslationEntry) => `${e.from}\u0000${e.to}\u0000${e.text}`
+    const here = new Set(this.entries.map(key))
+    const added = list.filter(isEntry).filter(e => !here.has(key(e)))
+    if (added.length === 0) return 0
+    this.entries = [...this.entries, ...added].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    this.prune()
+    this.save()
+    return added.filter(e => this.entries.includes(e)).length
+  }
+
   clear(): void {
     if (this.entries.length === 0) return
     this.entries = []
@@ -71,7 +83,7 @@ export class TranslationLog {
       fs.mkdirSync(path.dirname(this.file), { recursive: true })
       fs.writeFileSync(this.file, JSON.stringify(this.entries, null, 2) + '\n', 'utf8')
     } catch (error) {
-      console.warn('Altype: could not save the translations', error)
+      console.warn('Krya: could not save the translations', error)
     }
   }
 }

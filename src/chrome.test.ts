@@ -29,7 +29,7 @@ function desktop(after: number | undefined, other = false) {
       if (after !== undefined && looks > after) return { hwnd: 200n, pid: 2 }
       return other && looks > 1 ? { hwnd: 300n, pid: 3 } : { hwnd: 100n, pid: 1 }
     },
-    exeOf: pid => (pid === 2 ? 'chrome.exe' : pid === 3 ? 'notepad.exe' : 'altype.exe'),
+    exeOf: pid => (pid === 2 ? 'chrome.exe' : pid === 3 ? 'notepad.exe' : 'krya.exe'),
     allowFront: () => {},
     typeAddress: async url => void typed.push(url),
     find: async () => 'C:\\Chrome\\chrome.exe',

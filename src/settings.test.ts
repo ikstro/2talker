@@ -1,6 +1,18 @@
 import { describe, expect, test } from 'vitest'
 
-import { DEFAULTS, myLanguages, normalize } from './settings'
+import { addKept, DEFAULTS, keptForm, myLanguages, normalize } from './settings'
+
+describe('Kept as typed', () => {
+  test('a word is kept trimmed and in lower case', () => {
+    expect(keptForm('  Ghbdtn ')).toBe('ghbdtn')
+    expect(addKept(['vbh'], ' GHBDTN')).toEqual(['vbh', 'ghbdtn'])
+  })
+
+  test('an empty word or one kept already adds nothing', () => {
+    expect(addKept(['ghbdtn'], '   ')).toBeUndefined()
+    expect(addKept(['ghbdtn'], 'Ghbdtn')).toBeUndefined()
+  })
+})
 
 describe('normalize', () => {
   test('a missing or broken file gives the defaults, with the native language from the system', () => {
@@ -18,6 +30,15 @@ describe('normalize', () => {
     expect(normalize({}).translationLevel).toBe('fast')
     expect(normalize({ translationLevel: 'most' }).translationLevel).toBe('most')
     expect(normalize({ translationLevel: 'best' }).translationLevel).toBe('fast')
+  })
+
+  test('one model translates and checks: the level follows it, and an older file takes it from its level', () => {
+    expect(normalize({})).toMatchObject({ translationLevel: 'fast', model: 'accurate' })
+    expect(normalize({ translationLevel: 'most' })).toMatchObject({ translationLevel: 'most', model: 'most' })
+    // Picked on the Check page: a level that was the other model moves with it; Fast stays Fast.
+    expect(normalize({ translationLevel: 'accurate', model: 'most' })).toMatchObject({ translationLevel: 'most', model: 'most' })
+    expect(normalize({ translationLevel: 'fast', model: 'most' })).toMatchObject({ translationLevel: 'fast', model: 'most' })
+    expect(normalize({ model: 'gemma' }).model).toBe('accurate')
   })
 
   test('a shortcut may be cleared; a missing one is the default', () => {

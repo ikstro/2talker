@@ -1,9 +1,9 @@
-// The app window, Altype's back office. A sidebar holds every place in groups
-// (Home; the actions; the library; the person's lists; Altype itself), the
+// The app window, Krya's back office. A sidebar holds every place in groups
+// (Home; the actions; the library; the person's lists; Krya itself), the
 // open one lit, and a search over every line of every page. The bar over the
 // content says where the person is (a second-level page as a crumb), carries
 // the action's keys, Back, and the window's buttons. Home comes first, always:
-// one line that shows what Altype does (on the first opening it plays as a
+// one line that shows what Krya does (on the first opening it plays as a
 // moment: a word typed in the wrong layout is fixed, translated and read
 // aloud, each step lighting the person's own key; then the line rises into
 // Home's head and the keys drop into their actions), whether the translator
@@ -15,13 +15,14 @@
 
 import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
-import type { AppTab, AppView, DiffPart, KeyboardLayout, MistakeEntry, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
+import type { AppTab, AppView, DiffPart, KeyboardLayout, MistakeEntry, SavedWord, Settings, StorageId, StoragePart, StorageView, ToView, TutorHost, UpdateStatus } from '../protocol'
 import { LANGUAGES } from '../languages'
 import { translationAdvice, type LevelFit } from '../hardware'
-import { LEVEL_NAMES, myLanguages, RATES, type AppRule, type ThemeMode, type TranslationLevel } from '../settings'
+import { DEFAULTS, keptForm, LEVEL_NAMES, myLanguages, RATES, type AppRule, type LlmModel, type ThemeMode, type TranslationLevel } from '../settings'
 import type { AppPart } from '../typist'
 import { parseEntry } from '../vocabulary'
 import { changesOf, wordDiff } from '../worddiff'
+import { logo, tile } from './brand'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
@@ -41,7 +42,7 @@ declare global {
 const save = (patch: Partial<Settings>) => post({ type: 'saveSettings', patch })
 
 type Action = 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
-type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'engine' | 'computer' | 'about' | 'search'
+type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'engine' | 'storage' | 'computer' | 'about' | 'search'
 
 const ACTIONS: readonly Action[] = ['listen', 'translate', 'check', 'screen', 'dictate', 'transcribe', 'keyboard']
 const isAction = (name: Page): name is Action => (ACTIONS as readonly string[]).includes(name)
@@ -67,6 +68,7 @@ const TITLES: Record<Page, string> = {
   layouts: 'Layouts',
   settings: 'Settings',
   engine: 'Speech engine',
+  storage: 'Storage',
   computer: 'This computer',
   about: 'About',
   search: 'Search',
@@ -146,20 +148,18 @@ type KeyLine = { label: string; hotkey: string; chain?: 'listen' | 'translate' |
 function keyLines(action: Action, s: Settings): KeyLine[] {
   switch (action) {
     case 'listen':
-      if (s.doubleCopy && s.selectKey)
-        return [
-          { label: 'copy', hotkey: COPY_TWICE, chain: 'listen' },
-          { label: 'selection', hotkey: s.selectKey },
-        ]
-      return [{ label: 'selection', hotkey: s.doubleCopy ? COPY_TWICE : s.selectKey, chain: 'listen' }]
+      // One action: its key, else Ctrl+C twice.
+      return [{ label: 'selection', hotkey: s.selectKey || (s.doubleCopy ? COPY_TWICE : ''), chain: 'listen' }]
     case 'translate':
       return [
         { label: 'selection', hotkey: s.translateKey, chain: 'translate' },
+        ...(s.typeKey ? [{ label: 'type', hotkey: s.typeKey }] : []),
         { label: 'paste back', hotkey: 'Enter' },
       ]
     case 'check':
       return [
         { label: 'selection', hotkey: s.checkKey },
+        ...(s.typeCheckKey ? [{ label: 'type', hotkey: s.typeCheckKey }] : []),
         { label: 'by voice', hotkey: s.practiceKey },
       ]
     case 'screen':
@@ -182,8 +182,11 @@ function keyLines(action: Action, s: Settings): KeyLine[] {
   }
 }
 
-function keysOf(action: Action, s: Settings, chained = false): HTMLElement[] {
-  return keyLines(action, s).flatMap(k => [el('span', { class: 'kl' }, k.label), caps(k.hotkey, chained ? k.chain : undefined)])
+/** An action's keys as caps; `setOnly` leaves out those not set (the bar, where "not set" only crowds the title). */
+function keysOf(action: Action, s: Settings, chained = false, setOnly = false): HTMLElement[] {
+  return keyLines(action, s)
+    .filter(k => !setOnly || k.hotkey)
+    .flatMap(k => [el('span', { class: 'kl' }, k.label), caps(k.hotkey, chained ? k.chain : undefined)])
 }
 
 /** The layouts the keys go through, in order: those chosen that Windows has, or all of them. */
@@ -271,10 +274,11 @@ const NAV: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
-    label: 'Altype',
+    label: 'Krya',
     items: [
       { page: 'settings', icon: 'settings', title: 'Settings' },
       { page: 'engine', icon: 'hard-drive', title: 'Speech engine' },
+      { page: 'storage', icon: 'database', title: 'Storage', value: v => (v.storage?.parts.length ? speechSize(downloadsMb(v.storage)) : '') },
       { page: 'computer', icon: 'cpu', title: 'This computer' },
       { page: 'about', icon: 'info', title: 'About' },
     ],
@@ -315,7 +319,8 @@ for (const g of NAV) {
 const side = el(
   'aside',
   { class: 'side' },
-  el('div', { class: 'brand' }, el('span', { class: 'key mark' }, 'alt'), el('span', { class: 'wm' }, 'altype')),
+  // The text logo; a narrow sidebar has room for the icon only.
+  el('div', { class: 'brand' }, logo(), tile(28)),
   el('label', { class: 'find', title: 'Search settings (Ctrl+F)' }, lucide('search', 's'), findField, el('span', { class: 'key' }, 'Ctrl F')),
   tree,
 )
@@ -342,8 +347,8 @@ const pBack = el('button', { class: 'icon-btn back', title: 'Back (Esc)', 'aria-
 const pTitle = el('div', { class: 'ptitle' })
 const pCap = el('span', { class: 'pcap' })
 const pKeys = el('div', { class: 'pkeys' })
-// The mark in the bar is for the setup, which has no sidebar.
-const barMark = el('div', { class: 'brand bb' }, el('span', { class: 'key mark' }, 'alt'), el('span', { class: 'wm' }, 'altype'))
+// The logo in the bar is for the setup, which has no sidebar.
+const barMark = el('div', { class: 'brand bb' }, logo())
 const top = el('header', { class: 'top' }, barMark, pBack, pTitle, pCap, el('span', { class: 'gap' }), pKeys, winButtons)
 const home = el('main', { class: 'home' })
 const pBody = el('div', { class: 'pbody' })
@@ -435,14 +440,14 @@ function homeRow(action: Action, v: AppView): HTMLElement {
   )
 }
 
-/** Altype is paused: every key and reaction is off until Resume, here or in the tray. */
+/** Krya is paused: every key and reaction is off until Resume, here or in the tray. */
 function pausedNotice(v: AppView): HTMLElement | null {
   if (!v.settings.paused) return null
   return el(
     'div',
-    { class: 'row notice' },
+    { class: 'row notice paused' },
     lucide('pause'),
-    el('div', { class: 'l' }, 'Altype is paused', el('small', {}, 'shortcuts and layout fixing are off until you resume')),
+    el('div', { class: 'l' }, 'Krya is paused', el('small', {}, 'shortcuts and layout fixing are off until you resume')),
     btn('Resume', () => save({ paused: false }), 'primary'),
   )
 }
@@ -861,6 +866,8 @@ function show(place: Place | undefined, dir: 1 | -1 | 0, scroll = 0): void {
   findField.value = place?.name === 'search' ? finding : ''
   if (place?.name === 'transcripts' && was?.name !== 'transcripts') enterTranscripts()
   if (place?.name === 'programs' && !place.sub) askRunningApps()
+  // Sizes are measured each time the page opens: a download or a removal elsewhere changes them.
+  if (place?.name === 'storage' && was?.name !== 'storage') post({ type: 'storage' })
   root.classList.toggle('page-open', !!place)
   fillHeader()
   updateNav()
@@ -897,9 +904,9 @@ type Sub = { title: string | (() => string); cap?: (v: AppView) => string; body:
 
 const SUBS: Record<SubId, Sub> = {
   model: { title: 'Speech model', body: modelPage, valid: running },
-  meet: { title: 'Google Meet', cap: () => 'the Altype extension for Chrome', body: meetPage },
+  meet: { title: 'Google Meet', cap: () => 'the Krya extension for Chrome', body: meetPage },
   speakers: { title: 'Who spoke when', cap: () => 'the voices told apart', body: speakerRows, valid: installed },
-  fixing: { title: 'Fixing as I type', cap: () => 'what else Altype sets right while you type', body: fixingPage },
+  fixing: { title: 'Fixing as I type', cap: () => 'what else Krya sets right while you type', body: fixingPage },
   program: { title: () => programOpen, body: programPage, valid: () => !!programOpen },
   languages: { title: 'Languages you use', body: languagesPage },
 }
@@ -920,7 +927,8 @@ const CAPS: Partial<Record<Page, (v: AppView) => string>> = {
   learned: () => 'on this computer only',
   programs: () => 'left out of parts, or with a layout of their own',
   layouts: () => 'in the order the keys go through them',
-  about: v => `Altype ${v.version}`,
+  storage: v => (v.storage?.measuring ? 'measuring…' : v.storage ? `${speechSize(v.storage.freeMb)} free on ${v.storage.drive}` : 'what Krya keeps on this computer'),
+  about: v => `Krya ${v.version}`,
 }
 
 let sliding: Animation[] = []
@@ -971,7 +979,7 @@ function fillHeader(): void {
   }
   pTitle.replaceChildren(TITLES[name])
   pCap.textContent = isAction(name) ? actionText(name, v).cap : name === 'search' ? searchCap(v) : (CAPS[name]?.(v) ?? '')
-  const keys = isAction(name) ? keysOf(name, v.settings) : []
+  const keys = isAction(name) ? keysOf(name, v.settings, false, true) : []
   const next = el('div', {}, ...keys)
   if (next.innerHTML !== pKeys.innerHTML) pKeys.replaceChildren(...next.childNodes)
 }
@@ -1076,6 +1084,8 @@ function bodyOf(v: AppView): HTMLElement[] {
       return settingsPage(v)
     case 'engine':
       return enginePage(v)
+    case 'storage':
+      return storagePage(v)
     case 'computer':
       return computerPage(v)
     case 'about':
@@ -1106,6 +1116,7 @@ const SEARCHED: Place[] = [
   { name: 'settings' },
   { name: 'settings', sub: 'languages' },
   { name: 'engine' },
+  { name: 'storage' },
   { name: 'computer' },
 ]
 
@@ -1226,6 +1237,8 @@ type KeyName =
   | 'textKey'
   | 'inPlaceKey'
   | 'checkKey'
+  | 'typeKey'
+  | 'typeCheckKey'
   | 'switchKey'
   | 'fixKey'
   | 'dictateKey'
@@ -1243,6 +1256,8 @@ const KEY_USE: Record<KeyName, string> = {
   textKey: 'translating text on the screen',
   inPlaceKey: 'replacing the selection with its translation',
   checkKey: 'checking your English',
+  typeKey: 'typing a text to translate',
+  typeCheckKey: 'typing a text to check',
   switchKey: 'switching the layout',
   fixKey: 'fixing the layout',
   dictateKey: 'dictating',
@@ -1250,14 +1265,15 @@ const KEY_USE: Record<KeyName, string> = {
   noteKey: 'dictating a note',
   againKey: 'typing the last phrase again',
   practiceKey: 'checking what you say',
-  pauseKey: 'pausing Altype',
-  windowKey: 'opening Altype',
+  pauseKey: 'pausing Krya',
+  windowKey: 'opening Krya',
 }
 
 /** What else a key is for already, besides `self` (a setting's name, or a layout's id for its own key). */
 function keyTakenBy(key: string, self: string): string | undefined {
   const s = view?.settings
-  if (!s) return undefined
+  // No key is nobody's: any number of them may be empty.
+  if (!s || !key) return undefined
   const other = (Object.keys(KEY_USE) as KeyName[]).find(n => n !== self && s[n] === key)
   if (other) return KEY_USE[other]
   const layout = Object.entries(s.layoutKeys).find(([id, k]) => id !== self && k === key)?.[0]
@@ -1279,10 +1295,10 @@ function saveKey(name: KeyName, key: string): void {
 function keyRow(name: KeyName, label: string, note: string, taken = false, iconName?: LucideName, extra?: HTMLElement | null): HTMLElement {
   const key = view?.settings[name] ?? ''
   const menu = menuNote(key)
-  return keyRecorder(name, key, key => saveKey(name, key), label, menu ? `${note}; ${menu}` : note, taken, iconName, extra)
+  return keyRecorder(name, key, key => saveKey(name, key), label, menu ? `${note}; ${menu}` : note, taken, iconName, extra, DEFAULTS[name])
 }
 
-/** Alt or Win alone as a key: Altype keeps it from opening a menu (typist.ts), so the line says where the menu went. */
+/** Alt or Win alone as a key: Krya keeps it from opening a menu (typist.ts), so the line says where the menu went. */
 function menuNote(key: string): string {
   if (/^(Left|Right)Alt(\*2)?$/.test(key)) return 'Alt alone no longer opens menus, F10 does'
   if (/^(Left|Right)Super(\*2)?$/.test(key)) return 'Win alone no longer opens Start, Ctrl+Esc does'
@@ -1314,8 +1330,9 @@ function layoutKeyRow(l: KeyboardLayout, label: string, note: (string | HTMLElem
  * A key recorded from a press: Change (or a tap on the keys) listens for keys
  * with modifiers, a modifier tapped alone or twice (it waits a moment for a
  * second tap), modifiers pressed together, Pause or Caps Lock alone, the
- * mouse's side buttons. Esc gives up; × clears the key. `id` names it for the
- * trouble line under it; `extra` sits after its controls (a switch).
+ * mouse's side buttons. Esc gives up; × clears the key; ↺ brings back the key
+ * it came with (`byDefault`), when it had one and has another now. `id` names
+ * it for the trouble line under it; `extra` sits after its controls (a switch).
  */
 function keyRecorder(
   id: string,
@@ -1326,6 +1343,7 @@ function keyRecorder(
   taken = false,
   iconName?: LucideName,
   extra?: HTMLElement | null,
+  byDefault = '',
 ): HTMLElement {
   const name = id
   const recorder = new HotkeyRecorder()
@@ -1401,12 +1419,28 @@ function keyRecorder(
         lucide('x', 's'),
       )
     : null
+  const restore =
+    byDefault && current !== byDefault
+      ? el(
+          'button',
+          {
+            class: 'kx',
+            title: `Back to ${hotkeyLabel(byDefault)}`,
+            'aria-label': `${label}: back to ${hotkeyLabel(byDefault)}`,
+            onclick: () => {
+              keyTrouble = undefined
+              saveKeyAs(byDefault)
+            },
+          },
+          lucide('rotate-ccw', 's'),
+        )
+      : null
   const trouble = keyTrouble?.name === name ? keyTrouble.text : ''
   const notes = typeof note === 'string' ? [note] : note
   const node = row(
     label,
     [...notes, taken && current ? bad('Taken by another program; choose another.') : null, trouble ? bad(trouble) : null],
-    el('span', { class: 'kchg' }, field, clear, linkBtn(current ? 'Change' : 'Set', () => field.click()), extra ?? null),
+    el('span', { class: 'kchg' }, field, clear, restore, linkBtn(current ? 'Change' : 'Set', () => field.click()), extra ?? null),
   )
   if (iconName) node.prepend(lucide(iconName))
   return node
@@ -1419,16 +1453,16 @@ const fixedKey = (label: string, hotkey: string, note?: string) => row(label, [n
 
 function listenPage(v: AppView): HTMLElement[] {
   const s = v.settings
-  const how = s.doubleCopy ? 'Select this text, press Ctrl + C twice.' : s.selectKey ? `Select this text, press ${said(s.selectKey)}.` : 'Turn on Ctrl + C twice or set a key above, then select this text.'
+  const how = s.selectKey ? `Select this text, ${usage(s.selectKey)}.` : s.doubleCopy ? 'Select this text, press Ctrl + C twice.' : 'Set a key above or turn on Ctrl + C twice, then select this text.'
   return [
     grp('Keys'),
+    keyRow('selectKey', 'Listen to the selected text', 'select text anywhere, then press the key', !v.keysOk.select, 'volume-2'),
     card(
       'copy',
-      'Listen to copied text',
-      ['select it, then press Ctrl + C twice, quickly'],
+      'Also on Ctrl + C twice',
+      ['select text, then press Ctrl + C twice, quickly; works with no key set too'],
       el('span', { class: 'kchg' }, caps(COPY_TWICE), el('span', { class: 'tgwrap' }, toggleKnob(s.doubleCopy, doubleCopy => save({ doubleCopy }), 'Ctrl + C twice'))),
     ),
-    keyRow('selectKey', 'Listen to the selected text', s.selectKey ? 'select it anywhere, press this key' : 'a single key, instead of Ctrl + C twice', !v.keysOk.select, 'volume-2'),
     keyRow('snipKey', 'Listen to text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.snip, 'scan'),
     ...voiceRows(v),
     grp('The card'),
@@ -1486,11 +1520,17 @@ const LEVEL_ABOUT: Record<TranslationLevel, string> = {
   most: 'The best wording, and the slowest',
 }
 
+/** What each model is like as a checker. */
+const CHECK_ABOUT: Record<LlmModel, string> = {
+  accurate: 'Catches nearly every mistake, quickly',
+  most: 'A little more careful, and slower',
+}
+
 /** The model behind a level, named last. */
 const LEVEL_MODEL: Record<TranslationLevel, string> = {
   fast: 'Firefox Translations',
-  accurate: 'TranslateGemma 4B',
-  most: 'TranslateGemma 12B',
+  accurate: 'Gemma 4 E4B',
+  most: 'Gemma 4 12B',
 }
 
 const FIT_WHERE: Record<LevelFit['where'], string> = {
@@ -1517,17 +1557,19 @@ const SLOW_SENTENCE_S = 2
 const startText = (start: number | undefined) => (start !== undefined ? `; it starts in ${seconds(start)} after 10 idle minutes` : '')
 
 /** Where a level runs here and how long it takes: measured, once it has been, else expected. */
-function levelFitText(fit: LevelFit, measured: { sentence: number; start?: number } | undefined): string {
+function levelFitText(fit: LevelFit, speed: AppView['modelSpeed'][LlmModel]): string {
   const where = FIT_WHERE[fit.where]
+  const measured = speed?.sentence === undefined ? undefined : { sentence: speed.sentence, start: speed.start }
   if (!measured) return fit.cuda ? `${CUDA_GUESS}, ${where}` : fit.where === 'card' ? `${FIT_GUESS.card} ${where}` : `${FIT_GUESS[fit.where]}, ${where}`
   return `${measured.sentence > SLOW_SENTENCE_S ? 'slow here' : 'here'}: ${seconds(measured.sentence)} per sentence, ${where}${startText(measured.start)}`
 }
 
 /**
  * The three translators, one in use: Fast (Firefox's models), Accurate and
- * Most accurate (TranslateGemma, run by llama.cpp on this computer). Picking
- * one downloads it; nothing downloads before. The advice comes from this
- * computer's graphics card (hardware.ts translationAdvice).
+ * Most accurate (Gemma 4 E4B and 12B, run by llama.cpp on this computer: the
+ * one model, which checks English too). Picking one downloads it; nothing
+ * downloads before. The advice comes from this computer's graphics card
+ * (hardware.ts translationAdvice).
  */
 function levelRows(v: AppView): HTMLElement[] {
   const advice = translationAdvice(v.speech.device)
@@ -1539,7 +1581,8 @@ function levelRows(v: AppView): HTMLElement[] {
     // What it is, then how it runs here, then what it downloads: a line each.
     const notes: (string | HTMLElement | null)[] = [
       `${LEVEL_ABOUT[level]} (${LEVEL_MODEL[level]})`,
-      fit && level !== 'fast' ? levelFitText(fit, v.translationSpeed[level]) : null,
+      fit && level !== 'fast' ? levelFitText(fit, v.modelSpeed[level]) : null,
+      level !== 'fast' && inUse === 'fast' && level === v.settings.model ? 'Check my English uses it' : null,
       t.status === 'failed'
         ? bad('the download failed; Use tries again')
         : t.status === 'ready' || fetching
@@ -1553,7 +1596,7 @@ function levelRows(v: AppView): HTMLElement[] {
       : level === inUse
         ? chip('in use', 'lit')
         : linkBtn('Use', () => post({ type: 'translationLevel', level }))
-    const remove = level !== 'fast' && t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[level]} (${speechSize(t.size)})`, () => post({ type: 'removeTranslation', level })) : null
+    const remove = level !== 'fast' && t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[level]} (${speechSize(t.size)})`, () => post({ type: 'removeModel', model: level })) : null
     return row(label, notes, control, remove)
   })
 }
@@ -1566,11 +1609,13 @@ function translatePage(v: AppView): HTMLElement[] {
   return [
     grp('Keys'),
     keyRow('translateKey', 'Translate the selected text', s.translateKey ? `select it anywhere, ${usage(s.translateKey)}` : 'select it anywhere, then press one key, such as Left Ctrl twice', !v.keysOk.translate, 'languages'),
+    keyRow('typeKey', 'Type a text to translate', 'an empty card by the pointer, from any program; also in the tray menu', !v.keysOk.type, 'type'),
     keyRow('inPlaceKey', 'Replace the selection with its translation', 'no card', !v.keysOk.inPlace, 'wand-sparkles'),
     keyRow('textKey', 'Translate text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.text, 'scan'),
     fixedKey('In the card: paste the translation back', 'Enter'),
     grp('Translation'),
     ...levelRows(v),
+    aside('info', 'Accurate and Most accurate also check your English: the one you pick here is the one Check uses.'),
     grp('Languages'),
     card('globe', pairOf(v), [note], state),
     languagesCard(v),
@@ -1580,7 +1625,7 @@ function translatePage(v: AppView): HTMLElement[] {
   ]
 }
 
-/** The texts translated lately (translationlog.ts), each to copy; Altype forgets them after 30 days by itself. */
+/** The texts translated lately (translationlog.ts), each to copy; Krya forgets them after 30 days by itself. */
 function translationsPage(v: AppView): HTMLElement[] {
   const list = v.translations
   return [
@@ -1612,51 +1657,68 @@ const TRY_CHECK = 'I want to learn English and can we made tutor option? I dicta
 const SLOW_CHECK_S = 4
 
 /** Where the checker runs here and how long a text takes: measured, once it has been, else expected. */
-function checkFitText(fit: LevelFit, measured: { text: number; start?: number } | undefined): string {
+function checkFitText(fit: LevelFit, speed: AppView['modelSpeed'][LlmModel]): string {
   const where = FIT_WHERE[fit.where]
-  if (!measured) return fit.where === 'card' ? `about 1 s per text ${where}` : `possible, but slow here: several seconds per text, ${where}`
-  return `${measured.text > SLOW_CHECK_S ? 'slow here' : 'here'}: ${seconds(measured.text)} per text, ${where}${startText(measured.start)}`
+  if (speed?.text === undefined) return fit.where === 'card' ? `about 1 s per text ${where}` : `possible, but slow here: several seconds per text, ${where}`
+  return `${speed.text > SLOW_CHECK_S ? 'slow here' : 'here'}: ${seconds(speed.text)} per text, ${where}${startText(speed.start)}`
 }
 
-/** What the checker does, for the bar and Home: the language it checks, or its download. */
+/** What the checker does, for the bar and Home: the language it checks, or its model's download. */
 function checkCap(v: AppView): string {
-  const t = v.check.state
+  const t = v.models[v.settings.model]
   if (t.status === 'downloading') return `downloading ${Math.round(t.progress * 100)}%`
   return t.status === 'ready' ? `English · notes in ${v.settings.native}` : 'downloads once'
 }
 
-/** The checker's model: Download (with its progress), a cross to remove it, Recommended on a card that holds it, its time here. */
-function checkerRow(v: AppView): HTMLElement {
-  const c = v.check
-  const t = c.state
-  const fetching = t.status === 'downloading'
-  const notes: (string | HTMLElement | null)[] = [
-    `Marks the mistakes and says the main one (${c.name} by Google)`,
-    checkFitText(c.fit, c.speed),
-    t.status === 'failed' ? bad('the download failed; Download tries again') : t.status === 'ready' || fetching ? null : `${speechSize(t.size)} to download, with Download or at your first check`,
-    fetching ? bar(t.progress) : null,
-  ]
-  const label = el('span', {}, 'Checking model', c.fit.where === 'card' ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
-  const control = fetching
-    ? el('span', { class: 'pct' }, `${Math.round(t.progress * 100)}%`)
-    : t.status === 'ready'
-      ? chip('ready', 'lit')
-      : linkBtn('Download', () => post({ type: 'prepareChecker' }))
-  const remove = t.status === 'ready' ? ib('x', `Remove ${c.name} (${speechSize(t.size)})`, () => post({ type: 'removeChecker' })) : null
-  return row(label, notes, control, remove)
+/**
+ * The two models, one in use (the settings' `model`, which translates too
+ * unless Translate is on Fast): Use picks one and downloads it, the one in use
+ * downloads now with Download or at the first check; a cross removes one;
+ * Recommended on a card that holds it, its time here.
+ */
+function checkModelRows(v: AppView): HTMLElement[] {
+  const advice = translationAdvice(v.speech.device)
+  const inUse = v.settings.model
+  return (['accurate', 'most'] as const).map(model => {
+    const t = v.models[model]
+    const fetching = t.status === 'downloading'
+    const notes: (string | HTMLElement | null)[] = [
+      `${CHECK_ABOUT[model]} (${LEVEL_MODEL[model]})`,
+      checkFitText(advice[model], v.modelSpeed[model]),
+      t.status === 'failed'
+        ? bad('the download failed; Use tries again')
+        : t.status === 'ready' || fetching
+          ? null
+          : `${speechSize(t.size)} to download ${model === inUse ? 'with Download or at your first check' : 'when you pick it'}${advice[model].cuda ? ` (${CUDA_SIZE})` : ''}`,
+      fetching ? bar(t.progress) : null,
+    ]
+    const label = el('span', {}, LEVEL_NAMES[model], advice.advised === model ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
+    const control = fetching
+      ? el('span', { class: 'pct' }, `${Math.round(t.progress * 100)}%`)
+      : model !== inUse
+        ? linkBtn('Use', () => post({ type: 'useModel', model }))
+        : t.status === 'ready'
+          ? chip('in use', 'lit')
+          : linkBtn('Download', () => post({ type: 'useModel', model }))
+    const remove = t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[model]} (${speechSize(t.size)})`, () => post({ type: 'removeModel', model })) : null
+    return row(label, notes, control, remove)
+  })
 }
 
 function checkPage(v: AppView): HTMLElement[] {
   const s = v.settings
-  const how = s.checkKey ? `This text has mistakes on purpose. Select it, ${usage(s.checkKey)}, or use Check my English… in the tray menu.` : 'This text has mistakes on purpose. Select it and press your key, or use Check my English… in the tray menu.'
+  const typed = s.typeCheckKey ? `${usage(s.typeCheckKey)} and type it` : 'use Check my English… in the tray menu'
+  const how = s.checkKey ? `This text has mistakes on purpose. Select it, ${usage(s.checkKey)}, or ${typed}.` : `This text has mistakes on purpose. Select it and press your key, or ${typed}.`
   return [
     grp('Keys'),
     keyRow('checkKey', 'Check the selected text', s.checkKey ? `select it anywhere, ${usage(s.checkKey)}` : 'select it anywhere, then press one key, such as Right Ctrl twice', !v.keysOk.check, 'graduation-cap'),
+    keyRow('typeCheckKey', 'Type a text to check', 'an empty card by the pointer, from any program; also in the tray menu', !v.keysOk.typeCheck, 'type'),
     keyRow('practiceKey', 'Check what I say', installed(v) ? 'press, say a phrase in English, press again' : 'needs the speech engine (see Dictate)', !v.speech.keysOk.practice, 'mic'),
     fixedKey('In the card: paste the corrected text back', 'Enter'),
     aside('info', 'Speech recognition fixes some mistakes as it writes, so typing shows more of them.'),
     grp('Model'),
-    checkerRow(v),
+    ...checkModelRows(v),
+    aside('info', 'The same model translates when Translate is set to Accurate or Most accurate.'),
     grp('History'),
     navCard('list-checks', 'Mistakes', 'what Check found in your texts, repeated ones first', v.mistakes.length ? String(v.mistakes.length) : 'none', () => go('mistakes'), 'mistakes'),
     tryIt(TRY_CHECK, how),
@@ -1766,7 +1828,7 @@ function screenPage(v: AppView): HTMLElement[] {
     keyRow('textKey', 'Translate text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.text, 'languages'),
     grp('How it works'),
     card('scan', 'Draw a box around the text', ['Windows dims the screen while you draw'], null),
-    card('type', 'Altype reads the text on this computer', ['it reads the languages Windows has installed; add more there (Windows OCR)'], linkBtn('Languages…', () => post({ type: 'openLanguageSettings' }))),
+    card('type', 'Krya reads the text on this computer', ['it reads the languages Windows has installed; add more there (Windows OCR)'], linkBtn('Languages…', () => post({ type: 'openLanguageSettings' }))),
     card('spell-check', 'Fix misread words in the card', ['then listen or translate'], null),
   ]
 }
@@ -1838,7 +1900,7 @@ function dictatePage(v: AppView): HTMLElement[] {
 
 /**
  * Words to spell: names and terms dictation and transcripts write as the
- * person does, each with what it may be heard as (vocabulary.ts). Altype's own
+ * person does, each with what it may be heard as (vocabulary.ts). Krya's own
  * setting, sent to the engine with its plan, so it can be filled in before the
  * engine is here. Two fields add one: the word as written, and the heard
  * forms; a tap on a word puts it back into the fields to change it.
@@ -1847,7 +1909,7 @@ function vocabularyPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const wordOf = (line: string) => parseEntry(line).word.toLowerCase()
   const word = liveField('word', 'Word, as it should be written', 'Word to spell', key => (key === 'Enter' ? add() : clear()))
-  const heard = liveField('heard', 'Heard as (optional): альтайп, all type', 'What it is heard as', key => (key === 'Enter' ? add() : clear()))
+  const heard = liveField('heard', 'Heard as (optional): кря, края', 'What it is heard as', key => (key === 'Enter' ? add() : clear()))
   const clear = () => {
     word.value = ''
     heard.value = ''
@@ -1893,7 +1955,7 @@ function vocabularyPage(v: AppView): HTMLElement[] {
   ]
 }
 
-/** The phrases typed lately (dictationlog.ts), each to copy; Altype forgets them after 30 days by itself. */
+/** The phrases typed lately (dictationlog.ts), each to copy; Krya forgets them after 30 days by itself. */
 function recentPage(v: AppView): HTMLElement[] {
   const recent = v.dictation.recent
   return [
@@ -1946,7 +2008,7 @@ function ago(epochSeconds: number): string {
 }
 
 /**
- * Chrome's own page: Altype opens a new Chrome window and types the address into it. When the window did not
+ * Chrome's own page: Krya opens a new Chrome window and types the address into it. When the window did not
  * come to the front, or there is no Chrome, the address is copied for the person to paste.
  */
 function openChrome(url: string): void {
@@ -1971,13 +2033,13 @@ function olderVersion(a: string, b: string): boolean {
   return false
 }
 
-/** Chrome runs an older copy of the extension than the one in Altype's folder: Reload brings the new one in. */
+/** Chrome runs an older copy of the extension than the one in Krya's folder: Reload brings the new one in. */
 const extensionStale = (v: AppView) => {
   const ext = extensionSeen(v)
   return !!ext && !!v.speech.extensionShipped && olderVersion(ext.version, v.speech.extensionShipped)
 }
 
-/** The extensions page, at Altype's own card when Chrome has told its id. */
+/** The extensions page, at Krya's own card when Chrome has told its id. */
 const extensionsPage = (v: AppView) => {
   const id = extensionSeen(v)?.id
   return id && /^[a-p]{32}$/.test(id) ? `chrome://extensions/?id=${id}` : 'chrome://extensions/'
@@ -1988,10 +2050,10 @@ function meetCard(v: AppView): HTMLElement {
   const ext = extensionSeen(v)
   const stale = extensionStale(v)
   const value = !ext ? 'set up in Chrome' : stale ? `Reload in Chrome · v${ext.version} → v${v.speech.extensionShipped}` : `Installed · v${ext.version}`
-  return navCard('video', 'Google Meet', 'record a call in Chrome with the Altype extension', value, () => openSub('meet'), 'meet', !!ext && !stale)
+  return navCard('video', 'Google Meet', 'record a call in Chrome with the Krya extension', value, () => openSub('meet'), 'meet', !!ext && !stale)
 }
 
-/** How to record a Google Meet call: the Chrome extension, loaded from Altype's folder, and whether it is there. */
+/** How to record a Google Meet call: the Chrome extension, loaded from Krya's folder, and whether it is there. */
 function meetPage(v: AppView): HTMLElement[] {
   const dir = v.speech.extensionDir
   const ext = extensionSeen(v)
@@ -1999,7 +2061,7 @@ function meetPage(v: AppView): HTMLElement[] {
   const status = !ext
     ? card('video', 'Not set up yet', [running(v) ? 'three steps in Chrome, once; this line says when the extension is in' : 'the speech engine must run for the extension to work'], null)
     : extensionStale(v)
-      ? card('rotate-cw', `Chrome runs v${ext.version}; Altype has v${v.speech.extensionShipped}`, ['press Reload on the extension’s card in Chrome: Open in Chrome goes straight to it'], btn('Open in Chrome', () => openChrome(extensionsPage(v)), 'primary'))
+      ? card('rotate-cw', `Chrome runs v${ext.version}; Krya has v${v.speech.extensionShipped}`, ['press Reload on the extension’s card in Chrome: Open in Chrome goes straight to it'], btn('Open in Chrome', () => openChrome(extensionsPage(v)), 'primary'))
       : card('circle-check', `Installed in Chrome · v${ext.version}`, [el('small', { class: 'ok' }, `seen ${ago(ext.seen)} · the call’s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY))
   return [
     ...(offer.length ? [grp('Speech engine'), ...offer] : []),
@@ -2013,10 +2075,10 @@ function meetPage(v: AppView): HTMLElement[] {
       [pathNote(dir), 'Ctrl+V into the folder picker’s address line, then Select folder'],
       el('span', { class: 'kchg' }, linkBtn('Show the folder', () => post({ type: 'showInFolder', path: dir })), btn([lucide('copy', 's'), 'Copy path'], () => copyText(dir), 'primary')),
     ),
-    card('mic', '3 · In a meeting: the Altype icon → Record, or the key', ['the call’s sound and your microphone · the transcript appears in Transcripts'], caps(MEET_KEY)),
+    card('mic', '3 · In a meeting: the Krya icon → Record, or the key', ['the call’s sound and your microphone · the transcript appears in Transcripts'], caps(MEET_KEY)),
     grp('If something is off'),
     card('keyboard', 'The key does nothing', ['set it at chrome://extensions/shortcuts'], btn('Open in Chrome', () => openChrome('chrome://extensions/shortcuts'))),
-    card('rotate-cw', 'After Altype updates, press Reload on the extension', ['Chrome keeps the old copy until then'], btn('Open in Chrome', () => openChrome(extensionsPage(v)))),
+    card('rotate-cw', 'After Krya updates, press Reload on the extension', ['Chrome keeps the old copy until then'], btn('Open in Chrome', () => openChrome(extensionsPage(v)))),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -2170,11 +2232,11 @@ function programsPage(v: AppView): HTMLElement[] {
             `program-${a.exe}`,
           ),
         )
-      : [aside('info', 'None yet. Add a program above: Altype leaves out what you choose there, or switches to its own layout when it comes to the front.')]),
+      : [aside('info', 'None yet. Add a program above: Krya leaves out what you choose there, or switches to its own layout when it comes to the front.')]),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
-const APP_PART_NAMES: Record<AppPart, string> = { fix: 'fixing as you type', switch: 'the switch keys', badge: 'the badge', keys: 'every key of Altype' }
+const APP_PART_NAMES: Record<AppPart, string> = { fix: 'fixing as you type', switch: 'the switch keys', badge: 'the badge', keys: 'every key of Krya' }
 
 /** What a program's rule does, in a few words. */
 function programNote(v: AppView, a: AppRule): string {
@@ -2192,11 +2254,11 @@ function programPage(v: AppView): HTMLElement[] {
   const part = (p: AppPart, iconName: LucideName, label: string, note: string) =>
     toggleCard(iconName, label, !rule.off.includes(p), on => change({ off: on ? rule.off.filter(x => x !== p) : [...rule.off, p] }), note)
   return [
-    grp('Here, Altype'),
+    grp('Here, Krya'),
     part('fix', 'spell-check', 'Fixes words as you type', 'off: words stay as typed; the fix key still works'),
     part('switch', 'keyboard', 'Switches the layout by its keys', 'the switch key and the layouts\' own keys'),
     part('badge', 'type', 'Shows the layout by the cursor', 'the badge'),
-    part('keys', 'circle-alert', 'Hears its keys at all', 'off: none of Altype\'s keys works here, but the pause key'),
+    part('keys', 'circle-alert', 'Hears its keys at all', 'off: none of Krya\'s keys works here, but the pause key'),
     grp('Layout'),
     card(
       'globe',
@@ -2216,7 +2278,7 @@ function programPage(v: AppView): HTMLElement[] {
   ]
 }
 
-/** What Altype learned from the person's typing: words it fixes always, words of theirs; each can go, or everything. */
+/** What Krya learned from the person's typing: words it fixes always, words of theirs; each can go, or everything. */
 function learnedPage(v: AppView): HTMLElement[] {
   const { alwaysFix, myWords } = v.learned
   const name = (code: string) => languageName(code)
@@ -2227,11 +2289,11 @@ function learnedPage(v: AppView): HTMLElement[] {
     grp('Fixed always', alwaysFix.length || undefined),
     ...(alwaysFix.length ? alwaysFix.map(w => item('alwaysFix', w, `into ${name(w.lang)}`)) : [aside('info', 'A word you fix by hand twice (the fix key, or erased and typed again in the other layout) is fixed by itself from then on.')]),
     grp('Your words', myWords.length || undefined),
-    ...(myWords.length ? myWords.map(w => item('myWords', w, `${name(w.lang)} · never fixed, and fixed into`)) : [aside('info', 'A word in no dictionary that you type right three times becomes yours: Altype leaves it as typed, and fixes it into when it is typed in the wrong layout. Until then only an unreadable fingerprint of it is kept.')]),
+    ...(myWords.length ? myWords.map(w => item('myWords', w, `${name(w.lang)} · never fixed, and fixed into`)) : [aside('info', 'A word in no dictionary that you type right three times becomes yours: Krya leaves it as typed, and fixes it into when it is typed in the wrong layout. Until then only an unreadable fingerprint of it is kept.')]),
     grp('Never fixed'),
     navCard('lock', 'Kept as typed', 'words never fixed by themselves', String(v.settings.keepWords.length || 'none'), () => go('kept'), 'kept'),
     alwaysFix.length || myWords.length
-      ? card('trash-2', 'Forget all', ['what Altype learned goes; Kept as typed stays'], linkBtn('Forget', () => post({ type: 'forgetLearned' })))
+      ? card('trash-2', 'Forget all', ['what Krya learned goes; Kept as typed stays'], linkBtn('Forget', () => post({ type: 'forgetLearned' })))
       : null,
   ].filter((n): n is HTMLElement => n !== null)
 }
@@ -2247,7 +2309,7 @@ function keptPage(v: AppView): HTMLElement[] {
     items: s.keepWords,
     count: 'Words',
     empty: 'None yet. Add a word above, or press Backspace right after a fix you did not want.',
-    normalize: text => text.trim().toLowerCase(),
+    normalize: keptForm,
     add: word => save({ keepWords: [...words(), word] }),
     remove: word => save({ keepWords: words().filter(w => w !== word) }),
   })
@@ -2255,7 +2317,7 @@ function keptPage(v: AppView): HTMLElement[] {
 
 /** Other programs at the keyboard, named calmly: no harm, so the person knows who else is there. */
 function othersLine(v: AppView): HTMLElement | null {
-  const presses = 'presses keys by itself; Altype ignores those.'
+  const presses = 'presses keys by itself; Krya ignores those.'
   const text = v.keyboardApps.length
     ? `Also using the keyboard: ${v.keyboardApps.join(', ')}.${v.foreignKeys ? ` One of them ${presses}` : ''}`
     : v.foreignKeys
@@ -2299,14 +2361,14 @@ function keyboardPage(v: AppView): HTMLElement[] {
     toggleCard('monitor', 'Stay off in full screen', s.quietFullScreen, quietFullScreen => save({ quietFullScreen }), 'games, presentations, videos'),
     grp('Lists'),
     navCard('keyboard', 'Layouts', ownKeys ? `the layouts the switch key goes through; ${ownKeys} with a key of their own` : 'the layouts the switch key goes through, in order', cycleOf(v).map(l => l.short).join(' · '), () => go('layouts'), 'layouts'),
-    navCard('monitor', 'Programs', 'turn parts of Altype off in a program, or give it its own layout', count(s.apps.length, 'program'), () => go('programs'), 'programs'),
-    navCard('sparkles', 'Learned words', s.learn ? 'words Altype learned from your typing' : 'learning from your typing is off', count(learnedCount, 'word'), () => go('learned'), 'learned'),
-    navCard('lock', 'Kept as typed', 'words Altype never fixes by itself', count(s.keepWords.length, 'word'), () => go('kept'), 'kept'),
+    navCard('monitor', 'Programs', 'turn parts of Krya off in a program, or give it its own layout', count(s.apps.length, 'program'), () => go('programs'), 'programs'),
+    navCard('sparkles', 'Learned words', s.learn ? 'words Krya learned from your typing' : 'learning from your typing is off', count(learnedCount, 'word'), () => go('learned'), 'learned'),
+    navCard('lock', 'Kept as typed', 'words Krya never fixes by itself', count(s.keepWords.length, 'word'), () => go('kept'), 'kept'),
     v.rivals.length ? warn(`${v.rivals.join(' and ')} ${v.rivals.length > 1 ? 'are' : 'is'} running: turn off its layout switching, or words get fixed twice.`) : null,
-    v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Altype, so nothing is fixed or switched there.`) : null,
+    v.elevatedApp ? warn(`${v.elevatedApp} runs as administrator: Windows keeps its keys from Krya, so nothing is fixed or switched there.`) : null,
     v.keyboardTrouble ? warn(`The keyboard helper: ${v.keyboardTrouble}`) : null,
     othersLine(v),
-    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Altype reads your keystrokes only to fix the layout, and sends nothing anywhere. It keeps only the words it learned, on this computer.'),
+    el('p', { class: 'privacy' }, lucide('lock', 's'), 'Krya reads your keystrokes only to fix the layout, and sends nothing anywhere. It keeps only the words it learned, on this computer.'),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -2430,7 +2492,7 @@ function updateText(u: UpdateStatus): string {
     case 'downloading':
       return 'downloading an update…'
     case 'ready':
-      return `version ${u.version} is ready: it installs when Altype quits`
+      return `version ${u.version} is ready: it installs when Krya quits`
     case 'unavailable':
       return u.message
     case 'failed':
@@ -2523,7 +2585,7 @@ function enginePage(v: AppView): HTMLElement[] {
   return out.filter((n): n is HTMLElement => n !== null)
 }
 
-/** This computer (the sidebar's Altype group): what it is, the speed test, and what speech runs on. */
+/** This computer (the sidebar's Krya group): what it is, the speed test, and what speech runs on. */
 function computerPage(v: AppView): HTMLElement[] {
   const rows = computerRows(v)
   const first = rows[0]
@@ -2531,11 +2593,107 @@ function computerPage(v: AppView): HTMLElement[] {
   return [grp('Hardware'), ...rows, testOffer(v), card('cpu', 'Graphics card', [cardNote(v)], null)].filter((n): n is HTMLElement => n !== null)
 }
 
+/** The parts of the Storage page: what each is, in plain words, the model's name in brackets at the end. */
+const STORED: Record<StorageId, { icon: LucideName; title: string; note: string }> = {
+  fast: { icon: 'languages', title: 'Fast translation', note: 'the models for your languages (Firefox Translations)' },
+  voice: { icon: 'volume-2', title: 'Natural voice', note: 'reads English aloud (Kokoro)' },
+  dict: { icon: 'book-open', title: 'Word meanings', note: 'the dictionary for your language (Wiktionary)' },
+  accurate: { icon: 'languages', title: 'Accurate model', note: 'translates and checks your English (Gemma 4 E4B)' },
+  most: { icon: 'languages', title: 'Most accurate model', note: 'translates and checks your English (Gemma 4 12B)' },
+  unused: { icon: 'database', title: 'Models no longer used', note: 'an older Krya’s translation models; nothing uses them now (TranslateGemma)' },
+  llama: { icon: 'cpu', title: 'The models’ runner', note: 'runs the models above; goes with the last of them (llama.cpp)' },
+  speech: { icon: 'audio-lines', title: 'Speech engine', note: 'Dictate and Transcribe: the program and its speech models' },
+  yours: { icon: 'file-text', title: 'Your settings and lists', note: 'words, mistakes, what Krya learned, logs' },
+  transcripts: { icon: 'folder', title: 'Transcripts', note: 'yours: the text and a small copy of the sound' },
+}
+
+/** What Krya downloaded, in MB: everything in its one folder. */
+const DOWNLOADED: readonly StorageId[] = ['fast', 'voice', 'dict', 'accurate', 'most', 'unused', 'llama', 'speech']
+const downloadsMb = (s: StorageView) => s.parts.filter(p => DOWNLOADED.includes(p.id)).reduce((mb, p) => mb + p.bytes / 1e6, 0)
+
+/** Where everything Krya keeps lives and how big it is: the downloads in one folder, each with ×; the person's own things to open. */
+function storagePage(v: AppView): HTMLElement[] {
+  const s = v.storage
+  if (!s?.parts.length) return [aside('loader', 'Measuring what Krya keeps…')]
+  const busy: Partial<Record<StorageId, boolean>> = {
+    fast: v.translation.fast.status === 'downloading',
+    voice: v.natural.status === 'downloading',
+    dict: v.dictionary.status === 'downloading',
+    accurate: v.models.accurate.status === 'downloading',
+    most: v.models.most.status === 'downloading',
+  }
+  const remove: Partial<Record<StorageId, () => void>> = {
+    fast: () => post({ type: 'removeDownload', part: 'fast' }),
+    voice: () => post({ type: 'removeDownload', part: 'voice' }),
+    dict: () => post({ type: 'removeDownload', part: 'dict' }),
+    accurate: () => post({ type: 'removeModel', model: 'accurate' }),
+    most: () => post({ type: 'removeModel', model: 'most' }),
+    unused: () => post({ type: 'removeDownload', part: 'unused' }),
+  }
+  const mb = (p: StoragePart) => p.bytes / 1e6
+  // A part still outside Krya's folder says where it is.
+  const where = (p: StoragePart) => (p.away ? pathNote(p.path) : null)
+  const line = (p: StoragePart): HTMLElement => {
+    const { icon: name, title, note } = STORED[p.id]
+    // The speech engine is removed on its own page, which asks first.
+    if (p.id === 'speech') {
+      const shared = p.shared / 1e6
+      // Files it shares with a developer's own uv (hard links): there, and not freed by removing it.
+      const freed = shared >= 100 ? `; removing it frees ${speechSize(mb(p) - shared)}, as ${speechSize(shared)} of its files are shared with other Python tools here` : ''
+      return navCard(name, title, [`${note}${freed}`, where(p)], speechSize(mb(p)), () => go('engine'), 'storage-speech')
+    }
+    const x = remove[p.id]
+    const control = x && !busy[p.id] ? ib('x', `Remove; it downloads again when needed`, x) : null
+    const open = DOWNLOADED.includes(p.id) ? null : linkBtn('Open', () => post({ type: 'openPath', path: p.path }))
+    return card(name, title, [note, where(p)], el('span', { class: 'kchg' }, el('span', { class: 'v num' }, speechSize(mb(p))), control, open))
+  }
+  const got = s.parts.filter(p => DOWNLOADED.includes(p.id) && p.bytes > 0)
+  const own = s.parts.filter(p => p.id === 'yours' || p.id === 'transcripts')
+  return [
+    oldNotice(s),
+    grp('Downloads'),
+    card(
+      'database',
+      `Everything Krya downloads: ${speechSize(downloadsMb(s))}`,
+      [`${got.some(p => p.away) ? 'in Krya’s folder, but for the parts that say where they are' : 'in one folder'} · ${speechSize(s.freeMb)} free on ${s.drive}`, pathNote(s.root)],
+      linkBtn('Open folder', () => post({ type: 'openPath', path: s.root })),
+    ),
+    ...(got.length ? got.map(line) : [aside('info', 'Nothing downloaded yet: each part downloads when you first use it.')]),
+    grp('Yours'),
+    ...own.map(line),
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
+/**
+ * Parts Krya still uses from outside its folder (the old Altype one, mostly): how much, which, why the last
+ * move left them, and Move to Krya, which stops what uses them, moves them and starts Krya again.
+ */
+function oldNotice(s: StorageView): HTMLElement | null {
+  const away = s.parts.filter(p => p.away)
+  if (!s.old || !away.length) return null
+  const total = speechSize(away.reduce((sum, p) => sum + p.bytes / 1e6, 0))
+  const inOld = away.every(p => p.path.toLowerCase().startsWith(s.old!.dir.toLowerCase()))
+  const names = away.map(p => STORED[p.id].title).join(', ')
+  return el(
+    'div',
+    { class: 'row notice old' },
+    lucide('folder'),
+    el(
+      'div',
+      { class: 'l' },
+      inOld ? `${total} still in the old Altype folder` : `${total} still outside Krya’s folder`,
+      el('small', {}, `${names}: Krya uses them from there. Moving stops the speech engine and the model, then starts Krya again`),
+      s.old.why ? el('small', { class: 'bad' }, `Not moved: ${s.old.why}`) : null,
+    ),
+    s.old.moving ? el('span', { class: 'v' }, 'Moving…') : btn('Move to Krya', () => post({ type: 'moveToKrya' }), 'primary'),
+  )
+}
+
 const languageName = (code: string) => LANGUAGES.find(l => l.code === code)?.name ?? code
 
 /** The card that opens the languages the person uses: their names. */
 function languagesCard(v: AppView): HTMLElement {
-  return navCard('globe', 'Languages you use', 'when Altype hears or reads a text, it guesses among these', myLanguages(v.settings).map(languageName).join(', '), () => go('settings', 'languages'), 'languages')
+  return navCard('globe', 'Languages you use', 'when Krya hears or reads a text, it guesses among these', myLanguages(v.settings).map(languageName).join(', '), () => go('settings', 'languages'), 'languages')
 }
 
 /** The languages the person uses: their own and English always, others added; what dictation, the translator and the screen's text are read as. */
@@ -2554,7 +2712,7 @@ function languagesPage(v: AppView): HTMLElement[] {
     ),
     grp('Languages', used.length),
     card('globe', languageName(used[0] ?? ''), ['your language · changed in Settings'], null),
-    card('globe', 'English', ['always: the language Altype teaches'], null),
+    card('globe', 'English', ['always: the language Krya teaches'], null),
     ...s.languages.map(code => card('globe', languageName(code), [], ib('x', `Remove ${languageName(code)}`, () => save({ languages: mine().filter(c => c !== code) })))),
   ]
 }
@@ -2597,7 +2755,7 @@ function settingsPage(v: AppView): HTMLElement[] {
     card(
       'languages',
       'Your language',
-      ['Altype translates into it and shows word meanings in it'],
+      ['Krya translates into it and shows word meanings in it'],
       select(
         s.native,
         v.languages.map(l => [l.name, `${l.native} · ${l.name}`]),
@@ -2605,7 +2763,7 @@ function settingsPage(v: AppView): HTMLElement[] {
       ),
     ),
     languagesCard(v),
-    grp('Altype'),
+    grp('Krya'),
     card(
       'monitor',
       'Theme',
@@ -2621,9 +2779,10 @@ function settingsPage(v: AppView): HTMLElement[] {
       ),
     ),
     toggleCard('power', 'Start with Windows', s.startWithWindows, startWithWindows => save({ startWithWindows })),
-    toggleCard('pause', 'Pause Altype', s.paused, paused => save({ paused }), 'all shortcuts and fixing stop until you turn it back on; also in the tray menu'),
+    toggleCard('pause', 'Pause Krya', s.paused, paused => save({ paused }), 'all shortcuts and fixing stop until you turn it back on; also in the tray menu'),
     keyRow('pauseKey', 'Pause or resume with a key', 'works while paused too', !v.keysOk.pause, 'pause'),
     keyRow('windowKey', 'Open this window with a key', 'from any program', !v.keysOk.window, 'house'),
+    card('rotate-ccw', 'Reset all keys', ['every shortcut back to how it came; ↺ by a key brings back just that one'], linkBtn('Reset keys', () => post({ type: 'resetKeys' }))),
     card(
       'rotate-cw',
       `Version ${v.version}${v.dev ? ' dev' : ''}`,
@@ -2631,18 +2790,15 @@ function settingsPage(v: AppView): HTMLElement[] {
       linkBtn('Check for updates', () => post({ type: 'checkUpdates' }), u.status === 'dev' || u.status === 'checking' || u.status === 'downloading'),
     ),
     toggleCard('sparkles', 'Get test versions', s.betaUpdates, betaUpdates => save({ betaUpdates }), 'try new features before they are released'),
+    grp('Backup'),
     card(
       'file-text',
-      'Settings file',
-      ['back up your settings, move them to another computer, or start over'],
-      el(
-        'span',
-        { class: 'kchg' },
-        linkBtn('Export', () => post({ type: 'exportSettings' })),
-        linkBtn('Import', () => post({ type: 'importSettings' })),
-        linkBtn('Reset', () => post({ type: 'resetSettings' })),
-      ),
+      'Back up or move to another computer',
+      ['settings, words, mistakes, what Krya learned from your typing, recent translations and phrases, in one file; models download again'],
+      el('span', { class: 'kchg' }, linkBtn('Export', () => post({ type: 'exportBackup' })), linkBtn('Import', () => post({ type: 'importBackup' }))),
     ),
+    aside('info', 'Import replaces your settings with the backup’s and adds its words and history to yours; nothing of yours is removed.'),
+    card('rotate-ccw', 'Reset all settings', ['keys, switches and lists back to how they came; your words and history stay'], linkBtn('Reset', () => post({ type: 'resetSettings' }))),
   ].filter((n): n is HTMLElement => n !== null)
 }
 
@@ -2655,8 +2811,8 @@ function aboutPage(v: AppView): HTMLElement[] {
     el(
       'div',
       { class: 'about' },
-      el('div', { class: 'mk' }, el('span', { class: 'key bigkey' }, 'alt'), el('span', { class: 'bigwm' }, 'altype')),
-      el('p', { class: 'tag' }, 'Your language. ', el('span', {}, 'Your shortcut.')),
+      el('div', { class: 'mk' }, tile(88), logo()),
+      el('p', { class: 'tag' }, 'Talk to the duck.'),
       // A run from source says when it was built, so it is never taken for the last release.
       el('p', { class: 'ver' }, `Version ${v.version}${v.dev ? ` dev, built ${v.build}` : update ? ` · ${update}` : ''} · free and open source, MIT`),
       el(
@@ -2665,18 +2821,18 @@ function aboutPage(v: AppView): HTMLElement[] {
         ...fact('made by', 'Yevhen Peshynskyi · Design automation engineer', el('br'), link('https://ikstro.com', 'ikstro.com')),
         ...fact(
           'runs offline',
-          'Firefox Translations by Mozilla · TranslateGemma by Google (Gemma Terms of Use) and Gemma 4 by Google (Apache 2.0), run by llama.cpp · Kokoro-82M by hexgrad, eSpeak NG · Windows OCR · WikDict, from Wiktionary · FrequencyWords by Hermit Dave ',
+          'Firefox Translations by Mozilla · Gemma 4 by Google (Apache 2.0), run by llama.cpp · Kokoro-82M by hexgrad, eSpeak NG · Windows OCR · WikDict, from Wiktionary · FrequencyWords by Hermit Dave ',
           el('span', { class: 'q' }, '— your text is never sent anywhere'),
         ),
         ...fact('made with', 'Inter and JetBrains Mono (SIL OFL) · Electron · VS Code icons'),
         ...fact('goes online only for', `updates, and a one-time download of each part: the translator for your language, the natural voice (${v.natural.size} MB), word meanings`),
         ...fact(
           'links',
-          link('https://github.com/ikstro/altype/releases', 'Releases and what changed'),
+          link('https://github.com/ikstro/krya/releases', 'Releases and what changed'),
           ' · ',
-          link('https://github.com/ikstro/altype', 'Source on GitHub'),
+          link('https://github.com/ikstro/krya', 'Source on GitHub'),
           ' · ',
-          link('https://github.com/ikstro/altype/blob/main/NOTICE', 'Licenses'),
+          link('https://github.com/ikstro/krya/blob/main/NOTICE', 'Licenses'),
         ),
       ),
     ),

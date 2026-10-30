@@ -24,7 +24,7 @@ export type SetupHooks = {
 }
 
 const STEPS = ['Your language', 'This computer', 'What you need', 'Download'] as const
-const CAPS = ['English is what Altype teaches', 'what speech can run on here', 'advised for this computer', 'one button, then it goes on by itself'] as const
+const CAPS = ['English is what Krya teaches', 'what speech can run on here', 'advised for this computer', 'one button, then it goes on by itself'] as const
 
 let step = 1
 let choice: Choice | undefined
@@ -105,7 +105,7 @@ function languageStep(v: AppView, h: SetupHooks): HTMLElement[] {
   const own = card(
     'languages',
     'Your language',
-    ['what Altype translates into and listens for; English is the language it teaches'],
+    ['what Krya translates into and listens for; English is the language it teaches'],
     select(
       s.native,
       v.languages.map(l => [l.name, `${l.native} · ${l.name}`]),
@@ -227,7 +227,7 @@ function needStep(v: AppView, h: SetupHooks, c: Choice, r: ReturnType<typeof rec
     advised(toggleCard('audio-lines', 'Transcribe meetings and files', c.transcribe, flip('transcribe'), `${r.transcribe.why} · ${transcribeModel.label} ${transcribeModel.downloaded ? 'here' : sizeText(transcribeModel.mb)}${c.dictate ? '' : ` + the speech engine ${sizeText(engineMb)}`}`), r.transcribe),
     c.transcribe ? advised(toggleCard('users', 'Who spoke when', c.speakers, flip('speakers'), `${r.speakers.why} · ${sizeText(s.speakers.sizes[speakersWhere(c, v)].download)}`), r.speakers) : null,
     c.transcribe && c.speakers ? speakersOnCard(v, h, c) : null,
-    grp('Altype'),
+    grp('Krya'),
     advised(toggleCard('power', 'Start with Windows', c.startWithWindows, flip('startWithWindows'), r.startWithWindows.why), r.startWithWindows),
     grp('All of it'),
     total,

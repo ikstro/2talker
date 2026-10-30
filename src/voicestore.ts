@@ -82,6 +82,13 @@ export class VoiceStore {
 
   private running: Promise<void> | undefined
 
+  /** The files deleted (the voice's process stopped first, as Windows keeps a file in use); downloaded again when wanted. Not during a download. */
+  remove(): void {
+    if (this.running || !this.files) return
+    fs.rmSync(this.options.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    this.set('absent', 0)
+  }
+
   private async fetchAll(files: VoiceFile[]): Promise<void> {
     this.set('downloading', 0)
     const total = files.reduce((n, f) => n + f.bytes, 0)

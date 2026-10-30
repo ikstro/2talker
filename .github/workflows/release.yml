@@ -33,7 +33,7 @@ jobs:
       - run: npm run test:engine
       # The draft release is made first: electron-builder uploads its files
       # in parallel and, finding none, would make a draft for each of them.
-      - run: gh release view "$env:TAG" --json id > $null 2>&1; if (-not $?) { gh release create "$env:TAG" --draft --title "Altype $($env:TAG.Substring(1))" --notes-file .github/release-notes.md }
+      - run: gh release view "$env:TAG" --json id > $null 2>&1; if (-not $?) { gh release create "$env:TAG" --draft --title "Krya $($env:TAG.Substring(1))" --notes-file .github/release-notes.md }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}

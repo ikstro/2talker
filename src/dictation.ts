@@ -4,7 +4,7 @@
 // key again stops. Then, by the key:
 //   type     the text is typed where the cursor is (through the clipboard,
 //            which is put back as it was),
-//   english  the same, translated into English first by Altype's translator,
+//   english  the same, translated into English first by Krya's translator,
 //   note     the recording goes into the knowledge base as a .md file
 //            (through the engine's library), and a balloon says where.
 // Esc while recording throws it away. Typed phrases go into the log
@@ -15,7 +15,7 @@ import * as path from 'node:path'
 import { BrowserWindow, globalShortcut, screen, shell } from 'electron'
 
 import type { DictationLog } from './dictationlog'
-import { frameWindow, WIN11 } from './dwm'
+import { frameWindow } from './dwm'
 import { log } from './log'
 import { badgeOffset, placeBadge, type Rect } from './placement'
 import type { DictationMode, ToHost, ToView } from './protocol'
@@ -35,9 +35,6 @@ const MOST_EXPECTED = 8
 export type DictationOptions = {
   page: string
   preload: string
-  background: () => string
-  /** The badge's edge, drawn by Windows 11 (dwm.ts). */
-  border: () => string
   speech: SpeechHost
   /** Types the text in the program in front, the clipboard kept. */
   paste: (text: string) => Promise<void>
@@ -100,7 +97,7 @@ export class Dictation {
   private async start(mode: DictationMode, key: string): Promise<void> {
     if (!this.o.speech.installed) return this.o.needsEngine()
     if (!this.o.speech.ready) {
-      this.o.balloon('Altype', 'The speech engine is starting. Try again in a few seconds.')
+      this.o.balloon('Krya', 'The speech engine is starting. Try again in a few seconds.')
       return
     }
     this.mode = mode
@@ -224,8 +221,8 @@ export class Dictation {
   typeAgain(): void {
     if (this.state !== 'idle' || this.opening) return
     const last = this.o.log.last()
-    if (!last) return this.o.balloon('Altype', 'Nothing dictated yet')
-    this.o.paste(`${last.text} `).catch(error => console.warn('Altype: could not type the phrase again', error))
+    if (!last) return this.o.balloon('Krya', 'Nothing dictated yet')
+    this.o.paste(`${last.text} `).catch(error => console.warn('Krya: could not type the phrase again', error))
   }
 
   clearLog(): void {
@@ -303,11 +300,16 @@ export class Dictation {
       alwaysOnTop: true,
       // The program being typed in keeps the focus, so the text lands there.
       focusable: false,
-      title: 'Altype dictation',
-      backgroundColor: this.o.background(),
+      title: 'Krya dictation',
+      // The page draws the pill itself (its 16 px corners and 1 px edge, dictation.css): the window around it is
+      // see-through, on Windows 10 and 11 alike, as DWM's own round corner is fixed at about 8 px.
+      transparent: true,
+      backgroundColor: '#00000000',
+      hasShadow: false,
       webPreferences: { preload: this.o.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, backgroundThrottling: false },
     })
-    frameWindow(b, { corner: 'round', border: this.o.border() })
+    // No edge of Windows 11's around it either: a square ghost behind the pill's round corners.
+    frameWindow(b, { corner: 'square', border: 'none' })
     b.setAlwaysOnTop(true, 'pop-up-menu')
     b.removeMenu()
     b.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -328,7 +330,7 @@ export class Dictation {
     b.webContents.on('render-process-gone', (_event, details) => log(`badge: the page's process is gone: ${details.reason}`))
     b.webContents.on('did-fail-load', (_event, code, description) => log(`badge: the page did not load: ${code} ${description}`))
     b.webContents.on('console-message', m => log(`badge page: ${m.message} (${m.sourceId}:${m.lineNumber})`))
-    void b.loadFile(this.o.page, WIN11 ? { query: { frame: 'dwm' } } : undefined)
+    void b.loadFile(this.o.page)
     log(`badge: window made, page ${this.o.page}`)
     this.badge = b
     return b
@@ -339,7 +341,7 @@ export class Dictation {
     try {
       putOnTop(handleOf(b))
     } catch (error) {
-      console.warn('Altype: Windows did not put the badge on top', error)
+      console.warn('Krya: Windows did not put the badge on top', error)
     }
   }
 
@@ -348,7 +350,7 @@ export class Dictation {
     try {
       return sightOf(handleOf(b))
     } catch (error) {
-      console.warn('Altype: could not ask Windows about the badge', error)
+      console.warn('Krya: could not ask Windows about the badge', error)
       return undefined
     }
   }
@@ -387,14 +389,6 @@ export class Dictation {
     log('badge: made again, as Windows cloaked the last one')
   }
 
-  /** The theme changed: the badge's ground and edge in its colors. */
-  reframe(): void {
-    const b = this.badge
-    if (!b || b.isDestroyed()) return
-    b.setBackgroundColor(this.o.background())
-    frameWindow(b, { corner: 'round', border: this.o.border() })
-  }
-
   /**
    * The work area of the screen holding the window in front (the one the text
    * goes into); with no window there, or one Windows gives no size, the
@@ -405,7 +399,7 @@ export class Dictation {
       const rect = windowRect(foreground().hwnd)
       if (rect) return screen.getDisplayMatching(screen.screenToDipRect(null, rect)).workArea
     } catch (error) {
-      console.warn('Altype: could not find the window in front', error)
+      console.warn('Krya: could not find the window in front', error)
     }
     return screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
   }

@@ -30,7 +30,7 @@ import numpy as np
 
 from audio import RATE
 
-log = logging.getLogger("altype.stream")
+log = logging.getLogger("krya.stream")
 
 PAUSE = 0.6  # seconds of silence that end a piece
 PAD = 0.2  # seconds of silence kept after the speech of a piece
@@ -99,7 +99,7 @@ class Session:
         self.took = 0.0
         self.touched = time.monotonic()
         self._lock = threading.Condition()
-        self._thread = threading.Thread(target=self._run, name=f"altype-session-{self.id}", daemon=True)
+        self._thread = threading.Thread(target=self._run, name=f"krya-session-{self.id}", daemon=True)
         self._thread.start()
 
     # ---------------------------------------------------------------- sound in

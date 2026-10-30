@@ -101,7 +101,7 @@ button:disabled {
   background: var(--bg);
 }
 
-/* ---- the sidebar: the mark, the search, every place in groups */
+/* ---- the sidebar: the logo, the search, every place in groups */
 .side {
   display: flex;
   flex-direction: column;
@@ -119,10 +119,14 @@ button:disabled {
   -webkit-app-region: drag;
 }
 
-.wm {
-  font: 750 17px / 1 var(--font);
-  letter-spacing: -0.03em;
-  color: var(--strong);
+.brand .logo {
+  font-size: 17px;
+  line-height: 1;
+}
+
+/* The icon stands in for the logo only in a narrow sidebar. */
+.brand .tile {
+  display: none;
 }
 
 .find {
@@ -141,8 +145,8 @@ button:disabled {
 }
 
 .find:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .find input {
@@ -243,14 +247,14 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--mark);
   animation: dot 1.6s ease-in-out infinite;
 }
 
@@ -298,8 +302,8 @@ button:disabled {
 
 .ptitle {
   display: flex;
+  flex: none;
   align-items: center;
-  min-width: 0;
   font: 600 15px / 1 var(--font);
   color: var(--strong);
   white-space: nowrap;
@@ -418,7 +422,16 @@ svg.glyph {
     padding: 0;
   }
 
-  .brand .wm,
+  .brand .tile {
+    display: block;
+  }
+
+  /* The setup's bar keeps the logo: it has no sidebar to stand in for. */
+  .top .bb .logo {
+    display: inline-flex;
+  }
+
+  .brand .logo,
   .find input,
   .find .key,
   .it .lb,
@@ -706,7 +719,7 @@ svg.glyph {
 /* A key at work lights in the accent; a press sinks it one pixel. */
 .key.lit {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 16%, var(--raised));
 }
 
@@ -717,7 +730,7 @@ svg.glyph {
 }
 
 .kg.lit .x2 {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ---------------------------------------------------------------- the moment */
@@ -798,7 +811,7 @@ svg.glyph {
   height: 44px;
   margin-left: 4px;
   border-radius: 2px;
-  background: var(--accent);
+  background: var(--mark);
 }
 
 .badge {
@@ -823,7 +836,7 @@ svg.glyph {
 
 .w.on {
   background: var(--selection);
-  box-shadow: inset 0 -3px 0 var(--accent);
+  box-shadow: inset 0 -3px 0 var(--mark);
 }
 
 .play {
@@ -841,8 +854,8 @@ svg.glyph {
 }
 
 .play.speaking {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--mark);
+  color: var(--accent-text);
 }
 
 .rail {
@@ -1115,11 +1128,21 @@ mark {
   background: color-mix(in srgb, var(--red) 7%, var(--surface));
 }
 
-/* Home's notice (Altype is paused): a card in the actions' column, above them. */
+/* Home's notice (Krya is paused): a card in the actions' column, above them. */
 .home > .row.notice {
   width: auto;
   flex: none;
   margin: 12px var(--side) -4px;
+}
+
+/* Paused is indigo, wherever it shows. */
+.row.notice.paused {
+  border-color: color-mix(in srgb, var(--paused) 60%, var(--border));
+  background: color-mix(in srgb, var(--paused) 8%, var(--surface));
+}
+
+.row.notice.paused > .lu {
+  color: var(--paused);
 }
 
 /* A card's text that is itself a button (a word to change): laid out as the text is. */
@@ -1136,7 +1159,7 @@ mark {
 }
 
 .row > button.l:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* A card that opens a page of its own: its value on the right, then the chevron. */
@@ -1358,17 +1381,18 @@ mark {
 }
 
 .link {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
 }
 
 .link:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 .link:disabled {
+  text-decoration-color: transparent;
   color: var(--muted);
   text-decoration: none;
   opacity: 0.6;
@@ -1406,15 +1430,15 @@ mark {
 
 .krec.recording {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .key.rec {
   border-style: dashed;
   border-bottom-width: 1px;
-  border-color: var(--accent);
+  border-color: var(--focus);
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 400;
 }
 
@@ -1529,7 +1553,7 @@ button.chip:hover {
 .chip.lit {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, var(--raised));
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chipctl {
@@ -1561,8 +1585,8 @@ button.chip:hover {
 }
 
 .field:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .bar {
@@ -1630,7 +1654,7 @@ button.chip:hover {
   flex: none;
   margin-top: 1px;
   font-size: 16px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .offer .ot {
@@ -1724,8 +1748,8 @@ button.chip:hover {
 }
 
 .search:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .search input {
@@ -1878,7 +1902,7 @@ button.chip:hover {
   height: 28px;
   margin: -4px -6px 0 0;
   border-radius: var(--r-sm);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .star:hover {
@@ -1897,29 +1921,18 @@ button.chip:hover {
   padding-top: 26px;
 }
 
+/* The app icon large, the text logo beside it. */
 .about .mk {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
+  /* The tile's own inset (16 of 256), so its edge meets the column's. */
+  margin-left: -5px;
 }
 
-.about .bigkey {
-  height: 56px;
-  min-width: 76px;
-  padding: 0 14px;
-  border-color: var(--strong);
-  border-bottom-width: 4px;
-  border-bottom-color: var(--muted);
-  border-radius: 12px;
-  background: var(--strong);
-  color: var(--bg);
-  font: 700 26px / 1 var(--mono);
-}
-
-.about .bigwm {
-  font: 750 56px / 1 var(--font);
-  letter-spacing: -0.045em;
-  color: var(--strong);
+.about .logo {
+  font-size: 56px;
+  line-height: 1;
 }
 
 .tag {
@@ -1927,10 +1940,6 @@ button.chip:hover {
   font: 650 26px / 1.2 var(--font);
   letter-spacing: -0.025em;
   color: var(--strong);
-}
-
-.tag span {
-  color: var(--muted);
 }
 
 .about .ver {
@@ -1962,12 +1971,13 @@ button.chip:hover {
 }
 
 .facts a {
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--accent-text);
+  text-decoration: underline 1.5px var(--link-line);
+  text-underline-offset: 3px;
 }
 
 .facts a:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 .facts .q {
@@ -2073,7 +2083,7 @@ button.chip:hover {
 }
 
 .row .l small.kstate.busy {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .kstate .codicon {
@@ -2087,7 +2097,7 @@ button.chip:hover {
   height: 11px;
   margin-top: 3px;
   border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border-top-color: var(--mark);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -2125,12 +2135,13 @@ button.chip:hover {
 }
 
 .steps a {
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--accent-text);
+  text-decoration: underline 1.5px var(--link-line);
+  text-underline-offset: 3px;
 }
 
 .steps a:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 .kline {
@@ -2154,7 +2165,7 @@ button.chip:hover {
 }
 
 .zone:hover {
-  border-color: var(--accent);
+  border-color: var(--focus);
   background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
@@ -2246,7 +2257,7 @@ button.chip:hover {
   align-items: center;
   gap: 10px;
   padding: 36px 54px;
-  border: 1.5px dashed var(--accent);
+  border: 1.5px dashed var(--focus);
   border-radius: var(--r-md);
   background: var(--surface);
   color: var(--strong);
@@ -2255,7 +2266,7 @@ button.chip:hover {
 
 .drop .codicon {
   font-size: 30px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Short messages: the layout badge's inverted pill, at the bottom. */
@@ -2472,7 +2483,7 @@ li + li > .ti::before {
 
 .ttitle:focus {
   background: var(--raised);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--focus);
 }
 
 .tmeta {
@@ -2671,7 +2682,7 @@ li + li > .ti::before {
 }
 
 .sp-4 {
-  --sp: var(--orange);
+  --sp: var(--teal);
 }
 
 .sp-5 {
@@ -2755,7 +2766,7 @@ li + li > .ti::before {
 }
 
 .at:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .ub {
@@ -2796,7 +2807,7 @@ li + li > .ti::before {
 
 .ut:focus {
   background: var(--raised);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--focus);
 }
 
 /* The sound under the text, held at the page's bottom edge. */
@@ -2875,4 +2886,26 @@ li + li > .ti::before {
   .toast {
     animation: none;
   }
+}
+
+/* A size on the Storage page: a number, so mono. */
+.row .v.num {
+  max-width: none;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* ↺ beside × on a key: the pull to the edge is taken once. */
+.kx + .kx {
+  margin-left: 0;
+}
+
+/* Storage: parts still in the old Altype folder, and Move to Krya. Amber, as what waits for the person. */
+.row.notice.old {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface));
+}
+
+.row.notice.old > .lu {
+  color: var(--amber);
 }

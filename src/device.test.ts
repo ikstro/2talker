@@ -6,15 +6,15 @@ import { describe, expect, it } from 'vitest'
 
 import {
   fingerprint,
-  loadLevelSpeeds,
+  loadModelSpeeds,
   mainCard,
   median,
-  nextLevelSpeed,
+  nextModelSpeed,
   nextVoiceSpeed,
   parseNvidiaSmi,
   parseWindows,
   quickProfile,
-  saveLevelSpeeds,
+  saveModelSpeeds,
   saveProfile,
   vendorOf,
   withNvidia,
@@ -93,13 +93,15 @@ describe('device profile', () => {
     expect(v!.rtf).toBeGreaterThan(1.1)
   })
 
-  it('keeps the latest translation times; their median sets aside one slow first run', () => {
-    let s = nextLevelSpeed(undefined, { sentence: 9.5, start: 7.5 })
-    expect(s).toEqual({ sentence: [9.5], start: [7.5] })
-    for (const sentence of [0.3, 0.35, 0.3]) s = nextLevelSpeed(s, { sentence })
+  it('keeps a model’s latest times; their median sets aside one slow first run', () => {
+    let s = nextModelSpeed(undefined, { sentence: 9.5, start: 7.5 })
+    expect(s).toEqual({ sentence: [9.5], text: [], start: [7.5] })
+    for (const sentence of [0.3, 0.35, 0.3]) s = nextModelSpeed(s, { sentence })
+    s = nextModelSpeed(s, { text: 0.7 })
     expect(s.start).toEqual([7.5])
+    expect(s.text).toEqual([0.7])
     expect(median(s.sentence)).toBeCloseTo(0.325, 5)
-    for (let i = 0; i < 12; i++) s = nextLevelSpeed(s, { sentence: 0.4, start: 3 })
+    for (let i = 0; i < 12; i++) s = nextModelSpeed(s, { sentence: 0.4, start: 3 })
     expect(s.sentence).toHaveLength(9)
     expect(median(s.start)).toBe(3)
     expect(median([])).toBeUndefined()
@@ -111,11 +113,14 @@ describe('device profile', () => {
     try {
       const p = { ...base, gpus: [] }
       saveProfile(file, p)
-      saveLevelSpeeds(file, { accurate: { sentence: [0.3], start: [3] } })
+      saveModelSpeeds(file, { accurate: { sentence: [0.3], text: [0.7], start: [3] } })
       saveProfile(file, p)
-      expect(loadLevelSpeeds(file).accurate?.sentence).toEqual([0.3])
+      expect(loadModelSpeeds(file).accurate).toEqual({ sentence: [0.3], text: [0.7], start: [3] })
       saveProfile(file, { ...p, ramGb: p.ramGb + 16 })
-      expect(loadLevelSpeeds(file)).toEqual({})
+      expect(loadModelSpeeds(file)).toEqual({})
+      // 0.10.1's file: its checker's times are Accurate's (the same Gemma 4 E4B), TranslateGemma's are dropped.
+      fs.writeFileSync(file, JSON.stringify({ translate: { accurate: { sentence: [0.8], start: [2] }, check: { sentence: [0.7, 0.6], start: [3.2] } } }))
+      expect(loadModelSpeeds(file)).toEqual({ accurate: { sentence: [], text: [0.7, 0.6], start: [3.2] } })
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

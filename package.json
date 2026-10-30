@@ -1,7 +1,7 @@
 {
-  "name": "altype",
-  "productName": "Altype",
-  "version": "0.10.0",
+  "name": "krya",
+  "productName": "Krya",
+  "version": "0.11.0",
   "description": "Your language. Your shortcut. Listen to English, translate, fix keyboard layouts: offline, from any program.",
   "author": {
     "name": "Yevhen Peshynskyi",
@@ -12,7 +12,7 @@
   "main": "dist/main.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ikstro/altype"
+    "url": "https://github.com/ikstro/krya"
   },
   "scripts": {
     "build": "node esbuild.mjs",

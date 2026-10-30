@@ -33,7 +33,7 @@ const main = {
   entryPoints: ['src/main.ts'],
   external: ['electron', 'koffi', 'electron-updater'],
   outfile: 'dist/main.js',
-  define: { ALTYPE_BUILD: JSON.stringify(buildStamp()) },
+  define: { KRYA_BUILD: JSON.stringify(buildStamp()) },
 }
 
 /** @type {import('esbuild').BuildOptions} */

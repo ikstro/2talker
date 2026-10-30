@@ -1,10 +1,11 @@
-/* Altype's materials, shared by every page (the app window, the card, the tray
+/* Krya's materials, shared by every page (the app window, the card, the tray
    panel, the badges): the neutral colors of standard settings (Windows 11's
-   grays, a plain blue), picked by `prefers-color-scheme` (which
-   nativeTheme.themeSource sets from the theme setting); Inter for all text and
-   JetBrains Mono only for keys, times and numbers, both bundled (fonts/, OFL);
-   radii; the keycap every key is drawn with. The --vscode-* names the card's
-   styles first came with point at the same colors. */
+   grays) with Krya's duck yellow for the accent (2026-10-30), picked by
+   `prefers-color-scheme` (which nativeTheme.themeSource sets from the theme
+   setting); Inter for all text and JetBrains Mono only for keys, times and
+   numbers, both bundled (fonts/, OFL); radii; the keycap every key is drawn
+   with; the logo. The --vscode-* names the card's styles first came with point
+   at the same colors. */
 
 @font-face { font-family: 'Inter'; src: url('fonts/inter-latin.woff2') format('woff2'); font-weight: 100 900; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-21FF, U+2212, U+2215, U+2318, U+2325, U+2387, U+238B, U+23CE; }
 @font-face { font-family: 'Inter'; src: url('fonts/inter-cyrillic.woff2') format('woff2'); font-weight: 100 900; unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
@@ -25,23 +26,44 @@ html {
   --text: #1b1b1b;
   --strong: #0f0f0f;
   --muted: #616161;
-  /* the accent and the states */
-  --accent: #0067c0;
-  --accent-hover: #005fb8;
-  --on-accent: #ffffff;
+  /* The accent, duck yellow: a fill (a button, a switch, a bar) with dark ink
+     on it. Yellow cannot be text on a light ground, and a darker yellow reads
+     brown (the owner, 2026-10-30: no dirty colour on light), so on light the
+     accent never turns into text: where the accent is text (a lit key, a
+     pressed button, a live value) --accent-text is the ink, the yellow staying
+     as a fill, a border or a tint beside it; an inline link is the ink with
+     --link-line under it; a field's focus and the focus ring are the ink
+     (--focus), as Windows 11 draws focus in light; a mark that only has to be
+     seen (the dictation wave, a spinner, the word being read, a pulsing dot)
+     is --mark, the logo's duck. An action that must stand out is the yellow
+     fill with --on-accent. */
+  --accent: #f7c700;
+  --accent-hover: #e3b500;
+  --on-accent: #1a1500;
+  --accent-text: #0f0f0f;
+  --link-line: #f2a100;
+  --mark: #f2a100;
+  /* The logo's duck (')>: marigold on light, a logo needs no text contrast. */
+  --duck: #f2a100;
   --green: #0f7b0f;
   --red: #c42b1c;
-  --orange: #9d5d00;
-  /* the speakers' colors and the card's few tints */
-  --blue: var(--accent);
-  --blue-deep: var(--accent-hover);
+  /* Recording: the one red of a recorder's light, the tray's record dot's too (scripts/icons.mjs RECORD); --red stays for faults. */
+  --rec: #e81123;
+  /* Paused: a cool indigo, far from the warm accent, green and red (5.12:1 on --bg). */
+  --paused: #5a5fb0;
+  /* the speakers' colors and the card's few tints. Amber is a mark only (dictation's waiting dot,
+     Storage's old-folder notice), never text: a dark enough amber for text reads brown. Teal is speaker 4 (4.69:1 on --bg). */
+  --amber: #e8a000;
+  --teal: #0b7a70;
+  --blue: #0067c0;
+  --blue-deep: #005fb8;
   --sky: #2f80d0;
   --lilac: #7a5bc7;
   --coral: #c7503a;
   --coral-soft: #e0785f;
   /* roles */
-  --focus: #0067c0;
-  --selection: rgba(0, 103, 192, 0.16);
+  --focus: #0f0f0f;
+  --selection: rgba(247, 199, 0, 0.32);
   --hover: rgba(0, 0, 0, 0.04);
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
 }
@@ -59,20 +81,28 @@ html {
     --text: #e8e8e8;
     --strong: #ffffff;
     --muted: #9e9e9e;
-    --accent: #4cc2ff;
-    --accent-hover: #60cdff;
-    --on-accent: #0b1a26;
+    /* On the dark ground the yellow is text, link, focus and mark as it is (11.54:1 on --bg); a link is underlined only under the pointer. */
+    --accent: #ffd60a;
+    --accent-hover: #ffe14d;
+    --on-accent: #1a1500;
+    --accent-text: #ffd60a;
+    --link-line: transparent;
+    --mark: #ffd60a;
+    --duck: #ffd60a;
     --green: #6ccb5f;
     --red: #ff99a4;
-    --orange: #f0b429;
-    --blue: var(--accent);
-    --blue-deep: var(--accent-hover);
+    --rec: #e81123;
+    --paused: #a9b1f5;
+    --amber: #f0b429;
+    --teal: #5ccfc3;
+    --blue: #4cc2ff;
+    --blue-deep: #60cdff;
     --sky: #7cc4ff;
     --lilac: #c4a7f5;
     --coral: #f08a72;
     --coral-soft: #f4a08c;
-    --focus: #4cc2ff;
-    --selection: rgba(76, 194, 255, 0.22);
+    --focus: #ffd60a;
+    --selection: rgba(255, 214, 10, 0.24);
     --hover: rgba(255, 255, 255, 0.06);
     --shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
   }
@@ -104,7 +134,7 @@ html {
   --vscode-editor-background: var(--surface);
   --vscode-descriptionForeground: var(--muted);
   --vscode-focusBorder: var(--focus);
-  --vscode-textLink-foreground: var(--accent);
+  --vscode-textLink-foreground: var(--accent-text);
   --vscode-widget-border: var(--border);
   --vscode-panel-border: var(--border-soft);
   --vscode-sideBar-background: var(--bg);
@@ -153,19 +183,52 @@ html {
 .key.lit {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, var(--raised));
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
-/* The mark: "alt" on a keycap turned over, so it stands out of any surface. */
-.key.mark {
-  height: 22px;
-  min-width: 30px;
-  padding: 0 5px;
-  border-color: var(--strong);
-  border-bottom-color: var(--muted);
-  background: var(--strong);
-  color: var(--bg);
+/* The logo, as text with no plate or frame: "Krya" in Inter 800, then the duck
+   (')> in JetBrains Mono 700 in the font's own spacing, the beak looking right,
+   ligatures off so )> stays two characters. Its size is the place's. */
+.logo {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+  font-family: var(--font);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--strong);
+}
+
+.logo .duck {
+  margin-left: 0.22em;
+  font-family: var(--mono);
   font-weight: 700;
+  letter-spacing: 0;
+  font-variant-ligatures: none;
+  color: var(--duck);
+}
+
+/* The duck's eye ' in the text's colour (E1): white on dark, ink on light. */
+.logo .eye {
+  color: var(--strong);
+}
+
+/* An inline link: on light the ink over a duck-yellow line, on dark the yellow itself. */
+.link,
+a.link {
+  text-decoration: underline 1.5px var(--link-line);
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* The app icon (K3) drawn in a page: its own black, white and yellow in either theme. */
+svg.tile {
+  flex: none;
+  display: block;
 }
 
 /* A Lucide icon: an outline on the 24 grid, 20 px on a card, 16 px (`.s`) in a row or a button. */

@@ -39,13 +39,14 @@
     document.documentElement.classList.toggle("dwm", new URLSearchParams(location.search).get("frame") === "dwm");
   }
 
-  // src/webview/keycaps.ts
-  function caps(hotkey, chain) {
-    const attrs = chain ? { class: "kg", "data-chain": chain } : { class: "kg" };
-    if (!hotkey) return el("span", attrs, el("span", { class: "key none" }, "not set"));
-    const twice = hotkey.endsWith("*2");
-    const parts = hotkey.replace(/\*2$/, "").split("+");
-    return el("span", attrs, ...parts.map((part) => el("span", { class: "key" }, hotkeyLabel(part))), twice ? el("span", { class: "x2" }, "\xD72") : null);
+  // src/webview/brand.ts
+  function logo() {
+    return el(
+      "span",
+      { class: "logo", "aria-label": "Krya" },
+      el("span", {}, "Krya"),
+      el("span", { class: "duck", "aria-hidden": "true" }, "(", el("span", { class: "eye" }, "'"), ")>")
+    );
   }
 
   // src/webview/lucide.ts
@@ -76,6 +77,8 @@
     "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />',
     "external-link": '<path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
     "rotate-cw": '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" />',
+    "rotate-ccw": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" />',
+    "database": '<ellipse cx="12" cy="5" rx="9" ry="3" /> <path d="M3 5V19A9 3 0 0 0 21 19V5" /> <path d="M3 12A9 3 0 0 0 21 12" />',
     "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />',
     "pause": '<rect x="14" y="3" width="5" height="18" rx="1" /> <rect x="5" y="3" width="5" height="18" rx="1" />',
     "power": '<path d="M12 2v10" /> <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />',
@@ -101,6 +104,11 @@
     "wand-sparkles": '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" /> <path d="m14 7 3 3" /> <path d="M5 6v4" /> <path d="M19 14v4" /> <path d="M10 2v2" /> <path d="M7 8H3" /> <path d="M21 16h-4" /> <path d="M11 3H9" />',
     "thumbs-up": '<path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /> <path d="M7 10v12" />',
     "loader": '<path d="M12 2v4" /> <path d="m16.2 7.8 2.9-2.9" /> <path d="M18 12h4" /> <path d="m16.2 16.2 2.9 2.9" /> <path d="M12 18v4" /> <path d="m4.9 19.1 2.9-2.9" /> <path d="M2 12h4" /> <path d="m4.9 4.9 2.9 2.9" />',
+    "pencil-line": '<path d="M13 21h8" /> <path d="m15 5 4 4" /> <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />',
+    "monitor-speaker": '<path d="M5.5 20H8" /> <path d="M17 9h.01" /> <rect width="10" height="16" x="12" y="4" rx="2" /> <path d="M8 6H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4" /> <circle cx="17" cy="15" r="1" />',
+    "scan-text": '<path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" /> <path d="M7 8h8" /> <path d="M7 12h10" /> <path d="M7 16h6" />',
+    "text-cursor": '<path d="M17 22h-1a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4h1" /> <path d="M7 22h1a4 4 0 0 0 4-4" /> <path d="M7 2h1a4 4 0 0 1 4 4" />',
+    "panel-bottom": '<rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M3 15h18" />',
     "plus": '<path d="M5 12h14" /> <path d="M12 5v14" />',
     "x": '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
     "minus": '<path d="M5 12h14" />',
@@ -124,13 +132,17 @@
   dwmFlag();
   var post = (message) => window.tutorHost.post(message);
   var root = document.getElementById("root");
+  function keyText(hotkey) {
+    const twice = hotkey.endsWith("*2");
+    return el("span", { class: "kt" }, `${hotkeyLabel(hotkey.replace(/\*2$/, ""))}${twice ? " \xD72" : ""}`);
+  }
   function command(id, icon, label, run, hotkey = "") {
     return el(
       "button",
       { class: "cmd", "data-nav": true, "data-id": id, onclick: () => post({ type: "tray", command: run }) },
       lucide(icon, "s"),
       el("span", { class: "l" }, label),
-      hotkey ? caps(hotkey) : null
+      hotkey ? keyText(hotkey) : null
     );
   }
   function toggle(id, icon, label, on) {
@@ -155,6 +167,75 @@
       knob
     );
     return row;
+  }
+  var keep = { mode: "row" };
+  var waiting;
+  var keepTimer;
+  var KEPT_MS = 1500;
+  function keepRow(v) {
+    if (keep.mode === "kept")
+      return el("div", { class: "cmd kept", "data-id": "keepWord", role: "status" }, lucide("check", "s"), el("span", { class: "l" }, `Kept: ${keep.word}`));
+    return el(
+      "button",
+      { class: "cmd", "data-nav": true, "data-id": "keepWord", title: "Never fix this word by itself (Kept as typed)", onclick: () => openKeep(v) },
+      lucide("lock", "s"),
+      el("span", { class: "l" }, "Keep a word as typed\u2026")
+    );
+  }
+  function openKeep(v) {
+    const row = root.querySelector('[data-id="keepWord"]');
+    if (!row) return;
+    keep = { mode: "field" };
+    const note = v.keep.word && v.keep.fixed ? el("span", { class: "kt keep-note", title: `${v.keep.word} \u2192 ${v.keep.fixed}` }, `\u2192 ${v.keep.fixed}`) : null;
+    const field = el("input", {
+      class: "keep-field",
+      type: "text",
+      value: v.keep.word,
+      placeholder: "a word, as you type it",
+      "aria-label": "Keep a word as typed",
+      spellcheck: "false",
+      autocomplete: "off"
+    });
+    field.addEventListener("input", () => note?.remove());
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        const word = field.value.trim().toLowerCase();
+        if (!word) return closeKeep();
+        post({ type: "keepWord", word });
+        keep = { mode: "kept", word };
+        redraw();
+        window.clearTimeout(keepTimer);
+        keepTimer = window.setTimeout(() => {
+          keep = { mode: "row" };
+          redraw();
+        }, KEPT_MS);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeKeep(true);
+      } else event.stopPropagation();
+    });
+    field.addEventListener("blur", () => {
+      if (keep.mode === "field") closeKeep();
+    });
+    const edit = el("div", { class: "cmd keep-edit", "data-id": "keepWord" }, lucide("lock", "s"), field, note);
+    row.replaceWith(edit);
+    field.focus();
+    field.select();
+  }
+  function closeKeep(refocus = false) {
+    keep = { mode: "row" };
+    if (waiting) return redraw();
+    const edit = root.querySelector('[data-id="keepWord"]');
+    if (edit && last) edit.replaceWith(keepRow(last));
+    if (refocus) focusRow(root.querySelector('[data-id="keepWord"]'));
+  }
+  function redraw() {
+    const v = waiting ?? last;
+    waiting = void 0;
+    if (v) render(v);
   }
   function pauseButton(paused) {
     return el(
@@ -188,11 +269,13 @@
         return null;
     }
   }
+  var last;
   function render(v) {
+    last = v;
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.id : void 0;
     const openApp = () => post({ type: "tray", command: "open" });
     const version = el("span", { class: "ver", title: `Built ${v.build}` }, v.dev ? `${v.version} dev` : v.version);
-    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Altype", onclick: openApp }, el("span", { class: "key mark" }, "alt"), el("span", { class: "wm" }, "altype"), version);
+    const brand = el("button", { class: "brand", tabindex: "-1", title: "Open Krya", onclick: openApp }, logo(), version);
     const open = el("button", { class: "open", "data-nav": true, "data-id": "open", onclick: openApp }, "Open");
     const panel = el(
       "div",
@@ -202,19 +285,20 @@
         "Actions",
         command("listenCopied", "volume-2", "Listen to the copied text", "listenCopied", v.keys.listenCopied),
         command("translateCopied", "languages", "Translate the copied text", "translateCopied"),
-        command("typeToTranslate", "type", "Type to translate\u2026", "typeToTranslate"),
-        command("checkEnglish", "graduation-cap", "Check my English\u2026", "checkEnglish"),
-        command("listenScreen", "scan", "Listen to a screen snip", "listenScreen", v.keys.snipListen),
-        command("translateScreen", "scan", "Translate a screen snip", "translateScreen", v.keys.snipTranslate),
+        command("typeToTranslate", "pencil-line", "Type to translate\u2026", "typeToTranslate", v.keys.typeToTranslate),
+        command("checkEnglish", "graduation-cap", "Check my English\u2026", "checkEnglish", v.keys.checkEnglish),
+        command("listenScreen", "monitor-speaker", "Listen to a screen snip", "listenScreen", v.keys.snipListen),
+        command("translateScreen", "scan-text", "Translate a screen snip", "translateScreen", v.keys.snipTranslate),
         v.speech.installed ? command("note", "notebook-pen", v.speech.recording ? "Save the note" : "New note", "note", v.speech.noteKey) : null,
         v.speech.installed ? command("transcripts", "file-text", "Transcripts", "transcripts") : null
       ),
       group(
         "Quick settings",
         toggle("autoFix", "spell-check", "Fix the layout as I type", v.autoFix),
+        v.keep.on ? keepRow(v) : null,
         v.keys.switch ? toggle("switchOn", "keyboard", `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
-        toggle("layoutBadge", "type", "Show the layout by the cursor", v.layoutBadge),
-        toggle("trayLayout", "keyboard", "Show the layout in the tray", v.trayLayout),
+        toggle("layoutBadge", "text-cursor", "Show the layout by the cursor", v.layoutBadge),
+        toggle("trayLayout", "panel-bottom", "Show the layout in the tray", v.trayLayout),
         toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)
       ),
       el(
@@ -226,7 +310,7 @@
       )
     );
     root.replaceChildren(panel);
-    if (focused) focusRow(root.querySelector(`[data-id="${focused}"]`));
+    if (focused) focusRow(root.querySelector(`[data-id="${focused}"][data-nav]`));
   }
   function focusRow(node) {
     if (!node) return;
@@ -261,9 +345,16 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const m = event.data;
-    if (m.type === "tray") render(m.view);
-    else if (m.type === "trayShown") {
+    if (m.type === "tray") {
+      if (keep.mode === "field") waiting = m.view;
+      else render(m.view);
+    } else if (m.type === "trayShown") {
       byKeys(false);
+      if (keep.mode !== "row") {
+        window.clearTimeout(keepTimer);
+        keep = { mode: "row" };
+        redraw();
+      }
       focusRow(root.querySelector(".cmd[data-nav]"));
     }
   });

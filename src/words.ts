@@ -62,6 +62,23 @@ export class WordStore {
     if (this.words.length !== n) this.save()
   }
 
+  /** Words from a backup: each one not here yet is added with its date; how many came. */
+  merge(list: readonly unknown[]): number {
+    const here = new Set(this.words.map(w => w.base))
+    const added = list.filter(isSavedWord).filter(w => {
+      const base = w.base.toLowerCase()
+      if (here.has(base)) return false
+      here.add(base)
+      return true
+    })
+    if (added.length === 0) return 0
+    for (const w of added) this.words.push({ ...w, base: w.base.toLowerCase(), id: this.nextId++ })
+    // Oldest first, as they were saved.
+    this.words.sort((a, b) => Date.parse(a.addedAt) - Date.parse(b.addedAt))
+    this.save()
+    return added.length
+  }
+
   removeBase(base: string): void {
     const n = this.words.length
     this.words = this.words.filter(w => w.base !== base.toLowerCase())

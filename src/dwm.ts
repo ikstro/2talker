@@ -1,6 +1,6 @@
 // Windows 11 draws a frameless window's edge itself: rounded corners and a
 // 1px border (DWM). A page that draws its own border too shows two. So on
-// Windows 11 Altype's windows take DWM's edge in Altype's colors, and the
+// Windows 11 Krya's windows take DWM's edge in Krya's colors, and the
 // pages leave theirs transparent (`html.dwm`, told by `?frame=dwm`).
 // Windows 10 knows neither attribute: the pages keep their own border there.
 
@@ -40,7 +40,7 @@ export function frameWindow(win: BrowserWindow, opts: Frame): void {
     set(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, CORNERS[opts.corner])
     set(hwnd, DWMWA_BORDER_COLOR, opts.border === 'none' ? DWMWA_COLOR_NONE : colorRef(opts.border))
   } catch (error) {
-    console.warn('Altype: Windows did not take the window frame', error)
+    console.warn('Krya: Windows did not take the window frame', error)
   }
 }
 

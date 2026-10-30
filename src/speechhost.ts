@@ -1,4 +1,4 @@
-// The speech engine as Altype holds it: the installed parts (speechpack.ts),
+// The speech engine as Krya holds it: the installed parts (speechpack.ts),
 // the running service (speechservice.ts), this computer (device.ts) with the
 // plan of which model runs where (speechplan.ts), and what the app window sees
 // of all of it (SpeechView). The service runs once a part is installed;
@@ -26,11 +26,13 @@ const RETEST_MS = 3600_000
 /** How often a model being downloaded is asked about, and how many asks it has to show as running (each ask may start it again). */
 const MODEL_PROBE_MS = 3000
 const MODEL_START_PROBES = 2
+/** How often the library is asked whether a meeting is being recorded (the engine's /health does not say). */
+const MEETING_PROBE_MS = 5000
 
 export type SpeechHostOptions = {
-  /** %LOCALAPPDATA%\Altype\speech: the environment, models, uv. */
+  /** %LOCALAPPDATA%\Krya\speech: the environment, models, uv. */
   root: string
-  /** Altype's own folder (%APPDATA%\Altype): the engine's settings and log, device.json. */
+  /** Krya's own folder (%APPDATA%\Krya): the engine's settings and log, device.json. */
   userDir: string
   engineDir: string
   extensionDir: string
@@ -54,8 +56,11 @@ export class SpeechHost {
   private pushing = false
   private autoTested = { key: '', at: 0 }
   private readonly nvidiaDriver = hasNvidia()
-  /** The extension's version in Altype's folder, which Chrome loads unpacked. */
+  /** The extension's version in Krya's folder, which Chrome loads unpacked. */
   private readonly extensionShipped: string
+  /** A meeting is being recorded through the Chrome extension now (the tray shows it). */
+  meeting = false
+  private meetingTimer: NodeJS.Timeout | undefined
 
   constructor(private readonly o: SpeechHostOptions) {
     this.profile = loadProfile(this.deviceFile) ?? quickProfile()
@@ -76,7 +81,9 @@ export class SpeechHost {
       port: o.port,
       log: path.join(o.userDir, 'speech.log'),
       pycache: path.join(o.root, 'pycache'),
-      env: o.testHome ? { ALTYPE_SPEECH_HOME: o.testHome } : {},
+      // A test run's own home (its models are still the installed engine's); else where the engine is installed:
+      // %LOCALAPPDATA%\Krya\speech, or Altype's folder when it could not move (oldfolder.ts).
+      env: o.testHome ? { KRYA_SPEECH_HOME: o.testHome } : { KRYA_SPEECH_DIR: o.root },
       change: () => this.changed(),
     })
     this.extensionShipped = shippedVersion(o.extensionDir)
@@ -91,7 +98,7 @@ export class SpeechHost {
     return path.join(this.o.userDir, 'device.json')
   }
 
-  /** At Altype's start: the service, when a part is installed; after an update brought other packages, those first. */
+  /** At Krya's start: the service, when a part is installed; after an update brought other packages, those first. */
   start(): void {
     if (this.pack.state.status !== 'ready') return
     if (this.pack.stale) void this.install([])
@@ -145,6 +152,34 @@ export class SpeechHost {
   /** Something the plan depends on changed: the plan again, sent to the engine when it differs; the window told. */
   changed(): void {
     this.replan()
+    this.watchMeetings()
+    this.o.onChange()
+  }
+
+  /**
+   * A meeting can only come from the Chrome extension, and /health says
+   * nothing of recordings: while the engine runs and the extension has said
+   * hello, the library is asked every few seconds whether a meeting's
+   * transcript is still "recording". A recording the extension left behind
+   * is finished by the engine itself within minutes (jobs.py `_housekeeping`).
+   */
+  private watchMeetings(): void {
+    const wanted = this.ready && !!this.service.health?.extension
+    if (wanted && !this.meetingTimer) this.meetingTimer = setInterval(() => void this.lookForMeeting(), MEETING_PROBE_MS)
+    if (wanted || !this.meetingTimer) return
+    clearInterval(this.meetingTimer)
+    this.meetingTimer = undefined
+    this.setMeeting(false)
+  }
+
+  private async lookForMeeting(): Promise<void> {
+    const r = await this.call<{ source: string; status: string }[]>('GET', '/transcripts')
+    if (r.ok && Array.isArray(r.data)) this.setMeeting(r.data.some(t => t.source === 'meet' && t.status === 'recording'))
+  }
+
+  private setMeeting(on: boolean): void {
+    if (on === this.meeting) return
+    this.meeting = on
     this.o.onChange()
   }
 
@@ -159,7 +194,7 @@ export class SpeechHost {
     this.autoTest()
   }
 
-  /** What the engine is told of Altype's choices: the plan, and the words to spell (vocabulary.ts). */
+  /** What the engine is told of Krya's choices: the plan, and the words to spell (vocabulary.ts). */
   private engineSettings(): { plan: SpeechPlan['engine']; vocabulary: ReturnType<typeof vocabularyFor> } {
     return { plan: this.plan.engine, vocabulary: vocabularyFor(this.o.settings()) }
   }
@@ -282,7 +317,7 @@ export class SpeechHost {
       try {
         await this.fetchModel(model)
       } catch (error) {
-        console.warn(`Altype: the speech model ${model} did not download`, error)
+        console.warn(`Krya: the speech model ${model} did not download`, error)
       }
     }
   }
@@ -327,6 +362,7 @@ export class SpeechHost {
   }
 
   dispose(): void {
+    clearInterval(this.meetingTimer)
     this.service.dispose()
   }
 }

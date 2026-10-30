@@ -1,4 +1,4 @@
-"""Altype's speech service: a local HTTP service on 127.0.0.1 for Altype, its Chrome extension and other apps.
+"""Krya's speech service: a local HTTP service on 127.0.0.1 for Krya, its Chrome extension and other apps.
 
 Run: python app.py [--port 8765]. Only this computer can reach it; a web page
 cannot call it either (see `guard`), only the app (no Origin) and the extension.
@@ -22,7 +22,7 @@ What other apps may use, and keep using:
   GET  /health                        what is installed (parts), loaded and busy, and the Chrome
                                       extension last seen ({id, version, seen} or null)
 
-Altype alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
+Krya alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
 where, made from this computer's measurements; the words to spell right and what they
 are heard as), POST /calibrate (the speed test), POST /models/<name>/download.
 """
@@ -70,7 +70,7 @@ SOURCES = ("file", "mic", "meet", "note")
 TRACKS = ("main", "mic", "tab")
 MEDIA = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mp3", ".m4a", ".wav", ".ogg", ".oga", ".opus", ".flac", ".aac", ".wma"}
 
-log = logging.getLogger("altype")
+log = logging.getLogger("krya")
 settings = Settings()
 EXTENSION_FILE = APP_DIR / "extension.json"
 
@@ -100,7 +100,7 @@ extension: dict | None = load_extension()
 
 
 def note_extension(origin: str, version: str) -> None:
-    """The extension says who it is on every call (header X-Altype-Extension: its version).
+    """The extension says who it is on every call (header X-Krya-Extension: its version).
 
     The newest sighting stays in memory; the file is written only when the id or version
     is new, as the extension pings every 15 minutes.
@@ -125,7 +125,7 @@ sessions = Sessions()
 worker.dictating = sessions.active
 # The speed test runs only while nothing else does: no transcription, no phrase being recognized.
 calibrator = Calibrator(worker.bench, lambda: worker.idle() and not _dictating.locked() and not sessions.active(), worker.unload_all, lambda: worker.activity, worker.threads)
-app = FastAPI(title="Altype speech", version=VERSION)
+app = FastAPI(title="Krya speech", version=VERSION)
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"chrome-extension://[a-p]{32}", allow_methods=["*"], allow_headers=["*"])
 
 
@@ -139,7 +139,8 @@ async def guard(request: Request, call_next):
     origin = request.headers.get("origin", "")
     if host not in ("127.0.0.1", "localhost") or (origin and not origin.startswith("chrome-extension://")):
         return JSONResponse({"detail": "forbidden"}, status_code=403)
-    version = request.headers.get("x-altype-extension", "")
+    # The extension of Altype's days (up to 0.2.1) sent X-Altype-Extension; it says hello until Chrome reloads it.
+    version = request.headers.get("x-krya-extension", "") or request.headers.get("x-altype-extension", "")
     if version.strip():
         note_extension(origin, version)
     return await call_next(request)
@@ -219,7 +220,7 @@ def _prepare() -> None:
 @app.post("/dictate/prepare")
 def prepare_dictation():
     """Loads (and the first time downloads) the dictation model in the background; /health shows how far."""
-    threading.Thread(target=_prepare, name="altype-prepare", daemon=True).start()
+    threading.Thread(target=_prepare, name="krya-prepare", daemon=True).start()
     return planned("dictation")
 
 
@@ -303,7 +304,7 @@ def open_session(body: dict = Body(default={})):
     # stream.py calls a recognizer with (sound, language, expected, before) only; strictness rides along here.
     recognize = functools.partial(_piece, strict=body.get("strict") is True)
     session = sessions.open(Session(recognize, kind, expected, language))
-    threading.Thread(target=_prepare, name="altype-prepare", daemon=True).start()
+    threading.Thread(target=_prepare, name="krya-prepare", daemon=True).start()
     return {"id": session.id, "model": planned("dictation")}
 
 
@@ -365,7 +366,7 @@ def download_model(name: str):
             except Exception:
                 log.exception("could not download %s", name)
 
-        threading.Thread(target=fetch, name=f"altype-fetch-{name}", daemon=True).start()
+        threading.Thread(target=fetch, name=f"krya-fetch-{name}", daemon=True).start()
     return asr.model_state(name)
 
 
@@ -638,7 +639,7 @@ def cancel(id: str):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=int(os.environ.get("ALTYPE_SPEECH_PORT", PORT)))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("KRYA_SPEECH_PORT") or os.environ.get("ALTYPE_SPEECH_PORT") or PORT))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     # Only a real start adopts Altscribe's folders, never an import (the tests import this module).

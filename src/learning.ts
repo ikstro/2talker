@@ -1,4 +1,4 @@
-// What Altype learned from the person's typing (the keyboard thread reports
+// What Krya learned from the person's typing (the keyboard thread reports
 // it, typist.ts), kept in learning.json in the app's folder, on this computer
 // only:
 //   fixedOnce  words fixed by hand once (the fix key, or erased and typed
@@ -6,7 +6,7 @@
 //              into; fixed by hand again, they move to
 //   alwaysFix  words fixed by themselves from then on;
 //   myWords    words of the person's, in no list, typed right three times:
-//              never fixed, and fixed into ("Фдензу" → "Altype");
+//              never fixed, and fixed into ("Лкнф" → "Krya");
 //   tally      the words on their way there, by a fingerprint only (a salted
 //              hash), never the word: how often, and the day last seen; one
 //              unseen for 30 days is forgotten.
@@ -26,6 +26,9 @@ export const TALLY_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 
 type Data = { salt: string; fixedOnce: Learned[]; alwaysFix: Learned[]; myWords: Learned[]; tally: Record<string, [number, number]> }
+
+/** The three lists of words, as a backup carries them. */
+export type LearnedLists = { fixedOnce: Learned[]; alwaysFix: Learned[]; myWords: Learned[] }
 
 /** What the keyboard thread is given of it. */
 export type LearnedConfig = { alwaysFix: Learned[]; myWords: Learned[]; tally: Record<string, number>; salt: string }
@@ -115,6 +118,29 @@ export class LearnStore {
     this.save()
   }
 
+  /** The learned words, for a backup; the fingerprints stay (salted here, words on their way). */
+  lists(): LearnedLists {
+    return { fixedOnce: [...this.data.fixedOnce], alwaysFix: [...this.data.alwaysFix], myWords: [...this.data.myWords] }
+  }
+
+  /** Learned words from a backup: a word in none of the lists here is added to its list; how many came (the keyboard thread learns of them with the next applyKeyboard). */
+  merge(lists: Partial<Record<keyof LearnedLists, unknown>>): number {
+    const known = new Set([...this.data.fixedOnce, ...this.data.alwaysFix, ...this.data.myWords].map(l => l.word))
+    let added = 0
+    for (const list of ['myWords', 'alwaysFix', 'fixedOnce'] as const) {
+      for (const l of learnedList(lists[list])) {
+        if (known.has(l.word)) continue
+        known.add(l.word)
+        this.data[list] = [...this.data[list], l]
+        added++
+      }
+    }
+    if (added === 0) return 0
+    this.data.fixedOnce = this.data.fixedOnce.slice(0, ONCE_MOST)
+    this.save()
+    return added
+  }
+
   /** Everything learned goes, the fingerprints too. */
   forget(): void {
     this.data = { salt: randomBytes(16).toString('hex'), fixedOnce: [], alwaysFix: [], myWords: [], tally: {} }
@@ -153,7 +179,7 @@ export class LearnStore {
       fs.mkdirSync(path.dirname(this.file), { recursive: true })
       fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2) + '\n', 'utf8')
     } catch (error) {
-      console.warn('Altype: could not save what it learned', error)
+      console.warn('Krya: could not save what it learned', error)
     }
   }
 }

@@ -1,11 +1,11 @@
 // Messages between the main process and the card, the small window that
 // shows one picked text or one snipped piece of the screen at a time.
 import type { DictationEntry } from './dictationlog'
-import type { DeviceProfile, LevelFit } from './hardware'
+import type { DeviceProfile } from './hardware'
 import type { WordTime } from './kokoro'
 import type { Gloss } from './lemma'
 import type { NaturalState } from './natural'
-import type { Settings, TranslationLevel } from './settings'
+import type { LlmModel, Settings, TranslationLevel } from './settings'
 import type { SpeechPackState, SpeechPart } from './speechpack'
 import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
@@ -84,7 +84,7 @@ export type CardState =
    */
   /** `mine`: the languages the person uses, put first in From and To. */
   | { status: 'text'; text: string; from: string; to: string; languages: string[]; mine?: string[]; result: TextResult; canPaste?: boolean }
-  /** Check my English: the person's text as it is (editable) and what the checker (`model`, its name) says of it; `canPaste` as a text's. */
+  /** Check my English: the person's text as it is (editable) and what the checker (`model`, its level's name: Accurate) says of it; `canPaste` as a text's. */
   | { status: 'check'; text: string; result: CheckResult; model: string; canPaste?: boolean }
   /** The snipped piece of the screen holds no text. */
   | { status: 'empty' }
@@ -117,7 +117,7 @@ export type WordHintMode = 'shift' | 'hover' | 'off'
 export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
 
 /** The app window's places: Home (always first), its action pages, and Words, Mistakes, Settings, About; 'howto' is the old name of Home. */
-export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'settings' | 'about' | 'howto'
+export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'settings' | 'storage' | 'about' | 'howto'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -188,10 +188,10 @@ export type AppView = {
   words: SavedWord[]
   update: UpdateStatus
   /** Each shortcut is registered (false: another program holds it). */
-  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean; inPlace: boolean; check: boolean; pause: boolean; window: boolean }
-  /** What Altype learned from the person's typing (learning.ts): words fixed always, words of theirs. */
+  keysOk: { snip: boolean; select: boolean; translate: boolean; text: boolean; inPlace: boolean; check: boolean; type: boolean; typeCheck: boolean; pause: boolean; window: boolean }
+  /** What Krya learned from the person's typing (learning.ts): words fixed always, words of theirs. */
   learned: { alwaysFix: Learned[]; myWords: Learned[] }
-  /** A program that runs as administrator was in front lately: its keys never reach Altype. */
+  /** A program that runs as administrator was in front lately: its keys never reach Krya. */
   elevatedApp?: string
   /** The texts translated lately, newest first (the last 10). */
   translations: TranslationEntry[]
@@ -207,7 +207,7 @@ export type AppView = {
   rivals: string[]
   /** Other programs known to watch the keyboard, running now (AutoHotkey, WhisperTyping…): no harm, named so the person knows. */
   keyboardApps: string[]
-  /** Some program pressed keys by itself since the keyboard helper started; Altype ignores those. */
+  /** Some program pressed keys by itself since the keyboard helper started; Krya ignores those. */
   foreignKeys: boolean
   speech: SpeechView
   /** The phrases dictated lately, newest first (the last 10). */
@@ -216,31 +216,46 @@ export type AppView = {
   translatorState: TranslatorState
   /** Each translation level's models for the person's language (Fast: Firefox's pair), for the Translate page. */
   translation: Record<TranslationLevel, TranslatorState>
-  /** Seconds an accurate level takes here, measured once a few translations were done: a sentence, and loading the model after it was let go. */
-  translationSpeed: Partial<Record<Exclude<TranslationLevel, 'fast'>, { sentence: number; start?: number }>>
+  /** Each local model's download, whatever the language (Check my English; never `unsupported`). */
+  models: Record<LlmModel, TranslatorState>
+  /**
+   * Seconds a local model takes here, each once measured a few times: a
+   * sentence translated, a text checked, and loading the model after it was let go.
+   */
+  modelSpeed: Partial<Record<LlmModel, { sentence?: number; text?: number; start?: number }>>
   /** The word dictionary for the person's language. */
   dictionary: { status: DictionaryStatus }
-  /**
-   * Check my English: its model (`name`, the download's state as a
-   * translator's, without `unsupported`), how it fits this computer, and its
-   * seconds here once measured: a text, and loading the model after it was let go.
-   */
-  check: { name: string; state: TranslatorState; fit: LevelFit; speed?: { text: number; start?: number } }
   /** The mistakes checked texts had, newest first (mistakes.ts). */
   mistakes: MistakeEntry[]
+  /** What Krya keeps on this computer, measured once the Storage page was opened. */
+  storage?: StorageView
 }
+
+/** A part of what Krya keeps (storage.ts): the downloads one by one, llama.cpp's builds, the speech engine, the person's own things. */
+export type StorageId = 'fast' | 'voice' | 'dict' | 'accurate' | 'most' | 'unused' | 'llama' | 'speech' | 'yours' | 'transcripts'
+/** Its place, its bytes, and how many of them are files linked from elsewhere too (a developer's uv cache), which a removal does not free. */
+export type StoragePart = { id: StorageId; path: string; bytes: number; shared: number; away?: boolean }
+/**
+ * The downloads' folder and the free space on its drive (MB); `measuring` while the parts are walked again.
+ * A download outside it (`away`: a move from the old Altype folder that could not finish) brings `old`:
+ * that folder, why the last move left the part there, and Move to Krya under way.
+ */
+export type StorageView = { measuring: boolean; root: string; drive: string; freeMb: number; parts: StoragePart[]; old?: OldFolder }
+export type OldFolder = { dir: string; why?: string; moving: boolean }
 
 /** What the tray's panel shows, sent whole whenever any of it changes. */
 export type TrayView = {
   /** The keys of its commands, hotkey.ts notation ("Control+C*2" for Ctrl+C twice); empty when there is none. */
-  keys: { listenCopied: string; snipListen: string; snipTranslate: string; switch: string }
-  /** The quick settings' switches: fixing as one types, the switch key, the badge, the layout in the tray's icon, Ctrl+C twice, Altype paused. */
+  keys: { listenCopied: string; typeToTranslate: string; checkEnglish: string; snipListen: string; snipTranslate: string; switch: string }
+  /** The quick settings' switches: fixing as one types, the switch key, the badge, the layout in the tray's icon, Ctrl+C twice, Krya paused. */
   autoFix: boolean
   switchOn: boolean
   layoutBadge: boolean
   trayLayout: boolean
   doubleCopy: boolean
   paused: boolean
+  /** "Keep a word as typed…": shown while the fixer works (fixing as one types, or the fix key on); `word` the last word fixed by itself, as typed, and `fixed` what it became (empty when none, or it is kept already). */
+  keep: { on: boolean; word: string; fixed: string }
   /** The speech engine is installed: a note can be started from here; one is being recorded now. */
   speech: { installed: boolean; recording: boolean; noteKey: string }
   /** The translator between English and the person's language (as `AppView.translator`). */
@@ -280,7 +295,7 @@ export type ToView =
   | { type: 'dictReady' }
   /** The app window's whole state. */
   | { type: 'app'; view: AppView }
-  /** Show this tab of the app window (the tray's "About Altype…"). */
+  /** Show this tab of the app window (the tray's "About Krya…"). */
   | { type: 'appTab'; tab: AppTab }
   /** The app window fills the screen or not (its button, a double click on its bar, Windows' keys): Maximize or Restore. */
   | { type: 'appWindow'; maximized: boolean }
@@ -350,25 +365,29 @@ export type ToHost =
   | { type: 'checkUpdates' }
   /** Open one of the About tab's links in the browser. */
   | { type: 'openLink'; url: string }
-  /** The app window's own buttons: it has no Windows frame. Close hides it, as Altype lives in the tray. */
+  /** The app window's own buttons: it has no Windows frame. Close hides it, as Krya lives in the tray. */
   | { type: 'window'; action: 'minimize' | 'maximize' | 'close' }
+  /** The Transcribe page's microphone recording began or ended: the tray shows it. */
+  | { type: 'micRecording'; on: boolean }
   // The tray's panel.
   | { type: 'trayReady' }
   /** The panel's content is this tall, in CSS pixels; the window follows. */
   | { type: 'trayHeight'; px: number }
   | { type: 'tray'; command: TrayCommand }
+  /** The tray's "Keep a word as typed…" field: add it to Kept as typed (the panel stays). */
+  | { type: 'keepWord'; word: string }
   /** Esc, or a click outside it. */
   | { type: 'trayClose' }
   // The speech engine; `models` are downloaded once the service runs (the setup's picks).
   | { type: 'installSpeech'; parts: SpeechPart[]; models?: string[] }
   /** The first-run setup: the translator for the person's language and its word dictionary, downloaded ahead of use. */
   | { type: 'prepareTranslator' }
-  /** The translation level picked on the Translate page: saved, and its models downloaded; a level's model deleted (Fast in its place when it was in use). */
+  /** The translation level picked on the Translate page (a model: the one model, for Check too): saved, and its models downloaded. */
   | { type: 'translationLevel'; level: TranslationLevel }
-  | { type: 'removeTranslation'; level: Exclude<TranslationLevel, 'fast'> }
-  /** Check my English's model: downloaded now (Use), or deleted. */
-  | { type: 'prepareChecker' }
-  | { type: 'removeChecker' }
+  /** The one model picked on the Check page (translation too, when it is not Fast): saved and downloaded. */
+  | { type: 'useModel'; model: LlmModel }
+  /** A model deleted (Fast in its place when it translated). */
+  | { type: 'removeModel'; model: LlmModel }
   /** Forget one kept mistake (by its time), or all of them. */
   | { type: 'forgetMistake'; at: string }
   | { type: 'clearMistakes' }
@@ -385,13 +404,20 @@ export type ToHost =
   /** Forget the phrases dictated lately; the texts translated lately. */
   | { type: 'clearDictation' }
   | { type: 'clearTranslations' }
-  /** What Altype learned from the person's typing: one word out of a list, or everything. */
+  /** What Krya learned from the person's typing: one word out of a list, or everything. */
   | { type: 'unlearn'; list: 'alwaysFix' | 'myWords'; word: string }
   | { type: 'forgetLearned' }
-  /** The settings saved as a file, read from one (the person picks it), or all back to how they came. */
-  | { type: 'exportSettings' }
-  | { type: 'importSettings' }
+  /** A backup of the settings and the libraries saved as a file, imported from one (the person picks it), or the settings all back to how they came. */
+  | { type: 'exportBackup' }
+  | { type: 'importBackup' }
   | { type: 'resetSettings' }
+  /** Every key back to how it came (after a question). */
+  | { type: 'resetKeys' }
+  /** Measure what Krya keeps (the Storage page opened); remove a download of its own, which downloads again when needed. */
+  | { type: 'storage' }
+  | { type: 'removeDownload'; part: 'fast' | 'voice' | 'dict' | 'unused' }
+  /** What is left in the old Altype folder moved into Krya's: the engine and the model's server stopped first, Krya started again after. */
+  | { type: 'moveToKrya' }
   // The dictation badge.
   | { type: 'dictationReady' }
   /** A phrase to type: the whole recording, as webm (an engine without sessions). */

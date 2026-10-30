@@ -30,10 +30,16 @@ def call(headers: dict) -> int:
 
 
 def test_the_header_with_an_extension_origin_is_recorded():
-    assert call({"origin": ORIGIN, "x-altype-extension": "0.2.0"}) == 200
+    assert call({"origin": ORIGIN, "x-krya-extension": "0.2.0"}) == 200
     assert engine.extension["id"] == "a" * 32 and engine.extension["version"] == "0.2.0"
     assert engine.health()["extension"] == engine.extension
     assert json.loads(engine.EXTENSION_FILE.read_text("utf-8"))["version"] == "0.2.0"
+
+
+def test_the_old_name_s_header_is_recorded_too():
+    # An extension of Altype's days says hello as X-Altype-Extension until Chrome reloads it.
+    assert call({"origin": ORIGIN, "x-altype-extension": "0.2.1"}) == 200
+    assert engine.extension["version"] == "0.2.1"
 
 
 def test_without_the_header_nothing_is_recorded():
@@ -43,18 +49,18 @@ def test_without_the_header_nothing_is_recorded():
 
 
 def test_a_later_ping_refreshes_the_time_but_rewrites_the_file_only_for_a_new_version(monkeypatch):
-    call({"origin": ORIGIN, "x-altype-extension": "0.2.0"})
+    call({"origin": ORIGIN, "x-krya-extension": "0.2.0"})
     first = engine.extension["seen"]
     engine.EXTENSION_FILE.write_text("{}", "utf-8")  # a stand-in: a rewrite would replace it
     monkeypatch.setattr(engine.time, "time", lambda: first + 900)
-    call({"origin": ORIGIN, "x-altype-extension": "0.2.0"})
+    call({"origin": ORIGIN, "x-krya-extension": "0.2.0"})
     assert engine.extension["seen"] == first + 900 and engine.EXTENSION_FILE.read_text("utf-8") == "{}"
-    call({"origin": ORIGIN, "x-altype-extension": "0.3.0"})
+    call({"origin": ORIGIN, "x-krya-extension": "0.3.0"})
     assert json.loads(engine.EXTENSION_FILE.read_text("utf-8"))["version"] == "0.3.0"
 
 
 def test_a_refused_request_records_nothing():
-    assert call({"origin": "https://example.com", "x-altype-extension": "0.2.0"}) == 403
+    assert call({"origin": "https://example.com", "x-krya-extension": "0.2.0"}) == 403
     assert engine.extension is None
 
 

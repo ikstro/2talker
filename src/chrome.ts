@@ -1,6 +1,6 @@
 // Chrome's own pages (chrome://extensions/) cannot be opened by a link, by
 // Windows' default browser, or by chrome.exe itself: Chrome drops a chrome://
-// address that another program hands it. So Altype opens a new Chrome window
+// address that another program hands it. So Krya opens a new Chrome window
 // and types the address into its address bar, as the person would; only into
 // that new window, and when it does not come, the page copies the address for
 // the person to paste. Where Chrome is: the App Paths key Chrome's installer
@@ -10,7 +10,7 @@ import { execFile, spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-/** The only pages a page of Altype may open in Chrome: the extensions, their keys, and one extension's card. */
+/** The only pages a page of Krya may open in Chrome: the extensions, their keys, and one extension's card. */
 export const CHROME_PAGES = ['chrome://extensions/', 'chrome://extensions/shortcuts']
 const EXTENSION_CARD = /^chrome:\/\/extensions\/\?id=[a-p]{32}$/
 
@@ -46,7 +46,7 @@ export async function findChrome(): Promise<string | undefined> {
   return candidates.find((p): p is string => !!p && fs.existsSync(p))
 }
 
-/** What became of a page asked for: typed into a new Chrome window, Chrome opened without it, no Chrome, or not a page Altype opens. */
+/** What became of a page asked for: typed into a new Chrome window, Chrome opened without it, no Chrome, or not a page Krya opens. */
 export type ChromeOpened = 'typed' | 'opened' | 'missing' | 'refused'
 
 /** What opening a page needs from Windows; main.ts gives the real ones, the tests their own. */
@@ -70,7 +70,7 @@ const sleeper = (ms: number) => new Promise<void>(resolve => setTimeout(resolve,
 
 function startDetached(exe: string, args: string[]): void {
   const child = spawn(exe, args, { detached: true, stdio: 'ignore' })
-  child.on('error', error => console.warn('Altype: Chrome would not start', error))
+  child.on('error', error => console.warn('Krya: Chrome would not start', error))
   child.unref()
 }
 
@@ -93,7 +93,7 @@ export async function openInChrome(url: string, deps: ChromeDeps): Promise<Chrom
   try {
     const exe = await (deps.find ?? findChrome)()
     if (!exe) {
-      console.warn('Altype: Chrome was not found')
+      console.warn('Krya: Chrome was not found')
       return 'missing'
     }
     const before = deps.front().hwnd
@@ -107,7 +107,7 @@ export async function openInChrome(url: string, deps: ChromeDeps): Promise<Chrom
     await deps.typeAddress(url)
     return 'typed'
   } catch (error) {
-    console.warn('Altype: Chrome would not start', error)
+    console.warn('Krya: Chrome would not start', error)
     return 'missing'
   }
 }

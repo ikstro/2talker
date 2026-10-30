@@ -1,4 +1,4 @@
-// Altype's main process. It lives in the tray and waits for a text:
+// Krya's main process. It lives in the tray and waits for a text:
 //   - Ctrl+C twice in any program, or the listen key: the selected text;
 //   - the snip key (Ctrl+Alt+S): Windows' own snipping overlay opens, and the
 //     piece of the screen it puts on the clipboard is read with the OCR built
@@ -17,7 +17,7 @@
 // The speech engine (speechhost.ts: Python, installed in parts when first
 // wanted) serves Dictate (dictation.ts), Transcribe and the Chrome extension.
 //
-// %APPDATA%\Altype\ (moved over from 2Talker's or tu-talk's folder, once)
+// %APPDATA%\Krya\ (moved over from Altype's, 2Talker's or tu-talk's folder, once: oldfolder.ts)
 //   settings.json   see settings.ts
 //   words.json      the word notebook (words.ts)
 //   dictation.json  the phrases dictated lately, 30 days at most (dictationlog.ts)
@@ -27,16 +27,18 @@
 //   dict\           word dictionaries for languages other than Russian
 //   models\         the translator's models, one folder per language pair
 //   speech.json     the speech engine's settings (engine/settings.py), speech.log
-// %LOCALAPPDATA%\Altype\speech\   the speech engine's Python, packages and models
-// %LOCALAPPDATA%\Altype\translate\   llama.cpp and the TranslateGemma models (Accurate, Most accurate)
+// %LOCALAPPDATA%\Krya\ (moved over from Altype's, once; a part that could not move is used there)
+// %LOCALAPPDATA%\Krya\speech\   the speech engine's Python, packages and models
+// %LOCALAPPDATA%\Krya\translate\   llama.cpp and the Gemma 4 models (Accurate, Most accurate)
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
 
+import { backupSummary, makeBackup, readBackup, type BackupRead } from './backup'
 import { createChecker, type Checker } from './checker'
 import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
@@ -47,31 +49,32 @@ import { DOWNLOADABLE, DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { frameWindow, WIN11 } from './dwm'
 import { createTranslator, NATIVES } from './engine'
-import { checkAdvice, translationAdvice } from './hardware'
+import { translationAdvice } from './hardware'
 import { hotkeyLabel, isAccelerator } from './hotkey'
 import { FIX_LANGUAGES, KeyboardHelper, keyboardLayouts } from './keyboard'
-import { loadLevelSpeeds, loadVoiceSpeed, median, nextLevelSpeed, nextVoiceSpeed, saveLevelSpeeds, saveVoiceSpeed, type LevelSpeeds, type VoiceSpeed } from './device'
+import { driveOf, freeMb, loadModelSpeeds, loadVoiceSpeed, median, nextModelSpeed, nextVoiceSpeed, saveModelSpeeds, saveVoiceSpeed, type ModelSpeeds, type VoiceSpeed } from './device'
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { LearnStore } from './learning'
 import { lookup, type Dictionary } from './lemma'
 import { LlamaServer } from './llama'
-import { createLlmFiles, LLM_MODELS, type LlmFiles } from './llmfiles'
-import { createLlmTranslators, type LlmLevel, type LlmTranslators } from './llmtranslator'
+import { createLlmFiles, llmPaths, type LlmFiles } from './llmfiles'
+import { createLlmTranslators, type LlmTranslators } from './llmtranslator'
 import { MistakeStore } from './mistakes'
 import { log, logTo } from './log'
 import { systemVoiceName, type NaturalState } from './natural'
 import { recognize } from './ocr'
 import { pickLines } from './ocrpick'
-import { adoptOldFolders } from './oldfolder'
+import { adoptLocalFolder, adoptOldFolders, freeFolder, hasToMove, leftIn, moveDownloads, partDir, removeOldUpdaterCaches, type LeftPart, type Warn } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
-import type { AppTab, AppView, CardKind, CardState, CheckResult, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
+import type { AppTab, AppView, CardKind, CardState, CheckResult, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, StorageId, StoragePart, StorageView, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { englishHtml, textOutHtml, translationHtml } from './render'
-import { CARD_WIDTH, DEFAULTS, myLanguages, normalize, TARGET, type Settings } from './settings'
+import { addKept, CARD_WIDTH, DEFAULTS, keptForm, LEVEL_NAMES, myLanguages, normalize, TARGET, type LlmModel, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
 import { SPEECH_PORT } from './speechservice'
+import { markAway, measureParts, type Place } from './storage'
 import { NaturalSpeaker } from './synth'
 import { englishReady, languageOf, plainText, splitText, targetFor, translateLines, translatePairs, translatePlain, type LanguageWords } from './translate'
 import { TranslationLog } from './translationlog'
@@ -80,7 +83,7 @@ import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
 import { wordDiff } from './worddiff'
-import { focus, focusedElement, release } from './uia'
+import { focus, focusedElement, release, selectedText } from './uia'
 import { allowForeground, ctrlHeld, handleOf, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard, watchRendering } from './winclip'
 import {
   readers as clipboardReaders,
@@ -104,9 +107,11 @@ const MAX_TEXT_CHARS = 6000
 const SNIP_WAIT_MS = 120_000
 /** Programs put a copy on the clipboard in steps; it is read once they are done. */
 const SETTLE_MS = 60
-/** How long after the selection shortcut presses Ctrl+C its copy may come. */
-const SELECT_WAIT_MS = 600
-/** How long after Altype's own write to the clipboard a change is still taken for that write. */
+/** How long after Krya presses Ctrl+C the program's copy may come: a busy VS Code (Claude writing an answer) takes over half a second. */
+const COPY_WAIT_MS = 2000
+/** No copy by then: the field's selection is read through UI Automation instead (Claude's question box in VS Code never answers Ctrl+C). */
+const UIA_WAIT_MS = 600
+/** How long after Krya's own write to the clipboard a change is still taken for that write. */
 const OWN_CLIPBOARD_MS = 300
 /** A selection converted into another layout is selected again up to this long. */
 const RESELECT_MOST = 400
@@ -126,12 +131,12 @@ const KEYBOARD_APPS: Record<string, string> = {
   'logioptionsplus_agent.exe': 'Logitech Options+',
 }
 /** The tray's panel: its width; a click on the tray icon this soon after the panel hid on that click's blur only closes it. */
-const TRAY_WIDTH = 340
+const TRAY_WIDTH = 360
 const TRAY_REOPEN_MS = 300
 /** Ctrl+C pressed twice, as a card's header draws the key that called it. */
 const DOUBLE_COPY = 'Control+C*2'
 /** The settings that are keys of actions. */
-const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'inPlaceKey', 'checkKey', 'switchKey', 'fixKey', 'pauseKey', 'windowKey']
+const ACTION_KEYS: readonly (keyof Settings)[] = ['selectKey', 'snipKey', 'translateKey', 'textKey', 'inPlaceKey', 'checkKey', 'typeKey', 'typeCheckKey', 'switchKey', 'fixKey', 'pauseKey', 'windowKey']
 /** The settings the keyboard thread is given (besides the keys). */
 const KEYBOARD_SETTINGS: readonly (keyof Settings)[] = [
   'layouts',
@@ -156,9 +161,9 @@ const KEYBOARD_SETTINGS: readonly (keyof Settings)[] = [
 /** The links the About tab may open. */
 const LINKS = new Set([
   'https://ikstro.com',
-  'https://github.com/ikstro/altype',
-  'https://github.com/ikstro/altype/releases',
-  'https://github.com/ikstro/altype/blob/main/NOTICE',
+  'https://github.com/ikstro/krya',
+  'https://github.com/ikstro/krya/releases',
+  'https://github.com/ikstro/krya/blob/main/NOTICE',
   // The steps to the speakers' model: an account, the model's terms, a Read token.
   'https://huggingface.co/join',
   'https://huggingface.co/pyannote/speaker-diarization-community-1',
@@ -168,18 +173,26 @@ const LINKS = new Set([
 /** The settings that are Dictate's keys: registered only once the speech engine is installed. */
 const DICTATION_KEYS: readonly (keyof Settings)[] = ['dictateKey', 'englishKey', 'noteKey', 'againKey', 'practiceKey']
 
-// One Altype at a time, whichever folder it keeps its things in: the lock is taken on Altype's own
+// One Krya at a time, whichever folder it keeps its things in: the lock is taken on Krya's own
 // folder first, before a test run moves to its own. A second copy (another start, `npm start`, a test
 // run) hands its arguments to the first and quits; the first opens its window.
 const theOnlyOne = app.requestSingleInstanceLock()
-// A test run (ALTYPE_TEST_HOME) keeps to its own folders and port; the installed Altype is quit first.
-const TEST_HOME = process.env.ALTYPE_TEST_HOME
+// A test run (KRYA_TEST_HOME; ALTYPE_TEST_HOME, the old name, still read) keeps to its own folders and port; the installed Krya is quit first.
+const TEST_HOME = process.env.KRYA_TEST_HOME || process.env.ALTYPE_TEST_HOME || undefined
 if (TEST_HOME) app.setPath('userData', TEST_HOME)
-const speechPort = TEST_HOME ? Number(process.env.ALTYPE_TEST_PORT) || 8797 : SPEECH_PORT
+const speechPort = TEST_HOME ? Number(process.env.KRYA_TEST_PORT || process.env.ALTYPE_TEST_PORT) || 8797 : SPEECH_PORT
 
 const userDir = () => app.getPath('userData')
-/** %LOCALAPPDATA%\Altype: what is big and downloaded (the speech engine, the translation models), never roamed. */
-const localDir = () => TEST_HOME ?? path.join(process.env.LOCALAPPDATA ?? path.join(app.getPath('appData'), '..', 'Local'), 'Altype')
+const localAppData = () => process.env.LOCALAPPDATA ?? path.join(app.getPath('appData'), '..', 'Local')
+/** %LOCALAPPDATA%\Krya: what is big and downloaded (the speech engine, the translation models), never roamed. */
+const localDir = () => TEST_HOME ?? path.join(localAppData(), 'Krya')
+/** %LOCALAPPDATA%\Altype, the old name's folder: a part that could not move out of it is used there (oldfolder.ts adoptLocalFolder). */
+const oldLocalDir = () => path.join(localAppData(), 'Altype')
+const oldLocalDirs = () => (TEST_HOME ? [] : [oldLocalDir()])
+/** A part of localDir (speech, translate), or the old folder's when it is still there. */
+const localPart = (name: string) => partDir(name, localDir(), ...oldLocalDirs())
+/** A download's folder (the Firefox models, the voice, the word meanings): in localDir, beside the rest (oldfolder.ts moveDownloads); else where its move left it. */
+const downloads = (name: string) => partDir(name, localDir(), ...oldLocalDirs(), userDir())
 const settingsFile = () => path.join(userDir(), 'settings.json')
 /** A file the packaged app keeps outside its archive: the workers run as separate processes. */
 const unpacked = (...parts: string[]) => path.join(app.getAppPath(), ...parts).replace(/app\.asar([\\/])/, 'app.asar.unpacked$1')
@@ -207,9 +220,9 @@ let snipSince = 0
 /** What the snip is for: the card to listen to, or the translator; the key that asked for it. */
 let snipFor: Purpose = 'listen'
 let snipVia: string | undefined
-/** Altype is using the clipboard itself (converting a selection, pasting, putting it back): its changes are no requests. */
+/** Krya is using the clipboard itself (converting a selection, pasting, putting it back): its changes are no requests. */
 let clipboardBusy = false
-/** What the person had on the clipboard, kept while Altype borrows it and put back after; the card's window owns Altype's writes. */
+/** What the person had on the clipboard, kept while Krya borrows it and put back after; the card's window owns Krya's writes. */
 const clipGuard = new ClipboardGuard<ClipboardSnapshot>({
   sequence: clipboardSequence,
   snapshot: () => clipboardSnapshot(clipboardOwner()),
@@ -227,7 +240,7 @@ const copies = new DoubleCopy()
 let appWin: BrowserWindow | undefined
 let appReady = false
 let quitting = false
-let keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, pause: true, window: true }
+let keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, type: true, typeCheck: true, pause: true, window: true }
 let speechKeysOk = { dictate: true, note: true, english: true, again: true, practice: true }
 let speech: SpeechHost
 let dictation: Dictation
@@ -236,7 +249,7 @@ let balloonClick: (() => void) | undefined
 let keyboard: KeyboardHelper
 let keyboardTrouble: string | undefined
 let lastApp: string | undefined
-/** A program run as administrator was in front lately: Windows keeps its keys from Altype's hooks. */
+/** A program run as administrator was in front lately: Windows keeps its keys from Krya's hooks. */
 let elevatedApp: string | undefined
 /** The layout in front and Caps Lock, for the tray's icon (when it shows the layout). */
 let frontLayout: { layout: string; caps: boolean } | undefined
@@ -247,15 +260,19 @@ let keyboardApps: string[] = []
 let foreignKeys = false
 let trayPanel: BrowserWindow | undefined
 let trayReady = false
-let trayHeight = 320
+let trayHeight = 600
+/** The last word fixed by itself, as typed and as fixed, for the tray's "Keep a word as typed…"; kept in memory only. */
+let lastAutoFix: { word: string; fixed: string } | undefined
 let trayShownAt = 0
 let trayHiddenAt = 0
+/** The Transcribe page records from the microphone (its `micRecording` message): the tray shows the red dot. */
+let micRecording = false
 /**
  * A selection key pressed Ctrl+C: the next copy is the selection, shown by
  * the pointer to listen to or translate, and the window it was selected in
  * (the clipboard as it was is kept by `clipGuard`).
  */
-let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; field: unknown; via?: string } | undefined
+let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; field: unknown; via?: string; exe: string } | undefined
 /** A selection key found nothing copied: a copy that still comes this soon after, with Ctrl up (not the person's own Ctrl+C), is the program's late answer and is taken back. */
 let lateCopyUntil = 0
 const LATE_COPY_MS = 1500
@@ -291,9 +308,62 @@ function systemNative(): string {
   return defaultNative([app.getLocale(), ...app.getPreferredSystemLanguages()], TARGET)
 }
 
-/** The app was called tu-talk at first: its settings, translator and voice move over, once. */
-function adoptOldFolder(): void {
-  adoptOldFolders(app.getPath('appData'), userDir(), (message, error) => console.warn(message, error))
+/**
+ * The app was called Altype until 0.11, 2Talker and tu-talk before: its things move over once,
+ * %APPDATA%'s item by item, %LOCALAPPDATA%'s whole when it can (the speech engine's Python set right
+ * for its new place). A test run keeps to its own folder and moves nothing. Returns what moved, for the log.
+ */
+function adoptOldFolder(): Moved {
+  if (TEST_HOME) return { moved: [], stopped: [], left: [] }
+  const warn = (message: string, error: unknown) => console.warn(message, error)
+  const moved = adoptOldFolders(app.getPath('appData'), userDir(), warn)
+  const local = moveLocalFolder()
+  if (app.isPackaged) removeOldUpdaterCaches(localAppData(), warn)
+  return { ...local, moved: [...moved, ...local.moved] }
+}
+
+/** What a move from the old folders did: what moved, the programs stopped to let go of its files, what stayed and why. */
+type Moved = { moved: string[]; stopped: string[]; left: LeftPart[] }
+
+/**
+ * %LOCALAPPDATA%\Altype into Krya's folder (oldfolder.ts adoptLocalFolder), and the downloads from %APPDATA%\Krya
+ * (moveDownloads). Programs run from inside the old folder (the speech engine's Python, llama-server, left by Altype
+ * or a run from source) keep its files in use, so they are stopped first, only while it holds something to move.
+ */
+function moveLocalFolder(): Moved {
+  const old = oldLocalDir()
+  const errors = new Map<string, unknown>()
+  const warn: Warn = (message, error, from) => {
+    console.warn(message, error)
+    if (from) errors.set(path.basename(from), error)
+  }
+  const freed = hasToMove(old, localDir()) ? freeFolder(old, undefined, warn) : { stopped: [], holding: [] }
+  const moved = adoptLocalFolder(old, localDir(), warn).map(name => `local/${name}`)
+  moved.push(...moveDownloads(userDir(), localDir(), warn).map(name => `downloads/${name}`))
+  const left = leftIn(old, localDir(), errors, freed.holding)
+  leftOld = left
+  return { moved, stopped: freed.stopped.map(p => `${p.name} (${p.pid})`), left }
+}
+
+/** What the last move left in the old Altype folder and why: the Storage page says it beside Move to Krya. */
+let leftOld: LeftPart[] = []
+
+/** The log's lines for a move: what was stopped for it, what stayed in the old folder and why. */
+function logMoved(r: Moved): void {
+  if (r.moved.length) log(`moved over from the old folders: ${r.moved.join(', ')}`)
+  if (r.stopped.length) log(`stopped to free ${oldLocalDir()}: ${r.stopped.join(', ')}`)
+  if (r.left.length) log(`left in ${oldLocalDir()}: ${r.left.map(p => `${p.name} (${p.why})`).join(', ')}`)
+}
+
+/** The old name's program still running (Altype.exe, an older install): its folders are in use, so this start gives way. */
+function oldAppRunning(): boolean {
+  if (TEST_HOME || !fs.existsSync(path.join(app.getPath('appData'), 'Altype', 'settings.json'))) return false
+  try {
+    const out = execFileSync('tasklist.exe', ['/FI', 'IMAGENAME eq Altype.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    return /"Altype\.exe"/i.test(out)
+  } catch {
+    return false
+  }
 }
 
 function readSettings(): Settings {
@@ -310,7 +380,7 @@ function saveSettings(patch: Partial<Settings>): void {
     fs.mkdirSync(userDir(), { recursive: true })
     fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2) + '\n', 'utf8')
   } catch (error) {
-    console.warn('Altype: could not save the settings', error)
+    console.warn('Krya: could not save the settings', error)
   }
   if ('startWithWindows' in patch) applyLoginItem()
   // A key may be Electron's or the keyboard thread's (hotkey.ts isAccelerator): both learn of any change.
@@ -370,7 +440,7 @@ function applyColors(): void {
     trayPanel.setBackgroundColor(appColor())
     frameWindow(trayPanel, { corner: 'round', border: borderColor() })
   }
-  dictation?.reframe()
+  // The dictation badge needs nothing: its page draws its ground and edge, and follows the theme itself.
 }
 
 // ---------------------------------------------------------------- speech and words
@@ -387,7 +457,7 @@ function setUpSpeech(): void {
   })
   voiceStore = new VoiceStore({
     manifest: manifest as VoiceManifest,
-    root: path.join(userDir(), 'voice'),
+    root: downloads('voice'),
     platform: process.platform,
     arch: process.arch,
     open: url => openStream(url),
@@ -414,7 +484,7 @@ function setUpSpeech(): void {
   )
   dictionaries = new DictionaryStore({
     bundledDir: path.join(app.getAppPath(), 'media', 'dict'),
-    cacheDir: path.join(userDir(), 'dict'),
+    cacheDir: downloads('dict'),
     fetchGz: async url => {
       const res = await fetch(url, { signal: AbortSignal.timeout(60_000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -441,32 +511,26 @@ function voiceMade(took: number, seconds: number): void {
   if (before === undefined ? after !== undefined : (before > 1) !== ((after ?? 0) > 1)) postApp()
 }
 
-/** How fast each accurate level translates on this computer, measured on real translations. */
-let levelSpeeds: LevelSpeeds = {}
-/** Shown once a few translations were timed. */
+/** How fast each local model translates and checks on this computer, measured on real use. */
+let modelSpeeds: ModelSpeeds = {}
+/** Shown once a few were timed. */
 const LEVEL_SURE_AFTER = 3
 
-function levelTimed(level: LlmLevel, timed: { sentence: number; start?: number }): void {
-  levelSpeeds = { ...levelSpeeds, [level]: nextLevelSpeed(levelSpeeds[level], timed) }
-  saveLevelSpeeds(deviceFile(), levelSpeeds)
+function modelTimed(model: LlmModel, timed: { sentence?: number; text?: number; start?: number }): void {
+  modelSpeeds = { ...modelSpeeds, [model]: nextModelSpeed(modelSpeeds[model], timed) }
+  saveModelSpeeds(deviceFile(), modelSpeeds)
   postApp()
 }
 
-/** The checker's measured seconds: a text, and loading its model, once timed a few times. */
-function checkSpeedView(): { speed?: { text: number; start?: number } } {
-  const s = levelSpeeds.check
-  const text = s && s.sentence.length >= LEVEL_SURE_AFTER ? median(s.sentence) : undefined
-  const start = s && s.start.length >= LEVEL_SURE_AFTER ? median(s.start) : undefined
-  return text === undefined ? {} : { speed: { text, ...(start !== undefined ? { start } : {}) } }
-}
-
-function levelSpeedView(): AppView['translationSpeed'] {
-  const out: AppView['translationSpeed'] = {}
-  for (const level of ['accurate', 'most'] as const) {
-    const s = levelSpeeds[level]
-    const sentence = s && s.sentence.length >= LEVEL_SURE_AFTER ? median(s.sentence) : undefined
-    const start = s && s.start.length >= LEVEL_SURE_AFTER ? median(s.start) : undefined
-    if (sentence !== undefined) out[level] = { sentence, ...(start !== undefined ? { start } : {}) }
+/** Each model's measured seconds (a sentence, a text checked, loading it), each once timed a few times. */
+function modelSpeedView(): AppView['modelSpeed'] {
+  const sure = (list: number[] | undefined) => (list && list.length >= LEVEL_SURE_AFTER ? median(list) : undefined)
+  const out: AppView['modelSpeed'] = {}
+  for (const model of ['accurate', 'most'] as const) {
+    const s = modelSpeeds[model]
+    const view = { sentence: sure(s?.sentence), text: sure(s?.text), start: sure(s?.start) }
+    const known = Object.fromEntries(Object.entries(view).filter(([, n]) => n !== undefined))
+    if (Object.keys(known).length) out[model] = known
   }
   return out
 }
@@ -493,7 +557,7 @@ function prepareTranslator(t: Translator): void {
       last = Date.now()
       postApp()
     })
-    .catch(error => console.warn('Altype: the translator did not download', error))
+    .catch(error => console.warn('Krya: the translator did not download', error))
     .finally(() => postApp())
 }
 
@@ -542,46 +606,79 @@ function unsaveWord(word: string): void {
 async function exportWords(): Promise<void> {
   const { filePath } = await dialog.showSaveDialog(appWin ?? ({} as BrowserWindow), {
     title: 'Save the words for Anki',
-    defaultPath: path.join(app.getPath('documents'), 'Altype words.txt'),
+    defaultPath: path.join(app.getPath('documents'), 'Krya words.txt'),
     filters: [{ name: 'Text for Anki', extensions: ['txt'] }],
   })
   if (filePath) fs.writeFileSync(filePath, ankiTsv(words.list()) + '\n', 'utf8')
 }
 
-/** The settings saved as a file, to keep or to take to another computer. */
-async function exportSettings(): Promise<void> {
+/** A backup (backup.ts): the settings and everything the person made here, one file to keep or to take to another computer. */
+async function exportBackup(): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10)
   const options: Electron.SaveDialogOptions = {
-    title: 'Save the settings',
-    defaultPath: path.join(app.getPath('documents'), 'Altype settings.json'),
-    filters: [{ name: 'Altype settings', extensions: ['json'] }],
+    title: 'Save a backup',
+    defaultPath: path.join(app.getPath('documents'), `Krya backup ${day}.json`),
+    filters: [{ name: 'Krya backup', extensions: ['json'] }],
   }
   const { filePath } = appWin ? await dialog.showSaveDialog(appWin, options) : await dialog.showSaveDialog(options)
-  if (filePath) fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + '\n', 'utf8')
+  if (!filePath) return
+  learned.flush()
+  const backup = makeBackup(app.getVersion(), new Date(), settings, {
+    words: words.list().reverse(),
+    mistakes: mistakes.list(),
+    learned: learned.lists(),
+    translations: translationLog.list(),
+    dictation: dictationLog.list(),
+  })
+  fs.writeFileSync(filePath, JSON.stringify(backup, null, 2) + '\n', 'utf8')
 }
 
-/** Settings read from a file the person picks: what it holds replaces them, the rest as it was; this computer's place for the dictation badge stays. */
-async function importSettings(): Promise<void> {
-  const options: Electron.OpenDialogOptions = { title: 'Open saved settings', defaultPath: app.getPath('documents'), filters: [{ name: 'Altype settings', extensions: ['json'] }], properties: ['openFile'] }
+/**
+ * A backup the person picks, after a question that says what it holds: its
+ * settings replace these (this computer's place for the dictation badge
+ * stays), its words, mistakes, learned words and history are added to what is
+ * here. A settings file from an older Krya is its settings alone.
+ */
+async function importBackup(): Promise<void> {
+  const options: Electron.OpenDialogOptions = { title: 'Open a backup', defaultPath: app.getPath('documents'), filters: [{ name: 'Krya backup', extensions: ['json'] }], properties: ['openFile'] }
   const { canceled, filePaths } = appWin ? await dialog.showOpenDialog(appWin, options) : await dialog.showOpenDialog(options)
   const file = filePaths[0]
   if (canceled || !file) return
+  let read: BackupRead
   try {
-    const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
-    if (!read || typeof read !== 'object' || Array.isArray(read)) throw new Error('it holds no settings')
-    const next = normalize({ ...settings, ...read, dictationBadge: settings.dictationBadge, setupDone: true }, settings.native)
-    saveSettings(next)
+    read = readBackup(JSON.parse(fs.readFileSync(file, 'utf8')))
   } catch (error) {
-    void dialog.showMessageBox({ type: 'warning', title: 'Altype', message: 'These settings could not be read', detail: messageOf(error) })
+    void dialog.showMessageBox({ type: 'warning', title: 'Krya', message: 'This backup could not be read', detail: messageOf(error) })
+    return
   }
+  const ask: Electron.MessageBoxOptions = {
+    type: 'question',
+    title: 'Krya',
+    message: 'Import this backup?',
+    detail: `It holds ${backupSummary(read)}. Your settings become the backup's; its words, mistakes and history are added to yours, nothing of yours is removed.`,
+    buttons: ['Import', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+  }
+  const { response } = appWin ? await dialog.showMessageBox(appWin, ask) : await dialog.showMessageBox(ask)
+  if (response !== 0) return
+  words.merge(read.words)
+  mistakes.merge(read.mistakes)
+  learned.merge(read.learned)
+  translationLog.merge(read.translations)
+  dictationLog.merge(read.dictation)
+  // All of the settings saved: the keys and the keyboard are applied again, the learned words with them.
+  saveSettings(normalize({ ...settings, ...read.settings, dictationBadge: settings.dictationBadge, setupDone: true }, settings.native))
+  postApp()
 }
 
-/** All settings back to how they came, after a question; the person's language, the setup done and what Altype learned stay. */
+/** All settings back to how they came, after a question; the person's language, the setup done and what Krya learned stay. */
 async function resetSettings(): Promise<void> {
   const options: Electron.MessageBoxOptions = {
     type: 'question',
-    title: 'Altype',
+    title: 'Krya',
     message: 'Reset all settings?',
-    detail: 'Keys, switches and lists go back to how they came. Your language, words, transcripts and what Altype learned from your typing stay.',
+    detail: 'Keys, switches and lists go back to how they came. Your language, words, transcripts and what Krya learned from your typing stay.',
     buttons: ['Reset', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
@@ -589,6 +686,23 @@ async function resetSettings(): Promise<void> {
   const { response } = appWin ? await dialog.showMessageBox(appWin, options) : await dialog.showMessageBox(options)
   if (response !== 0) return
   saveSettings({ ...DEFAULTS, native: settings.native, languages: settings.languages, setupDone: true, introSeen: true })
+}
+
+/** Every key back to how it came, after a question: the actions', the layouts' own, Ctrl+C twice and the keys turned off. */
+async function resetKeys(): Promise<void> {
+  const options: Electron.MessageBoxOptions = {
+    type: 'question',
+    title: 'Krya',
+    message: 'Reset all keys?',
+    detail: 'Every shortcut goes back to how it came: Ctrl+Alt+S, Ctrl+Alt+T, Ctrl+Alt+D, Ctrl+Alt+N and Ctrl+C twice; the others are cleared. Nothing else changes.',
+    buttons: ['Reset keys', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+  }
+  const { response } = appWin ? await dialog.showMessageBox(appWin, options) : await dialog.showMessageBox(options)
+  if (response !== 0) return
+  const keys = Object.fromEntries([...ACTION_KEYS, ...DICTATION_KEYS].map(k => [k, DEFAULTS[k]]))
+  saveSettings({ ...keys, layoutKeys: {}, doubleCopy: true, switchOn: true, fixKeyOn: true })
 }
 
 // ---------------------------------------------------------------- the card
@@ -608,7 +722,7 @@ function createCard(): BrowserWindow {
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    title: 'Altype',
+    title: 'Krya',
     backgroundColor: cardColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -717,12 +831,130 @@ function commonWords(): string[] {
 // ---------------------------------------------------------------- the app window
 
 /** esbuild.mjs: when this copy was built, and from which commit. */
-declare const ALTYPE_BUILD: { at: string; commit: string; changed: boolean }
+declare const KRYA_BUILD: { at: string; commit: string; changed: boolean }
 
 /** "30 Oct, 07:12 (ff17ba8, changed)": a run from source tells today's build from yesterday's. */
 function buildText(): string {
-  const at = new Date(ALTYPE_BUILD.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-  return ALTYPE_BUILD.commit ? `${at} (${ALTYPE_BUILD.commit}${ALTYPE_BUILD.changed ? ', changed' : ''})` : at
+  const at = new Date(KRYA_BUILD.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  return KRYA_BUILD.commit ? `${at} (${KRYA_BUILD.commit}${KRYA_BUILD.changed ? ', changed' : ''})` : at
+}
+
+// ---------------------------------------------------------------- storage
+
+/** What Krya keeps, measured once the Storage page was opened (storage.ts); again after a removal. */
+let storage: StorageView | undefined
+let measuring = false
+let measureAgain = false
+
+function storagePlaces(): Place[] {
+  const translate = localPart('translate')
+  const models = llmPaths(translate)
+  const transcripts = speech?.service.health?.dataDir
+  return [
+    { id: 'fast', path: downloads('models') },
+    { id: 'voice', path: downloads('voice') },
+    { id: 'dict', path: downloads('dict') },
+    { id: 'accurate', path: models.model('accurate') },
+    { id: 'most', path: models.model('most') },
+    { id: 'unused', path: path.join(translate, 'models'), only: llmFiles.unused() },
+    { id: 'llama', path: path.join(translate, 'engine') },
+    { id: 'speech', path: localPart('speech') },
+    { id: 'yours', path: userDir() },
+    ...(transcripts ? [{ id: 'transcripts' as const, path: transcripts }] : []),
+  ]
+}
+
+/** Walks the parts (a few seconds for the speech engine's thousands of files); a call meanwhile measures once more after. */
+function measureStorage(): void {
+  if (measuring) {
+    measureAgain = true
+    return
+  }
+  measuring = true
+  const root = localDir()
+  storage = { measuring: true, root, drive: driveOf(root), freeMb: storage?.freeMb ?? 0, parts: storage?.parts ?? [] }
+  postApp()
+  measureParts(storagePlaces())
+    .then(measured => {
+      const parts = markAway(measured, root, DOWNLOADED)
+      storage = { measuring: false, root, drive: driveOf(root), freeMb: freeMb(root), parts, ...oldFolderView(parts) }
+    })
+    .catch(error => console.warn('Krya: could not measure the storage', error))
+    .finally(() => {
+      measuring = false
+      if (storage?.measuring) storage = { ...storage, measuring: false }
+      postApp()
+      if (measureAgain) {
+        measureAgain = false
+        measureStorage()
+      }
+    })
+}
+
+/** Measured again after a removal, when the page has been opened. */
+const remeasure = () => (storage ? measureStorage() : postApp())
+
+/** Krya's downloads, which belong in its one folder; the person's own things live elsewhere. */
+const DOWNLOADED: readonly StorageId[] = ['fast', 'voice', 'dict', 'accurate', 'most', 'unused', 'llama', 'speech']
+/** Move to Krya is under way: the page shows it, and a second press waits. */
+let movingToKrya = false
+
+/** A download used from outside Krya's folder: the old one's place, and why the last move left it there. */
+function oldFolderView(parts: readonly StoragePart[]): Pick<StorageView, 'old'> {
+  if (!parts.some(p => p.away)) return {}
+  const why = [...new Set(leftOld.filter(p => p.why !== 'Krya has its own').map(p => p.why))].join('; ')
+  return { old: { dir: oldLocalDir(), moving: movingToKrya, ...(why ? { why } : {}) } }
+}
+
+/**
+ * The Storage page's Move to Krya: what still lives in the old Altype folder goes into Krya's. The speech engine,
+ * the model's server, the voice and Firefox's translator let go of their files first; the programs run from the
+ * old folder are stopped (moveLocalFolder). Each part keeps its place from Krya's start, so Krya starts again on
+ * the Storage page once anything moved; when nothing could, the engine comes back and the page says why.
+ */
+async function moveToKrya(): Promise<void> {
+  if (movingToKrya || TEST_HOME) return
+  movingToKrya = true
+  if (storage) storage = { ...storage, ...oldFolderView(storage.parts) }
+  postApp()
+  speech.service.stop()
+  await llmFiles.server.stop()
+  natural.dispose()
+  translator.dispose()
+  // The page's "moving" is drawn before the move holds the main process for a second or two.
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const r = moveLocalFolder()
+  log('move to Krya: pressed on the Storage page')
+  logMoved(r)
+  if (r.moved.length) {
+    app.relaunch({ args: [...process.argv.slice(1).filter(a => a !== '--storage'), '--storage'] })
+    app.quit()
+    return
+  }
+  movingToKrya = false
+  speech.start()
+  measureStorage()
+}
+
+/** A download of Krya's own deleted from the Storage page; each downloads again when it is wanted next. */
+function removeDownload(part: 'fast' | 'voice' | 'dict' | 'unused'): void {
+  switch (part) {
+    case 'fast':
+      if (translator.state(langCode(settings.native)).status === 'downloading') return
+      translator.dispose()
+      fs.rmSync(downloads('models'), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      return
+    case 'voice':
+      natural.dispose()
+      voiceStore.remove()
+      return
+    case 'dict':
+      dictionaries.clear()
+      return
+    case 'unused':
+      llmFiles.removeUnused()
+      return
+  }
 }
 
 function appView(): AppView {
@@ -746,10 +978,11 @@ function appView(): AppView {
       accurate: llm.accurate.state(langCode(settings.native)),
       most: llm.most.state(langCode(settings.native)),
     },
-    translationSpeed: levelSpeedView(),
+    models: { accurate: llmFiles.state('accurate'), most: llmFiles.state('most') },
+    modelSpeed: modelSpeedView(),
     dictionary: { status: dictionaryStatus() },
-    check: { name: LLM_MODELS.check.name, state: checker.state(), fit: checkAdvice(speech?.profile), ...checkSpeedView() },
     mistakes: mistakes.list(),
+    ...(storage ? { storage } : {}),
     layouts: keyboardLayouts(),
     ...(keyboardTrouble ? { keyboardTrouble } : {}),
     ...(lastApp ? { lastApp } : {}),
@@ -777,7 +1010,7 @@ function createAppWindow(): BrowserWindow {
     show: false,
     // The page draws its own sidebar and bar (the mark, the places, minimize and close); the edges still resize.
     frame: false,
-    title: 'Altype',
+    title: 'Krya',
     icon: path.join(app.getAppPath(), 'media', 'icon.png'),
     backgroundColor: appColor(),
     webPreferences: {
@@ -797,10 +1030,10 @@ function createAppWindow(): BrowserWindow {
   win.on('unmaximize', () => postAppWindow())
   // A run from source shows the page's errors in the terminal.
   if (!app.isPackaged) {
-    win.webContents.on('console-message', m => console.warn(`Altype app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
-    win.webContents.on('did-fail-load', (_event, code, description) => console.warn(`Altype app window did not load: ${code} ${description}`))
+    win.webContents.on('console-message', m => console.warn(`Krya app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
+    win.webContents.on('did-fail-load', (_event, code, description) => console.warn(`Krya app window did not load: ${code} ${description}`))
   }
-  // Closing hides: Altype lives in the tray.
+  // Closing hides: Krya lives in the tray.
   win.on('close', event => {
     if (quitting) return
     event.preventDefault()
@@ -988,43 +1221,42 @@ function onMessage(message: ToHost): void {
       applyKeyboard()
       postApp()
       return
-    case 'exportSettings':
-      exportSettings().catch(error => console.warn('Altype: could not save the settings file', error))
+    case 'exportBackup':
+      exportBackup().catch(error => console.warn('Krya: could not save the backup', error))
       return
-    case 'importSettings':
-      importSettings().catch(error => console.warn('Altype: could not read the settings file', error))
+    case 'importBackup':
+      importBackup().catch(error => console.warn('Krya: could not import the backup', error))
       return
     case 'resetSettings':
-      resetSettings().catch(error => console.warn('Altype: could not reset the settings', error))
+      resetSettings().catch(error => console.warn('Krya: could not reset the settings', error))
+      return
+    case 'resetKeys':
+      resetKeys().catch(error => console.warn('Krya: could not reset the keys', error))
       return
     case 'installSpeech':
       speech.install(message.parts, message.models).then(
         () => (registerShortcuts(), applyKeyboard()),
-        error => console.warn('Altype: the speech engine did not install', error),
+        error => console.warn('Krya: the speech engine did not install', error),
       )
       return
     case 'prepareTranslator':
       prepareTranslator(translator)
       return
     case 'translationLevel':
-      saveSettings({ translationLevel: message.level })
+      // A model picked here is the one model: Check uses it too.
+      saveSettings(message.level === 'fast' ? { translationLevel: 'fast' } : { translationLevel: message.level, model: message.level })
       prepareTranslator(activeTranslator())
       return
-    case 'removeTranslation':
-      if (settings.translationLevel === message.level) saveSettings({ translationLevel: 'fast' })
-      llmFiles
-        .remove(message.level)
-        .catch(error => console.warn('Altype: could not remove the translation model', error))
-        .finally(postApp)
+    case 'useModel':
+      saveSettings({ model: message.model })
+      prepareModel()
       return
-    case 'prepareChecker':
-      prepareChecker()
-      return
-    case 'removeChecker':
+    case 'removeModel':
+      if (settings.translationLevel === message.model) saveSettings({ translationLevel: 'fast' })
       llmFiles
-        .remove('check')
-        .catch(error => console.warn('Altype: could not remove the checker', error))
-        .finally(postApp)
+        .remove(message.model)
+        .catch(error => console.warn('Krya: could not remove the model', error))
+        .finally(remeasure)
       return
     case 'forgetMistake':
       mistakes.remove(message.at)
@@ -1048,7 +1280,26 @@ function onMessage(message: ToHost): void {
       void speech.downloadModel(message.model).then(() => postApp())
       return
     case 'removeSpeech':
-      void speech.remove().then(() => (registerShortcuts(), applyKeyboard()))
+      void speech.remove().then(() => (registerShortcuts(), applyKeyboard(), remeasure()))
+      return
+    case 'storage':
+      measureStorage()
+      return
+    case 'moveToKrya':
+      void moveToKrya().catch(error => {
+        movingToKrya = false
+        leftOld = [{ name: 'Altype', why: messageOf(error) }]
+        console.warn('Krya: could not move the old folder', error)
+        remeasure()
+      })
+      return
+    case 'removeDownload':
+      try {
+        removeDownload(message.part)
+      } catch (error) {
+        console.warn(`Krya: could not remove ${message.part}`, error)
+      }
+      remeasure()
       return
     case 'restartSpeech':
       speech.restart()
@@ -1078,7 +1329,7 @@ function onMessage(message: ToHost): void {
       natural.at(message.id, message.index)
       return
     case 'downloadNatural':
-      voiceStore.download().catch(error => console.warn('Altype: the natural voice did not download', error))
+      voiceStore.download().catch(error => console.warn('Krya: the natural voice did not download', error))
       return
     case 'dismissNatural':
       saveSettings({ naturalDismissed: true })
@@ -1103,7 +1354,7 @@ function onMessage(message: ToHost): void {
       maximizeCard(message.on)
       return
     case 'close':
-      closeCard().catch(error => console.warn('Altype: could not give the keyboard back', error))
+      closeCard().catch(error => console.warn('Krya: could not give the keyboard back', error))
       return
     case 'retry':
       if (last && shown?.id === last.id) void translateInto(last.id, last.text, last.kind, last.note)
@@ -1115,10 +1366,10 @@ function onMessage(message: ToHost): void {
       void checkCard(message.id, message.text)
       return
     case 'copyText':
-      clipboard.writeText(message.text).catch(error => console.warn('Altype: could not copy', error))
+      clipboard.writeText(message.text).catch(error => console.warn('Krya: could not copy', error))
       return
     case 'pasteText':
-      pasteTranslation(message.id, message.text).catch(error => console.warn('Altype: could not paste the translation', error))
+      pasteTranslation(message.id, message.text).catch(error => console.warn('Krya: could not paste the translation', error))
       return
     case 'lookup':
       lookupWord(message.word)
@@ -1131,6 +1382,11 @@ function onMessage(message: ToHost): void {
       return
     case 'appReady':
       appReady = true
+      // A page loaded afresh records nothing.
+      if (micRecording) {
+        micRecording = false
+        refreshTray()
+      }
       postApp()
       postAppWindow()
       if (pendingTab) appWin?.webContents.send('to-view', { type: 'appTab', tab: pendingTab } satisfies ToView)
@@ -1146,10 +1402,10 @@ function onMessage(message: ToHost): void {
       postApp()
       return
     case 'exportWords':
-      exportWords().catch(error => console.warn('Altype: could not save the words', error))
+      exportWords().catch(error => console.warn('Krya: could not save the words', error))
       return
     case 'copyWords':
-      clipboard.writeText(wordsText(words.list())).catch(error => console.warn('Altype: could not copy the words', error))
+      clipboard.writeText(wordsText(words.list())).catch(error => console.warn('Krya: could not copy the words', error))
       return
     case 'checkUpdates':
       updater.check()
@@ -1164,6 +1420,10 @@ function onMessage(message: ToHost): void {
         else appWin?.maximize()
       } else appWin?.hide()
       return
+    case 'micRecording':
+      micRecording = message.on
+      refreshTray()
+      return
     case 'trayReady':
       trayReady = true
       refreshTray()
@@ -1175,6 +1435,14 @@ function onMessage(message: ToHost): void {
     case 'trayClose':
       hideTrayPanel()
       return
+    case 'keepWord': {
+      // As the Kept as typed page adds one (and as Backspace after a fix does): fixed by itself no more.
+      const keepWords = addKept(settings.keepWords, message.word)
+      if (!keepWords) return
+      learned.kept(keptForm(message.word))
+      saveSettings({ keepWords })
+      return
+    }
     case 'tray':
       hideTrayPanel()
       runTrayCommand(message.command)
@@ -1193,7 +1461,7 @@ async function sendHostVoices(): Promise<void> {
 
 // ---------------------------------------------------------------- translating
 
-/** Firefox's models (Fast), and TranslateGemma's two levels. */
+/** Firefox's models (Fast), and the local models' two levels. */
 let translator: Translator
 let llm: LlmTranslators
 
@@ -1248,7 +1516,7 @@ function translateText(text: string, kind: CardKind, at: Point, via?: string): v
  * text, the card showing why.
  */
 async function recognizeSnip(id: number, png: Buffer): Promise<{ text: string; misread: boolean } | undefined> {
-  const file = path.join(app.getPath('temp'), `altype-${process.pid}-${id}.png`)
+  const file = path.join(app.getPath('temp'), `krya-${process.pid}-${id}.png`)
   try {
     fs.writeFileSync(file, png)
     const native = langCode(settings.native)
@@ -1290,8 +1558,19 @@ function focusedField(): unknown {
   try {
     return focusedElement()
   } catch (error) {
-    console.warn('Altype: could not ask which field has the keyboard', error)
+    console.warn('Krya: could not ask which field has the keyboard', error)
     return undefined
+  }
+}
+
+/** The text selected in a field, through UI Automation; empty when it has none or will not say. */
+function selectionIn(field: unknown): string {
+  if (!field) return ''
+  try {
+    return selectedText(field).trim()
+  } catch (error) {
+    console.warn('Krya: could not read the selection through UI Automation', error)
+    return ''
   }
 }
 
@@ -1341,7 +1620,7 @@ async function pasteInto(window: bigint, field: unknown, text: string): Promise<
       // A web page in a window (VS Code's chat) takes the keyboard back a moment after.
       if (focus(field)) await new Promise(resolve => setTimeout(resolve, 80))
     } catch (error) {
-      console.warn('Altype: could not give the keyboard back to the field', error)
+      console.warn('Krya: could not give the keyboard back to the field', error)
     }
     releaseField(field)
   }
@@ -1378,7 +1657,7 @@ async function translateInPlace(text: string, at: Point, window: bigint, via?: s
     await pasteInto(window, undefined, out)
   } catch (error) {
     keyboard.say('')
-    tray?.displayBalloon({ title: 'Altype', content: `Could not translate: ${messageOf(error)}` })
+    tray?.displayBalloon({ title: 'Krya', content: `Could not translate: ${messageOf(error)}` })
   }
 }
 
@@ -1432,7 +1711,7 @@ async function translateTextCard(id: number, text: string, from: string, to: str
 
 // ---------------------------------------------------------------- checking English
 
-/** Check my English (Gemma 4 E4B, on llama.cpp's server with the translation levels), and the mistakes it found. */
+/** Check my English (the one local model, which translates too, on llama.cpp's server), and the mistakes it found. */
 let llmFiles: LlmFiles
 let checker: Checker
 let mistakes: MistakeStore
@@ -1446,7 +1725,7 @@ let checkAsked = 0
  * dictated, to paste the text set right back into, `after` it.
  */
 function checkWindow(text: string, at: Point, window?: bigint, via?: string, field?: unknown, after?: string): void {
-  const id = openCard('check', { status: 'check', text, result: { status: 'none' }, model: LLM_MODELS.check.name, canPaste: !!window }, at, via)
+  const id = openCard('check', { status: 'check', text, result: { status: 'none' }, model: LEVEL_NAMES[settings.model], canPaste: !!window }, at, via)
   releaseField(pasteTarget?.field)
   pasteTarget = window ? { id, window, field, ...(after ? { after } : {}) } : undefined
   if (!window) releaseField(field)
@@ -1481,18 +1760,12 @@ async function checkCard(id: number, text: string): Promise<void> {
   }
 }
 
-/** The checker's model downloaded ahead (the Check page's Use). */
-function prepareChecker(): void {
+/** The model in use downloaded ahead (the Check page's Use). */
+function prepareModel(): void {
   checker
     .prepare(() => postApp())
-    .catch(error => console.warn('Altype: the checker did not download', error))
-    .finally(postApp)
-}
-
-function checkTimed(timed: { text: number; start?: number }): void {
-  levelSpeeds = { ...levelSpeeds, check: nextLevelSpeed(levelSpeeds.check, { sentence: timed.text, ...(timed.start !== undefined ? { start: timed.start } : {}) }) }
-  saveLevelSpeeds(deviceFile(), levelSpeeds)
-  postApp()
+    .catch(error => console.warn('Krya: the model did not download', error))
+    .finally(() => (postApp(), remeasure()))
 }
 
 /** A checked text with a mistake, kept for Library › Mistakes. */
@@ -1529,21 +1802,34 @@ function showText(text: string, purpose: Purpose, at: Point, window?: bigint, vi
 async function useClipboard(purpose: Purpose): Promise<void> {
   const text = (await clipboard.readText()).trim()
   if (text) showText(text, purpose, screen.getCursorScreenPoint())
-  else tray?.displayBalloon({ title: 'Altype', content: 'The clipboard holds no text. Select a text and copy it first.' })
+  else tray?.displayBalloon({ title: 'Krya', content: 'The clipboard holds no text. Select a text and copy it first.' })
 }
 
-/** A selection key: Altype presses Ctrl+C in the program in front and shows what it copies; the clipboard is put back after. */
+/** A selection key: Krya presses Ctrl+C in the program in front and shows what it copies; the clipboard is put back after. */
 async function useSelection(purpose: Purpose, via?: string): Promise<void> {
   const at = screen.getCursorScreenPoint()
-  const window = foreground().hwnd
-  // The translator's (and the checker's) Paste gives the keyboard back to this field.
-  const field = purpose === 'translate' || purpose === 'check' ? focusedField() : undefined
+  const front = foreground()
+  const window = front.hwnd
+  const exe = exeOf(front.pid)
+  // The translator's (and the checker's) Paste gives the keyboard back to this field; any purpose reads its selection when no copy comes.
+  const field = focusedField()
   snipSince = 0
   clipGuard.hold()
   await pressCopy()
   const since = Date.now()
   releaseField(copyWanted?.field)
-  copyWanted = { since, at, purpose, window, field, ...(via ? { via } : {}) }
+  copyWanted = { since, at, purpose, window, field, exe, ...(via ? { via } : {}) }
+  setTimeout(() => {
+    if (copyWanted?.since !== since) return
+    const text = selectionIn(field)
+    if (!text) return
+    copyWanted = undefined
+    // A copy the program makes after all is its late answer: taken back with the rest.
+    lateCopyUntil = Date.now() + LATE_COPY_MS
+    clipGuard.release(LATE_COPY_MS)
+    log(`copy: none in ${UIA_WAIT_MS} ms, read ${text.length} chars by UI Automation from ${exe}`)
+    showText(text, purpose, at, window, via, field)
+  }, UIA_WAIT_MS)
   setTimeout(() => {
     if (copyWanted?.since !== since) return
     releaseField(copyWanted.field)
@@ -1551,8 +1837,9 @@ async function useSelection(purpose: Purpose, via?: string): Promise<void> {
     lateCopyUntil = Date.now() + LATE_COPY_MS
     // Put back once a late copy has had its time; nothing changed, nothing is written.
     clipGuard.release(LATE_COPY_MS)
-    tray?.displayBalloon({ title: 'Altype', content: 'Nothing was copied. Select a text, then press the shortcut.' })
-  }, SELECT_WAIT_MS)
+    log(`copy: nothing in ${COPY_WAIT_MS} ms from ${exe}`)
+    tray?.displayBalloon({ title: 'Krya', content: 'Nothing was copied. Select a text, then press the shortcut.' })
+  }, COPY_WAIT_MS)
 }
 
 /** The picture on the clipboard as PNG, if there is one. */
@@ -1567,18 +1854,19 @@ async function clipboardPng(): Promise<Buffer | undefined> {
 
 /** Reads the clipboard once the program that changed it is done. */
 function afterSettling(read: () => Promise<void>): void {
-  setTimeout(() => read().catch(error => console.warn('Altype: could not read the clipboard', error)), SETTLE_MS)
+  setTimeout(() => read().catch(error => console.warn('Krya: could not read the clipboard', error)), SETTLE_MS)
 }
 
 function onClipboardChange(): void {
   const now = Date.now()
   if (clipboardBusy || now < ownClipboardUntil || clipGuard.isOurs()) return
   const ctrl = ctrlHeld()
-  if (copyWanted && now - copyWanted.since < SELECT_WAIT_MS) {
+  if (copyWanted && now - copyWanted.since < COPY_WAIT_MS) {
     const { at, purpose, window, field, via } = copyWanted
+    log(`copy: came in ${now - copyWanted.since} ms from ${copyWanted.exe}`)
     copyWanted = undefined
     afterSettling(async () => {
-      // The copy Altype pressed: taken back once read.
+      // The copy Krya pressed: taken back once read.
       clipGuard.claim()
       const text = (await clipboard.readText()).trim()
       await clipGuard.putBack()
@@ -1588,7 +1876,7 @@ function onClipboardChange(): void {
     return
   }
   if (now < lateCopyUntil && !ctrl) {
-    // The program's late answer to Altype's Ctrl+C: put back with the rest, when clipGuard's wait ends.
+    // The program's late answer to Krya's Ctrl+C: put back with the rest, when clipGuard's wait ends.
     lateCopyUntil = 0
     clipGuard.claim()
     return
@@ -1615,7 +1903,7 @@ function onClipboardChange(): void {
 
 /** A change of the clipboard by the person: Ctrl+C twice asks for the card. */
 function doubleCopyChange(now: number, ctrl: boolean): void {
-  // Copying from the card itself is not a request, nor is any copy while Altype is paused.
+  // Copying from the card itself is not a request, nor is any copy while Krya is paused.
   if (card?.isFocused() || !settings.doubleCopy || settings.paused) return
   if (!copies.change(now, ctrl)) return
   const at = screen.getCursorScreenPoint()
@@ -1626,10 +1914,10 @@ function doubleCopyChange(now: number, ctrl: boolean): void {
 }
 
 function selection(purpose: Purpose, via?: string): void {
-  useSelection(purpose, via).catch(error => console.warn('Altype: could not copy the selection', error))
+  useSelection(purpose, via).catch(error => console.warn('Krya: could not copy the selection', error))
 }
 
-/** The pause key: Altype paused, or back. */
+/** The pause key: Krya paused, or back. */
 function togglePause(): void {
   saveSettings({ paused: !settings.paused })
 }
@@ -1647,7 +1935,7 @@ function registerShortcuts(): void {
   }
   // Paused: no key but the pause key, and none is "taken".
   if (settings.paused) {
-    keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, pause: register(settings.pauseKey, togglePause), window: true }
+    keysOk = { snip: true, select: true, translate: true, text: true, inPlace: true, check: true, type: true, typeCheck: true, pause: register(settings.pauseKey, togglePause), window: true }
     speechKeysOk = { dictate: true, english: true, note: true, again: true, practice: true }
     return
   }
@@ -1658,6 +1946,8 @@ function registerShortcuts(): void {
     text: register(settings.textKey, () => snip('translate', settings.textKey)),
     inPlace: register(settings.inPlaceKey, () => selection('inPlace', settings.inPlaceKey)),
     check: register(settings.checkKey, () => selection('check', settings.checkKey)),
+    type: register(settings.typeKey, () => typeInto('translate', settings.typeKey)),
+    typeCheck: register(settings.typeCheckKey, () => typeInto('check', settings.typeCheckKey)),
     pause: register(settings.pauseKey, togglePause),
     window: register(settings.windowKey, () => openApp()),
   }
@@ -1677,6 +1967,8 @@ function registerShortcuts(): void {
     !keysOk.text && settings.textKey,
     !keysOk.inPlace && settings.inPlaceKey,
     !keysOk.check && settings.checkKey,
+    !keysOk.type && settings.typeKey,
+    !keysOk.typeCheck && settings.typeCheckKey,
     !keysOk.pause && settings.pauseKey,
     !keysOk.window && settings.windowKey,
     !speechKeysOk.dictate && settings.dictateKey,
@@ -1688,7 +1980,7 @@ function registerShortcuts(): void {
   // The settings window shows the trouble itself; the balloon is for a start without it.
   if (taken.length > 0 && !(appWin?.isVisible() ?? false)) {
     tray?.displayBalloon({
-      title: 'Altype',
+      title: 'Krya',
       content: `${taken.map(keyLabel).join(' and ')} ${taken.length > 1 ? 'are' : 'is'} taken by another program. Choose another in the settings.`,
     })
   }
@@ -1714,7 +2006,7 @@ function tableFor(id: string): KeyTable | undefined {
 }
 
 /**
- * Altype pastes through the clipboard: what the person had there is kept
+ * Krya pastes through the clipboard: what the person had there is kept
  * (once for a run of such pastes) and goes back once `work` is done, or has
  * failed: a moment after the program read the pasted text, or `after` ms;
  * a snip still awaited is no longer.
@@ -1731,7 +2023,7 @@ async function borrowClipboard<T>(work: () => Promise<T>, after: (result: T | un
   }
 }
 
-/** Runs Altype's own use of the clipboard; the changes it makes, until a moment after, are not taken for requests. */
+/** Runs Krya's own use of the clipboard; the changes it makes, until a moment after, are not taken for requests. */
 async function ownClipboard<T>(work: () => Promise<T>): Promise<T> {
   clipboardBusy = true
   try {
@@ -1743,7 +2035,7 @@ async function ownClipboard<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The fix key with a selection: Altype copies it, types it again in the
+ * The fix key with a selection: Krya copies it, types it again in the
  * next layout of `cycle` (the one after the layout it was typed in), pastes
  * it over the selection, selects it again (a second press goes on to the
  * next layout), switches the layout and puts the clipboard back.
@@ -1758,17 +2050,28 @@ async function convertSelection(cycle: string[]): Promise<void> {
 
 /** Copies the selection, pastes it converted; 'now' when nothing was pasted and the clipboard can go back at once. */
 async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
-  const marker = `Altype ${Date.now()}`
+  const marker = `Krya ${Date.now()}`
+  const field = focusedField()
   await clipGuard.write(marker)
   await pressCopy()
   let text = ''
-  for (let i = 0; i < 25 && !text; i++) {
+  let copied = false
+  const started = Date.now()
+  for (let asked = false; !text && Date.now() < started + COPY_WAIT_MS; ) {
     await new Promise(resolve => setTimeout(resolve, 20))
     const now = await clipboard.readText()
-    if (now !== marker) text = now
+    if (now !== marker) {
+      text = now
+      copied = true
+    } else if (!asked && Date.now() >= started + UIA_WAIT_MS) {
+      // A field that does not answer Ctrl+C: its selection through UI Automation.
+      asked = true
+      text = selectionIn(field)
+    }
   }
-  // The copy Altype pressed is its own to take back.
-  if (text) clipGuard.claim()
+  releaseField(field)
+  // The copy Krya pressed is its own to take back.
+  if (copied) clipGuard.claim()
   const layouts = cycle.map(id => ({ id, table: tableFor(id) })).filter((l): l is { id: string; table: KeyTable } => !!l.table)
   const from = text ? sourceLayout(text, layouts) : undefined
   const to = nextLayout(cycle, from)
@@ -1819,13 +2122,17 @@ function keyLabel(hotkey: string): string {
 /** What the tray's panel shows. */
 function trayView(): TrayView {
   return {
-    keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', snipListen: settings.snipKey, snipTranslate: settings.textKey, switch: settings.switchKey },
+    keys: { listenCopied: settings.doubleCopy ? DOUBLE_COPY : '', typeToTranslate: settings.typeKey, checkEnglish: settings.typeCheckKey, snipListen: settings.snipKey, snipTranslate: settings.textKey, switch: settings.switchKey },
     autoFix: settings.autoFix,
     switchOn: settings.switchOn,
     layoutBadge: settings.layoutBadge,
     trayLayout: settings.trayLayout,
     doubleCopy: settings.doubleCopy,
     paused: settings.paused,
+    keep: {
+      on: settings.autoFix || (!!settings.fixKey && settings.fixKeyOn),
+      ...(lastAutoFix && !settings.keepWords.includes(lastAutoFix.word) ? lastAutoFix : { word: '', fixed: '' }),
+    },
     speech: { installed: speech?.installed ?? false, recording: dictation?.state === 'recording', noteKey: settings.noteKey },
     translator: activeTranslator().state(langCode(settings.native)).status,
     native: settings.native,
@@ -1839,92 +2146,124 @@ function refreshTray(): void {
   if (!tray) return
   tray.setToolTip(tooltip())
   void refreshTrayIcon()
+  sendTrayView()
+}
+
+/** The tray's panel drawn again, the icon left as it is. */
+function sendTrayView(): void {
   if (trayPanel && trayReady && !trayPanel.isDestroyed()) trayPanel.webContents.send('to-view', { type: 'tray', view: trayView() } satisfies ToView)
 }
 
-/** The tray's icon: the mark, faded while paused, or the layout in front on its keycap when the person wants that. */
+/** Something records now: dictation listening (any of its keys), the microphone on the Transcribe page, or a meeting through the Chrome extension. */
+function recordingNow(): boolean {
+  return dictation?.state === 'recording' || micRecording || !!speech?.meeting
+}
+
+/** The taskbar's theme, which the tray's icon follows (not the app's theme setting). */
+const darkTaskbar = () => nativeTheme.shouldUseDarkColorsForSystemIntegratedUI
+
+/**
+ * The tray's icon: the red dot while anything records (over everything else);
+ * else the layout in front on its keycap when the person wants that; else the
+ * duck, faded while paused. All drawn for the taskbar's theme.
+ */
 async function refreshTrayIcon(): Promise<void> {
+  if (recordingNow()) return tray?.setImage(trayIcon('recording'))
+  const dark = darkTaskbar()
   const front = settings.trayLayout && !settings.paused ? frontLayout : undefined
-  const icon = front ? await layoutIcon(keyboard.shortOf(front.layout).toLowerCase(), front.caps) : undefined
-  tray?.setImage(icon ?? trayIcon(settings.paused))
+  const icon = front ? await layoutIcon(keyboard.shortOf(front.layout).toLowerCase(), front.caps, dark) : undefined
+  // The recording may have begun while the keycap was drawn.
+  if (recordingNow()) return tray?.setImage(trayIcon('recording'))
+  tray?.setImage(icon ?? trayIcon(`${dark ? 'dark' : 'light'}${settings.paused ? '-paused' : ''}`))
 }
 
 /**
- * Runs in the tray panel's page: the mark's keycap (scripts/icons.mjs's
- * colours) with a layout's short name on it ("en"; underlined with Caps Lock
- * on), `size` pixels, as a PNG data URL.
+ * Runs in the tray panel's page: a layout's short name ("en") on a keycap in
+ * the tray duck's colours (scripts/icons.mjs), `size` pixels, as a PNG data
+ * URL: the cap in the taskbar's ink, its lower edge in the duck's colour, the
+ * letters (underlined with Caps Lock on) cut out of it, so the taskbar shows
+ * through them as through Windows' own glyphs.
  */
-function drawLayoutCap(size: number, text: string, caps: boolean): string {
+function drawLayoutCap(size: number, text: string, caps: boolean, ink: string, duck: string): string {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const g = canvas.getContext('2d') as CanvasRenderingContext2D
   const s = size / 16
-  const box = (x: number, y: number, w: number, h: number, r: number, fill: string) => {
-    g.beginPath()
-    g.roundRect(x * s, y * s, w * s, h * s, r * s)
-    g.fillStyle = fill
-    g.fill()
-  }
-  box(0, 0, 16, 16, 3.5, '#1c2128')
-  box(1, 1, 14, 14, 2.5, '#768390')
-  box(1, 1, 14, 12.5, 2.5, '#cdd9e5')
-  g.fillStyle = '#1c2128'
+  // One rounded shape, so its corners have one edge: the duck's colour, the cap's ink over all but its lower edge.
+  g.beginPath()
+  g.roundRect(0, 0, 16 * s, 16 * s, 3.5 * s)
+  g.clip()
+  g.fillStyle = ink
+  g.fillRect(0, 0, 16 * s, 14 * s)
+  g.fillStyle = duck
+  g.fillRect(0, 14 * s, 16 * s, 2 * s)
+  g.globalCompositeOperation = 'destination-out'
+  g.fillStyle = '#000'
   g.font = `800 ${size >= 32 ? 15 : 8}px "JetBrains Mono", monospace`
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.fillText(text.slice(0, 2), 8 * s, 7.4 * s)
-  if (caps) g.fillRect(4 * s, 11 * s, 8 * s, Math.max(1, s))
+  g.fillText(text.slice(0, 2), 8 * s, 6.9 * s)
+  if (caps) g.fillRect(4 * s, 10.5 * s, 8 * s, Math.max(1, s))
   return canvas.toDataURL('image/png')
 }
 
+/** The tray's ink and the duck's colour on a light and on a dark taskbar (scripts/icons.mjs `TASKBAR`). */
+const TASKBAR_COLOURS = { light: ['#1b1b1b', '#F2A100'], dark: ['#f2f2f2', '#FFD60A'] } as const
+
 const layoutIcons = new Map<string, Electron.NativeImage>()
-async function layoutIcon(short: string, caps: boolean): Promise<Electron.NativeImage | undefined> {
-  const key = `${short}${caps ? '^' : ''}`
+async function layoutIcon(short: string, caps: boolean, dark: boolean): Promise<Electron.NativeImage | undefined> {
+  const key = `${short}${caps ? '^' : ''}${dark ? ':dark' : ':light'}`
   const known = layoutIcons.get(key)
   if (known) return known
   if (!trayPanel || !trayReady || trayPanel.isDestroyed()) return undefined
+  const [ink, duck] = TASKBAR_COLOURS[dark ? 'dark' : 'light']
   try {
-    const draw = (size: number) => trayPanel?.webContents.executeJavaScript(`(${drawLayoutCap.toString()})(${size}, ${JSON.stringify(short)}, ${caps})`) as Promise<string>
+    const draw = (size: number) =>
+      trayPanel?.webContents.executeJavaScript(`(${drawLayoutCap.toString()})(${size}, ${JSON.stringify(short)}, ${caps}, ${JSON.stringify(ink)}, ${JSON.stringify(duck)})`) as Promise<string>
     const icon = nativeImage.createEmpty()
     icon.addRepresentation({ scaleFactor: 1, dataURL: await draw(16) })
     icon.addRepresentation({ scaleFactor: 2, dataURL: await draw(32) })
     layoutIcons.set(key, icon)
     return icon
   } catch (error) {
-    console.warn('Altype: could not draw the layout in the tray', error)
+    console.warn('Krya: could not draw the layout in the tray', error)
     return undefined
   }
 }
 
 function tooltip(): string {
-  if (settings.paused) return 'Altype · paused'
+  if (recordingNow()) return 'Recording'
+  if (settings.paused) return 'Krya · paused'
   const ways = [settings.doubleCopy ? 'Ctrl+C twice' : '', settings.selectKey ? keyLabel(settings.selectKey) : ''].filter(Boolean)
   const listen = ways.length ? `${ways.join(' or ')} to listen` : ''
   const translate = settings.translateKey ? `${keyLabel(settings.translateKey)} to translate` : ''
-  return ['Altype', listen, translate].filter(Boolean).join(' · ')
+  return ['Krya', listen, translate].filter(Boolean).join(' · ')
 }
 
-/** The tray's mark, made once each: tray.png, or tray-paused.png (the same, faded) while Altype is paused. */
-const trayIcons = new Map<boolean, Electron.NativeImage>()
-function trayIcon(paused: boolean): Electron.NativeImage {
-  let icon = trayIcons.get(paused)
+/** The tray's pictures (scripts/icons.mjs): the duck for a light or a dark taskbar, faded while paused, and the red dot while recording. */
+type TrayPicture = 'light' | 'dark' | 'light-paused' | 'dark-paused' | 'recording'
+
+/** Each picture, made once: media/tray-<picture>.png. */
+const trayIcons = new Map<TrayPicture, Electron.NativeImage>()
+function trayIcon(picture: TrayPicture): Electron.NativeImage {
+  let icon = trayIcons.get(picture)
   if (!icon) {
-    // The 16 px mark set pixel by pixel; Electron takes the @2x file beside it on a screen at 200 %.
-    icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'media', paused ? 'tray-paused.png' : 'tray.png'))
-    trayIcons.set(paused, icon)
+    // The 16 px picture set pixel by pixel; Electron takes the @2x file beside it on a screen at 200 %.
+    icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'media', `tray-${picture}.png`))
+    trayIcons.set(picture, icon)
   }
   return icon
 }
 
 function createTray(): Tray {
-  const t = new Tray(trayIcon(settings.paused))
-  // Either button opens Altype's own panel: Windows' menu cannot take Altype's look.
+  const t = new Tray(trayIcon(`${darkTaskbar() ? 'dark' : 'light'}${settings.paused ? '-paused' : ''}`))
+  // Either button opens Krya's own panel: Windows' menu cannot take Krya's look.
   t.on('click', () => toggleTrayPanel())
   t.on('right-click', () => toggleTrayPanel())
   return t
 }
 
-/** The tray's panel: a window of Altype's own by the tray icon, made once and hidden between uses. */
+/** The tray's panel: a window of Krya's own by the tray icon, made once and hidden between uses. */
 function createTrayPanel(): BrowserWindow {
   const win = new BrowserWindow({
     width: TRAY_WIDTH,
@@ -1938,7 +2277,7 @@ function createTrayPanel(): BrowserWindow {
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    title: 'Altype',
+    title: 'Krya',
     backgroundColor: appColor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1953,7 +2292,7 @@ function createTrayPanel(): BrowserWindow {
   win.removeMenu()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', event => event.preventDefault())
-  if (!app.isPackaged) win.webContents.on('console-message', m => console.warn(`Altype tray panel: ${m.message} (${m.sourceId}:${m.lineNumber})`))
+  if (!app.isPackaged) win.webContents.on('console-message', m => console.warn(`Krya tray panel: ${m.message} (${m.sourceId}:${m.lineNumber})`))
   // A click anywhere else puts it away, as a menu goes.
   win.on('blur', () => {
     if (Date.now() - trayShownAt > 200) hideTrayPanel()
@@ -1996,6 +2335,12 @@ function hideTrayPanel(): void {
   trayPanel.hide()
 }
 
+/** An empty translator or checker by the pointer, to type into (the tray's rows, their keys); nothing to paste back into. */
+function typeInto(kind: 'translate' | 'check', via?: string): void {
+  if (kind === 'translate') translateWindow('', screen.getCursorScreenPoint(), undefined, via)
+  else checkWindow('', screen.getCursorScreenPoint(), undefined, via)
+}
+
 function runTrayCommand(command: TrayCommand): void {
   switch (command) {
     case 'listenCopied':
@@ -2005,11 +2350,10 @@ function runTrayCommand(command: TrayCommand): void {
       afterSettling(() => useClipboard('translate'))
       return
     case 'typeToTranslate':
-      // An empty translator to type into; nothing to paste back into.
-      translateWindow('', screen.getCursorScreenPoint())
+      typeInto('translate')
       return
     case 'checkEnglish':
-      checkWindow('', screen.getCursorScreenPoint())
+      typeInto('check')
       return
     case 'listenScreen':
       snip('listen')
@@ -2037,7 +2381,7 @@ function runTrayCommand(command: TrayCommand): void {
 }
 
 /**
- * For a mouse button or a launcher: `Altype --clipboard` listens to the
+ * For a mouse button or a launcher: `Krya --clipboard` listens to the
  * copied text and `--translate` translates it; `--snip` snips to listen,
  * `--text` to translate. True when the arguments held one.
  */
@@ -2056,6 +2400,11 @@ function runCommand(argv: readonly string[]): boolean {
   }
   if (argv.includes('--text')) {
     snip('translate')
+    return true
+  }
+  // Started again by Move to Krya: back on the Storage page, measured anew.
+  if (argv.includes('--storage')) {
+    openApp('storage')
     return true
   }
   return false
@@ -2095,7 +2444,7 @@ function balloon(title: string, content: string, click?: () => void): void {
 
 function setUpSpeechEngine(): void {
   speech = new SpeechHost({
-    root: path.join(localDir(), 'speech'),
+    root: localPart('speech'),
     userDir: userDir(),
     engineDir: unpacked('engine'),
     extensionDir: unpacked('extension'),
@@ -2112,8 +2461,6 @@ function setUpSpeechEngine(): void {
   dictation = new Dictation({
     page: path.join(app.getAppPath(), 'media', 'dictation.html'),
     preload: path.join(__dirname, 'preload.js'),
-    background: cardColor,
-    border: borderColor,
     speech,
     paste: typeText,
     toEnglish: (text, from) => {
@@ -2133,8 +2480,8 @@ function setUpSpeechEngine(): void {
     moved: offset => saveSettings({ dictationBadge: offset }),
   })
   speech.start()
-  // Windows is asked about the cards and the battery once Altype is up: it takes a second or two.
-  setTimeout(() => void speech.probe().catch(error => console.warn('Altype: could not look at this computer', error)), 4000)
+  // Windows is asked about the cards and the battery once Krya is up: it takes a second or two.
+  setTimeout(() => void speech.probe().catch(error => console.warn('Krya: could not look at this computer', error)), 4000)
 }
 
 /** A page's request with an answer: the speech engine's API, a folder to pick, a transcript to save. */
@@ -2174,22 +2521,32 @@ async function hostCall(request: HostCall): Promise<unknown> {
 }
 
 function start(): void {
-  adoptOldFolder()
-  // altype.log beside the settings: the warnings, and what the windows did.
+  if (oldAppRunning()) {
+    dialog.showMessageBoxSync({ type: 'info', title: 'Krya', message: 'Altype is still running', detail: "Krya is Altype's new name. Quit Altype from its tray menu, then start Krya: it takes over your settings, words and downloads." })
+    app.quit()
+    return
+  }
+  const adopted = adoptOldFolder()
+  // krya.log beside the settings: the warnings, and what the windows did.
   logTo(userDir())
   const warn = console.warn.bind(console)
   console.warn = (...parts: unknown[]) => {
     warn(...parts)
     log(`warn: ${parts.map(p => (p instanceof Error ? (p.stack ?? p.message) : String(p))).join(' ')}`)
   }
-  log(`start: Altype ${app.getVersion()}, Electron ${process.versions.electron}, Windows ${process.getSystemVersion()}${TEST_HOME ? ', test home' : ''}`)
+  log(`start: Krya ${app.getVersion()}, Electron ${process.versions.electron}, Windows ${process.getSystemVersion()}${TEST_HOME ? ', test home' : ''}`)
+  // Everything downloaded in one folder (moveLocalFolder): what 0.10.0 and before kept in %APPDATA% moves over too.
+  logMoved(adopted)
   const firstRun = !fs.existsSync(settingsFile())
   settings = readSettings()
   // Only a fresh install sees the setup; a settings file from before it counts as set up (the default).
   if (firstRun) saveSettings({ setupDone: false })
   applyTheme()
-  // Windows' own light or dark, switched while Altype runs (the theme "system"), repaints the windows' ground and edge.
-  nativeTheme.on('updated', applyColors)
+  // Windows' own light or dark, switched while Krya runs (the theme "system"), repaints the windows' ground and edge, and the tray's icon for the taskbar.
+  nativeTheme.on('updated', () => {
+    applyColors()
+    refreshTray()
+  })
   applyLoginItem()
   setUpSpeech()
   words = new WordStore(path.join(userDir(), 'words.json'))
@@ -2199,25 +2556,25 @@ function start(): void {
   updater = new Updater(
     {
       change: () => postApp(),
-      ready: version => tray?.displayBalloon({ title: 'Altype', content: `Version ${version} is ready. It installs when Altype quits.` }),
+      ready: version => tray?.displayBalloon({ title: 'Krya', content: `Version ${version} is ready. It installs when Krya quits.` }),
     },
     settings.betaUpdates,
   )
-  translator = createTranslator(path.join(userDir(), 'models'), unpacked('dist', 'mt-worker.js'), {
+  translator = createTranslator(downloads('models'), unpacked('dist', 'mt-worker.js'), {
     loader: unpacked('vendor', 'bergamot', 'bergamot-translator.js'),
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
   })
   llmFiles = createLlmFiles({
-    root: path.join(localDir(), 'translate'),
-    // One server for the translation levels and the checker: one model on the card at a time.
+    root: localPart('translate'),
+    // One server for translating and checking: one model on the card at a time, the same for both.
     server: new LlamaServer({ log: path.join(userDir(), 'translate.log') }),
     // A model that does not fit an NVIDIA card goes to llama.cpp's CUDA build, far quicker there than Vulkan.
-    engineFor: model => ((model === 'check' ? checkAdvice(speech?.profile) : translationAdvice(speech?.profile)[model]).cuda ? 'cuda' : 'vulkan'),
+    engineFor: model => (translationAdvice(speech?.profile)[model].cuda ? 'cuda' : 'vulkan'),
   })
-  llm = createLlmTranslators({ files: llmFiles, onTimed: levelTimed })
-  checker = createChecker({ files: llmFiles, onTimed: checkTimed })
+  llm = createLlmTranslators({ files: llmFiles, onTimed: modelTimed })
+  checker = createChecker({ files: llmFiles, model: () => settings.model, onTimed: modelTimed })
   mistakes = new MistakeStore(path.join(userDir(), 'mistakes.json'))
-  levelSpeeds = loadLevelSpeeds(deviceFile())
+  modelSpeeds = loadModelSpeeds(deviceFile())
   tray = createTray()
   tray.on('balloon-click', () => balloonClick?.())
   setUpSpeechEngine()
@@ -2229,6 +2586,11 @@ function start(): void {
     keep: word => {
       learned.kept(word)
       saveSettings({ keepWords: [...settings.keepWords, word] })
+    },
+    // The tray's "Keep a word as typed…" offers the last one (only from a field not known to be a password).
+    autoFixed: (word, fixed) => {
+      lastAutoFix = { word, fixed }
+      sendTrayView()
     },
     // A word fixed by hand twice is fixed by itself from then on, and kept as typed no more.
     fixedByHand: word => {
@@ -2242,7 +2604,7 @@ function start(): void {
       applyKeyboard()
       postApp()
     },
-    selection: cycle => void convertSelection(cycle).catch(error => console.warn('Altype: could not convert the selection', error)),
+    selection: cycle => void convertSelection(cycle).catch(error => console.warn('Krya: could not convert the selection', error)),
     hotkey: action => {
       if (action === 'pause') return togglePause()
       // Paused, the thread keeps the pause key alone; a key on its way meanwhile does nothing.
@@ -2256,6 +2618,8 @@ function start(): void {
       else if (action === 'translate') selection('translate', settings.translateKey)
       else if (action === 'inPlace') selection('inPlace', settings.inPlaceKey)
       else if (action === 'check') selection('check', settings.checkKey)
+      else if (action === 'type') typeInto('translate', settings.typeKey)
+      else if (action === 'typeCheck') typeInto('check', settings.typeCheckKey)
       else if (action === 'text') snip('translate', settings.textKey)
       else if (action === 'window') openApp()
       else snip('listen', settings.snipKey)
@@ -2277,7 +2641,7 @@ function start(): void {
     },
     failed: message => {
       keyboardTrouble = message
-      console.warn(`Altype keyboard: ${message}`)
+      console.warn(`Krya keyboard: ${message}`)
       postApp()
     },
   })
@@ -2285,7 +2649,7 @@ function start(): void {
   card = createCard()
   ipcMain.on('to-host', (_event, message: ToHost) => onMessage(message))
   ipcMain.handle('host-call', (_event, request: HostCall) => hostCall(request))
-  // The card's window owns Altype's pasted text: handed over when the paste's program reads it.
+  // The card's window owns Krya's pasted text: handed over when the paste's program reads it.
   const stopRendering = watchRendering(
     card,
     () => {
@@ -2302,7 +2666,7 @@ function start(): void {
       stopRendering()
     }
   } catch (error) {
-    tray.displayBalloon({ title: 'Altype', content: `Ctrl+C twice will not work: ${messageOf(error)}. Use the tray menu.` })
+    tray.displayBalloon({ title: 'Krya', content: `Ctrl+C twice will not work: ${messageOf(error)}. Use the tray menu.` })
   }
   void sendHostVoices()
   updater.start()
@@ -2326,7 +2690,7 @@ if (!theOnlyOne) {
     // Quitting within a paste's moment: what the person had goes back now, while the card's window can still own the clipboard.
     clipGuard.flush()
   })
-  // The card is hidden, never closed: Altype keeps running in the tray.
+  // The card is hidden, never closed: Krya keeps running in the tray.
   app.on('window-all-closed', () => undefined)
   // Each part is put away on its own: one that fails must not keep the app from quitting.
   app.on('will-quit', () => {
@@ -2346,7 +2710,7 @@ if (!theOnlyOne) {
       try {
         step()
       } catch (error) {
-        console.warn(`Altype: could not put away the ${name}`, error)
+        console.warn(`Krya: could not put away the ${name}`, error)
       }
     }
   })

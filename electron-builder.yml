@@ -1,7 +1,11 @@
-# Windows installer: npm run dist → release/Altype-Setup-<version>.exe
-# The id of 2Talker, the app's first name: Altype installs over it, and updates it.
+# Windows installer: npm run dist → release/Krya-Setup-<version>.exe
+# The id of 2Talker, the app's first name: Krya installs over it and over Altype, and updates them.
+# An update keeps the folder the app was installed in (NSIS reads InstallLocation
+# from the registry key of this id), so Programs\altype stays Altype's old home and
+# the Chrome extension loaded unpacked from it keeps working; a new install goes to
+# Programs\krya (package.json's name). The program is Krya.exe either way.
 appId: com.ikstro.2talker
-productName: Altype
+productName: Krya
 copyright: Copyright © 2026 Yevhen Peshynskyi
 directories:
   output: release
@@ -46,7 +50,7 @@ nsis:
   oneClick: true
   perMachine: false
   runAfterFinish: true
-  artifactName: Altype-Setup-${version}.${ext}
+  artifactName: Krya-Setup-${version}.${ext}
   # Uninstall asks whether the data goes too (build/installer.nsh); an update keeps it.
   include: build/installer.nsh
 # Each release carries the update files of every channel (latest.yml, beta.yml):
@@ -57,4 +61,4 @@ generateUpdatesFilesForAllChannels: true
 publish:
   provider: github
   owner: ikstro
-  repo: altype
+  repo: krya

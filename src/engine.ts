@@ -72,7 +72,7 @@ export function createTranslator(root: string, workerPath: string, engineFiles: 
 
   function prepare(native: string, onProgress: (state: TranslatorState) => void): Promise<void> {
     const s = state(native)
-    if (s.status === 'unsupported') return Promise.reject(new Error(`Altype has no translator between English and this language yet`))
+    if (s.status === 'unsupported') return Promise.reject(new Error(`Krya has no translator between English and this language yet`))
     if (s.status === 'ready') return Promise.resolve()
     const existing = downloads.get(native)
     if (existing) return existing.running

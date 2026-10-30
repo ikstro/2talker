@@ -1,4 +1,4 @@
-Altype (formerly 2Talker)
+Krya (formerly Altype and 2Talker)
 Code: MIT License (see LICENSE). Parts of it come from the Language Tutor panel
 (https://github.com/ikstro/cc-translator), MIT License, same author.
 
@@ -29,7 +29,7 @@ media/lang-words.json: the 200 most frequent words of 25 languages, which tell t
 Natural voice (downloaded on request from the cc-translator voice-1 release, not shipped)
   Kokoro-82M by hexgrad (https://huggingface.co/hexgrad/Kokoro-82M), Apache License 2.0;
     ONNX export by onnx-community. Text rules in src/kokoro.ts follow kokoro-js (Apache License 2.0).
-  ONNX Runtime by Microsoft (https://onnxruntime.ai), MIT License; Altype bundles the
+  ONNX Runtime by Microsoft (https://onnxruntime.ai), MIT License; Krya bundles the
     JavaScript of onnxruntime-node and downloads its native library.
   phonemizer.js by Xenova (https://github.com/xenova/phonemizer.js), Apache License 2.0, which
     contains eSpeak NG (https://github.com/espeak-ng/espeak-ng), GNU General Public License v3.0.

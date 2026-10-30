@@ -60,7 +60,7 @@ async function start({ streamId, title, port: enginePort }) {
   const r = await call('POST', '/recordings', { source: 'meet', title, tracks })
   if (!r.ok) {
     release()
-    return { ok: false, error: `Altype did not take the recording (${r.status})` }
+    return { ok: false, error: `Krya did not take the recording (${r.status})` }
   }
   session.id = (await r.json()).id
   session.tracks.push(track('tab', tab))
@@ -84,7 +84,7 @@ async function stop() {
   release()
   const lost = s.tracks.reduce((n, t) => n + t.lost, 0)
   const r = await call('POST', `/recordings/${s.id}/finish`, {})
-  return r.ok ? { ok: true, id: s.id, lost } : { ok: false, error: `Altype did not take the end of the recording (${r.status})` }
+  return r.ok ? { ok: true, id: s.id, lost } : { ok: false, error: `Krya did not take the end of the recording (${r.status})` }
 }
 
 function release() {

@@ -105,7 +105,7 @@ button {
 }
 
 .icon-btn[aria-pressed='true'] {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Pinned: the pin stays lit, as the card stays. */
@@ -142,18 +142,18 @@ svg.glyph {
 }
 
 .primary-btn:hover {
-  background: var(--blue-deep);
+  background: var(--accent-hover);
 }
 
 .link {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .link:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 /* Copy: quiet, a word and its icon. */
@@ -193,7 +193,7 @@ svg.glyph {
 
 .quiet-btn.is-playing,
 .quiet-btn.is-playing:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .quiet-btn:disabled,
@@ -252,7 +252,7 @@ svg.glyph {
 
 .x2 {
   margin-left: 3px;
-  color: var(--accent);
+  color: var(--accent-text);
   font: 500 var(--t-caption) / 1 var(--mono);
 }
 
@@ -291,7 +291,7 @@ svg.glyph {
 .toggle[aria-pressed='true'] {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
   background: var(--tint);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ------------------------------------------------------------ states */
@@ -468,7 +468,7 @@ span.t.speaking:hover {
 ::highlight(tutor-word) {
   background-color: var(--selection);
   color: var(--strong);
-  text-decoration: underline solid var(--accent) 2px;
+  text-decoration: underline solid var(--mark) 2px;
   text-underline-offset: 4px;
 }
 
@@ -497,7 +497,7 @@ span.t.speaking:hover {
   border: 0;
   border-radius: 50%;
   background: var(--tint);
-  color: var(--accent);
+  color: var(--accent-text);
   opacity: 0;
   transition: opacity 80ms ease-out;
 }
@@ -576,7 +576,7 @@ span.t.speaking:hover {
 .listen.is-playing {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chip {
@@ -599,7 +599,7 @@ span.t.speaking:hover {
 .chip[aria-pressed='true'] {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
   background: var(--tint);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .space-hint {
@@ -724,7 +724,7 @@ body.no-translation .msg > .half-bar {
 }
 
 .wc-head .icon-btn[aria-pressed='true'] {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .wc-sense {
@@ -813,9 +813,9 @@ body.maximized .text-field {
 }
 
 .text-field:focus {
-  border-color: var(--accent);
+  border-color: var(--focus);
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 14%, transparent);
 }
 
 .text-view .half-bar {
@@ -865,9 +865,9 @@ body.maximized .text-field {
 }
 
 .select-pill select:focus-visible {
-  border-color: var(--accent);
+  border-color: var(--focus);
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 14%, transparent);
 }
 
 /* The list opens in the card's colors. */
@@ -1026,7 +1026,7 @@ body.maximized .text-field {
 }
 
 .paste-btn:hover:not(:disabled) {
-  background: var(--blue-deep);
+  background: var(--accent-hover);
 }
 
 /* Its key, on it: the .key cap in the button's own colors (not in its name). */

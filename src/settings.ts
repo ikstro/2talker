@@ -1,5 +1,5 @@
-// Altype's settings, kept in settings.json in the app's folder
-// (%APPDATA%\Altype). The learned language is English: the natural voice and
+// Krya's settings, kept in settings.json in the app's folder
+// (%APPDATA%\Krya). The learned language is English: the natural voice and
 // the word dictionaries are English ones.
 
 import { findLanguage, LANGUAGES } from './languages'
@@ -19,9 +19,11 @@ export const RATES: readonly number[] = [0.75, 0.9, 1, 1.15, 1.3, 1.5]
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
-export type TranslationLevel = 'fast' | 'accurate' | 'most'
+/** Krya's local language models (llmfiles.ts): Accurate is Gemma 4 E4B, Most accurate Gemma 4 12B; each translates and checks English. */
+export type LlmModel = 'accurate' | 'most'
+export type TranslationLevel = 'fast' | LlmModel
 
-/** The levels as the pages and the card name them. */
+/** The levels (and the models) as the pages and the card name them. */
 export const LEVEL_NAMES: Readonly<Record<TranslationLevel, string>> = { fast: 'Fast', accurate: 'Accurate', most: 'Most accurate' }
 
 export const CARD_WIDTH = { min: 320, max: 1200 }
@@ -54,7 +56,7 @@ export type Settings = {
   cardHeight: number
   /** Ctrl+C pressed twice: listen to the copied text. */
   doubleCopy: boolean
-  /** Keys (hotkey.ts; empty for none): listen to the selection (Altype copies it), or to a piece of the screen; */
+  /** Keys (hotkey.ts; empty for none): listen to the selection (Krya copies it), or to a piece of the screen; */
   selectKey: string
   snipKey: string
   /** translate the selection, or a piece of the screen. */
@@ -64,6 +66,9 @@ export type Settings = {
   inPlaceKey: string
   /** Check my English: the selection's mistakes in the card, set right, Paste over it (checker.ts). */
   checkKey: string
+  /** An empty card to type into, from anywhere: the translator, the checker (the tray's Type to translate…, Check my English…). */
+  typeKey: string
+  typeCheckKey: string
   /** The keyboard: a key (hotkey.ts) that switches the layout to the next of `layouts`; empty for none. `switchOn` turns it and the layouts' own keys off without forgetting them. */
   switchKey: string
   switchOn: boolean
@@ -82,7 +87,7 @@ export type Settings = {
   fixOnPause: boolean
   /** A quiet click when a word is fixed by itself. */
   fixSound: boolean
-  /** Altype learns from the person's typing (learning.ts): words fixed by hand, words of theirs. */
+  /** Krya learns from the person's typing (learning.ts): words fixed by hand, words of theirs. */
   learn: boolean
   /** A key that types the words at the end, typed in the wrong layout, again in the right one (again: the next layout), or converts the selection; empty for none. `fixKeyOn` turns it off without forgetting it. */
   fixKey: string
@@ -97,7 +102,7 @@ export type Settings = {
   trayLayout: boolean
   /** Nothing of the keyboard helper while a program fills the screen (a game, a presentation, a video). */
   quietFullScreen: boolean
-  /** A key that pauses Altype and resumes it; a key that opens its window. Empty for none. */
+  /** A key that pauses Krya and resumes it; a key that opens its window. Empty for none. */
   pauseKey: string
   windowKey: string
   /**
@@ -121,15 +126,17 @@ export type Settings = {
   /**
    * Words dictation and transcripts spell as written, one line each as the
    * person typed it: the word, then what it may be heard as in parentheses
-   * ("Altype (альтайп, all type)"); vocabulary.ts reads them.
+   * ("Krya (кря, края)"); vocabulary.ts reads them.
    */
   vocabulary: string[]
   /**
-   * Which translator every card and key uses: Fast (Firefox's models), Accurate
-   * or Most accurate (TranslateGemma 4B or 12B, llmtranslator.ts), downloaded
-   * when picked. A card waits for the level picked, never another.
+   * Which translator every card and key uses: Fast (Firefox's models), or the
+   * local model (`model`, llmtranslator.ts), downloaded when picked. A card
+   * waits for the level picked, never another. Never a model other than `model`.
    */
   translationLevel: TranslationLevel
+  /** The one local model, Accurate (Gemma 4 E4B) or Most accurate (Gemma 4 12B): Check my English uses it, and translation when it is not Fast. */
+  model: LlmModel
   /** Speech models: the most accurate this computer runs in time, or quicker ones. */
   speechPrefer: Prefer
   /** A speech model the person picked for dictation and for transcripts (models.json names); empty: chosen for this computer. */
@@ -142,7 +149,7 @@ export type Settings = {
   /** "Not now" to the test: what it would have measured then, and when; it is offered again when that changes, a day later at the soonest. */
   speechTestDeclinedKey: string
   speechTestDeclinedAt: number
-  /** Start Altype when Windows starts. */
+  /** Start Krya when Windows starts. */
   startWithWindows: boolean
   /** Updates include the test versions published before a release. */
   betaUpdates: boolean
@@ -150,7 +157,7 @@ export type Settings = {
   naturalDismissed: boolean
   /** The Home's opening moment (one line through fix, translate, listen) has played once; Replay plays it again. */
   introSeen: boolean
-  /** Altype paused: all its keys and reactions off (Ctrl+C twice, the keyboard helper, dictation) until turned back on. */
+  /** Krya paused: all its keys and reactions off (Ctrl+C twice, the keyboard helper, dictation) until turned back on. */
   paused: boolean
   /**
    * The first-run setup (the window's wizard: language, this computer, what to
@@ -179,6 +186,8 @@ export const DEFAULTS: Settings = {
   textKey: 'Control+Alt+T',
   inPlaceKey: '',
   checkKey: '',
+  typeKey: '',
+  typeCheckKey: '',
   switchKey: '',
   switchOn: true,
   layouts: [],
@@ -207,6 +216,7 @@ export const DEFAULTS: Settings = {
   dictationBadge: { dx: 0, dy: 0 },
   vocabulary: [],
   translationLevel: 'fast',
+  model: 'accurate',
   speechPrefer: 'accuracy',
   dictationModel: '',
   transcriptsModel: '',
@@ -239,6 +249,16 @@ function vocabularyLines(raw: unknown): string[] {
     if (out.length >= VOCABULARY.lines) break
   }
   return out
+}
+
+/** A word as Kept as typed holds it: trimmed and in lower case, as the keyboard thread compares them. */
+export const keptForm = (text: string): string => text.trim().toLowerCase()
+
+/** Kept as typed with `text` added (the page's Add and the tray's field); undefined when it is empty or there already. */
+export function addKept(list: readonly string[], text: string): string[] | undefined {
+  const word = keptForm(text)
+  if (!word || list.includes(word)) return undefined
+  return [...list, word]
 }
 
 /** The languages a text of the person's is read as, by code: their own, English, then the others they named. */
@@ -284,6 +304,17 @@ function badgeOffset(v: unknown): Settings['dictationBadge'] {
   return { dx: n(r.dx), dy: n(r.dy) }
 }
 
+/**
+ * The level and the one model, kept in step: the model wins, so picking one on
+ * the Check page moves a translation level that was the other model too. A
+ * file from before the shared model (0.10.1) takes the model from its level.
+ */
+function levelAndModel(level: unknown, model: unknown): Pick<Settings, 'translationLevel' | 'model'> {
+  const isModel = (v: unknown): v is LlmModel => v === 'accurate' || v === 'most'
+  const m = isModel(model) ? model : isModel(level) ? level : DEFAULTS.model
+  return { translationLevel: isModel(level) ? m : 'fast', model: m }
+}
+
 export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Settings | 'fixApps', unknown>>
   const flag = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d)
@@ -315,6 +346,8 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     textKey: key(r.textKey, DEFAULTS.textKey),
     inPlaceKey: key(r.inPlaceKey, DEFAULTS.inPlaceKey),
     checkKey: key(r.checkKey, DEFAULTS.checkKey),
+    typeKey: key(r.typeKey, DEFAULTS.typeKey),
+    typeCheckKey: key(r.typeCheckKey, DEFAULTS.typeCheckKey),
     switchKey: key(r.switchKey, DEFAULTS.switchKey),
     switchOn: flag(r.switchOn, DEFAULTS.switchOn),
     layouts: strings(r.layouts, s => s.trim().toUpperCase()).filter(s => /^[0-9A-F]{8}$/.test(s)),
@@ -330,7 +363,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     fixKeyOn: flag(r.fixKeyOn, DEFAULTS.fixKeyOn),
     apps: appRules(r.apps, r.fixApps),
     // Lower case, as the keyboard thread compares them; the Set in `strings` drops the same word twice.
-    keepWords: strings(r.keepWords, s => s.trim().toLowerCase()),
+    keepWords: strings(r.keepWords, keptForm),
     layoutBadge: flag(r.layoutBadge, DEFAULTS.layoutBadge),
     trayLayout: flag(r.trayLayout, DEFAULTS.trayLayout),
     quietFullScreen: flag(r.quietFullScreen, DEFAULTS.quietFullScreen),
@@ -343,7 +376,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     practiceKey: key(r.practiceKey, DEFAULTS.practiceKey),
     dictationBadge: badgeOffset(r.dictationBadge),
     vocabulary: vocabularyLines(r.vocabulary),
-    translationLevel: r.translationLevel === 'accurate' || r.translationLevel === 'most' ? r.translationLevel : 'fast',
+    ...levelAndModel(r.translationLevel, r.model),
     speechPrefer: r.speechPrefer === 'speed' ? 'speed' : 'accuracy',
     dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),
     transcriptsModel: key(r.transcriptsModel, DEFAULTS.transcriptsModel),

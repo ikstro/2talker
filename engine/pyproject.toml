@@ -1,6 +1,6 @@
-# Altype's speech engine. Installed by the app in parts (src/speechpack.ts runs
+# Krya's speech engine. Installed by the app in parts (src/speechpack.ts runs
 # `uv sync` with the extras of the parts chosen), into
-# %LOCALAPPDATA%\Altype\speech\env, outside the app's own folder:
+# %LOCALAPPDATA%\Krya\speech\env, outside the app's own folder:
 #   core          speech to text (faster-whisper on the CPU, and
 #                 Parakeet through onnx-asr on the same onnxruntime)  ~330 MB
 #   gpu           the same on an NVIDIA card (cuBLAS, cuDNN)          ~1.7 GB
@@ -9,9 +9,9 @@
 #                 the CUDA libraries, so it replaces gpu              ~4 GB
 
 [project]
-name = "altype-speech"
+name = "krya-speech"
 version = "0.1.0"
-description = "Altype's local speech engine: Whisper for the words, pyannote for the speakers."
+description = "Krya's local speech engine: Whisper for the words, pyannote for the speakers."
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "faster-whisper>=1.2",

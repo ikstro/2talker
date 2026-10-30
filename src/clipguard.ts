@@ -1,12 +1,12 @@
-// Altype borrows the clipboard: to copy a selection, to paste a translation,
+// Krya borrows the clipboard: to copy a selection, to paste a translation,
 // a converted word or a dictated phrase, and the screen snip lands there.
 // The guard keeps what the person had there and puts it back after, so
-// nothing of Altype's is left: one snapshot for a run of actions close
-// together (a second press of the fix key would otherwise keep Altype's own
+// nothing of Krya's is left: one snapshot for a run of actions close
+// together (a second press of the fix key would otherwise keep Krya's own
 // text as "what was there"); put back only while the clipboard still holds
-// Altype's doing (a copy the person made meanwhile stays); not written at
+// Krya's doing (a copy the person made meanwhile stays); not written at
 // all when nothing changed; tried again while another program holds it. A
-// pasted text is only promised (winclipboard.ts): Windows asks Altype for it
+// pasted text is only promised (winclipboard.ts): Windows asks Krya for it
 // when a program reads it (`read` decides who gets it), and what the person
 // had goes back once the paste's program has it, not after a guessed moment
 // (a slow program would paste the old content).
@@ -20,7 +20,7 @@ export type ClipboardBackend<S> = {
   writeText(text: string, paste: boolean): void
 }
 
-/** Changes of Altype's own this many back are still known as its own. */
+/** Changes of Krya's own this many back are still known as its own. */
 const REMEMBERED = 32
 /** Waits between tries while another program holds the clipboard. */
 const RETRY_MS = [30, 60, 120, 240, 480]
@@ -43,18 +43,18 @@ export class ClipboardGuard<S> {
     private readonly wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
   ) {}
 
-  /** Before Altype changes the clipboard: what is there is kept, unless an earlier action's keeping is still waiting to go back. */
+  /** Before Krya changes the clipboard: what is there is kept, unless an earlier action's keeping is still waiting to go back. */
   hold(): void {
     this.cancelTimer()
     if (!this.saved) this.saved = { content: this.backend.snapshot(), sequence: this.backend.sequence() }
   }
 
-  /** Whether a run of Altype's actions has the clipboard. */
+  /** Whether a run of Krya's actions has the clipboard. */
   get holding(): boolean {
     return this.saved !== undefined
   }
 
-  /** Puts a text there; `paste`: for pasting, which Altype then presses (`pasted`). */
+  /** Puts a text there; `paste`: for pasting, which Krya then presses (`pasted`). */
   async write(text: string, paste = false): Promise<void> {
     // Known before writing: a program may ask for the text while Windows is still announcing it.
     this.paste = paste ? { pressed: false, read: false, watchers: new Set() } : undefined
@@ -93,13 +93,13 @@ export class ClipboardGuard<S> {
     return true
   }
 
-  /** The clipboard as it is now is Altype's doing: a copy it pressed in another program. */
+  /** The clipboard as it is now is Krya's doing: a copy it pressed in another program. */
   claim(): void {
     this.ours.push(this.backend.sequence())
     if (this.ours.length > REMEMBERED) this.ours.shift()
   }
 
-  /** Whether the clipboard's latest change is Altype's: its writing, a copy it pressed, or its putting back. */
+  /** Whether the clipboard's latest change is Krya's: its writing, a copy it pressed, or its putting back. */
   isOurs(): boolean {
     return this.ours.includes(this.backend.sequence())
   }
@@ -119,7 +119,7 @@ export class ClipboardGuard<S> {
     this.cancelTimer()
     this.timer = setTimeout(() => {
       this.timer = undefined
-      void this.putBack().catch(error => console.warn('Altype: could not put the clipboard back', error))
+      void this.putBack().catch(error => console.warn('Krya: could not put the clipboard back', error))
     }, ms)
   }
 
@@ -129,7 +129,7 @@ export class ClipboardGuard<S> {
     this.saved = undefined
   }
 
-  /** Puts back what the person had, if the clipboard still holds Altype's doing. */
+  /** Puts back what the person had, if the clipboard still holds Krya's doing. */
   async putBack(): Promise<void> {
     const saved = this.take()
     if (saved) await this.tried(() => this.backend.restore(saved))
@@ -143,11 +143,11 @@ export class ClipboardGuard<S> {
     try {
       this.backend.restore(saved)
     } catch (error) {
-      console.warn('Altype: could not put the clipboard back on quitting', error)
+      console.warn('Krya: could not put the clipboard back on quitting', error)
     }
   }
 
-  /** The kept content, when it should go back: not when nothing changed, nor when the latest change is not Altype's. */
+  /** The kept content, when it should go back: not when nothing changed, nor when the latest change is not Krya's. */
   private take(): S | undefined {
     this.cancelTimer()
     const saved = this.saved

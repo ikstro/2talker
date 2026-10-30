@@ -40,8 +40,8 @@ describe('createChecker', () => {
       target: () => ({ exe: 'llama-server.exe', model: 'check.gguf' }),
       server: { run: async (_t: unknown, job: (base: string, loaded: boolean) => Promise<unknown>) => job('http://127.0.0.1:9001', true) },
     } as unknown as LlmFiles
-    const timed: { text: number; start?: number }[] = []
-    const checker = createChecker({ files, fetch: post as unknown as typeof fetch, onTimed: t => timed.push(t) })
+    const timed: { model: string; text: number; start?: number }[] = []
+    const checker = createChecker({ files, model: () => 'most', fetch: post as unknown as typeof fetch, onTimed: (model, t) => timed.push({ model, ...t }) })
     return { checker, asked, timed }
   }
 
@@ -52,6 +52,7 @@ describe('createChecker', () => {
     expect(await checker.check('  Think abot this idea.\n', 'ru')).toEqual({ corrected: '  Think about this idea.\n', note: 'abot → about: опечатка.' })
     expect(asked[0]?.system).toContain('whose own language is Russian')
     expect(asked[0]?.body).toMatchObject({ temperature: 0, chat_template_kwargs: { enable_thinking: false }, response_format: { type: 'json_schema' } })
+    expect(timed[0]).toMatchObject({ model: 'most' })
     expect(timed[0]?.start).toBeGreaterThanOrEqual(0)
   })
 

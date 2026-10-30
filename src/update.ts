@@ -1,4 +1,4 @@
-// Updates from the GitHub releases of ikstro/altype (electron-builder.yml
+// Updates from the GitHub releases of ikstro/krya (electron-builder.yml
 // names them): checked when the app starts and every few hours, downloaded
 // quietly, installed when the app quits. A run from source never updates.
 // Test versions (a prerelease, a tag like v1.2.0-beta.1) come only to those

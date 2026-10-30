@@ -188,6 +188,8 @@ async function startMic(): Promise<void> {
   try {
     await r.start()
     tx.recorder = r
+    // The tray shows the red dot while it records.
+    post({ type: 'micRecording', on: true })
   } catch (error) {
     toast(micTrouble(error), undefined, true)
   }
@@ -197,6 +199,7 @@ async function startMic(): Promise<void> {
 async function stopMic(): Promise<void> {
   const r = tx.recorder
   tx.recorder = undefined
+  post({ type: 'micRecording', on: false })
   redrawPage()
   if (!r) return
   try {
@@ -211,6 +214,7 @@ async function stopMic(): Promise<void> {
 async function cancelMic(): Promise<void> {
   const r = tx.recorder
   tx.recorder = undefined
+  post({ type: 'micRecording', on: false })
   redrawPage()
   await r?.cancel()
 }

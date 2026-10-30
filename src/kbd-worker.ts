@@ -61,7 +61,7 @@ const WM_APP_PORT = 0x8000
 const WM_APP_FIX = 0x8001
 /** The field thread answered. */
 const WM_APP_FIELD = 0x8002
-/** An Alt or Win tap of Altype's is let go behind a key that types nothing (wParam: the key). */
+/** An Alt or Win tap of Krya's is let go behind a key that types nothing (wParam: the key). */
 const WM_APP_MASK = 0x8003
 /** AutoHotkey's key that types nothing. */
 const VK_MASK = 0xe8
@@ -206,10 +206,10 @@ const keyboardProc = koffi.register((code: number, wParam: number | bigint, lPar
       const message = Number(wParam)
       const injected = (info.flags & LLKHF_INJECTED) !== 0
       const mark = Number(info.dwExtraInfo)
-      // Altype's own keys; the person's keys pressed again after a fix count as theirs; any other program's are foreign.
+      // Krya's own keys; the person's keys pressed again after a fix count as theirs; any other program's are foreign.
       const own = injected && mark === OWN_KEYS
       const foreign = injected && mark !== OWN_KEYS && mark !== REPLAY_KEYS
-      // The settings say so once when another program presses keys by itself (the main process's copy and paste are Altype's).
+      // The settings say so once when another program presses keys by itself (the main process's copy and paste are Krya's).
       if (foreign && !foreignSeen && mark !== MAIN_KEYS && !MASK_KEYS.has(info.vkCode)) {
         foreignSeen = true
         send({ type: 'foreignKeys' })
@@ -249,7 +249,7 @@ drainPort()
 const module = GetModuleHandleW(null)
 const keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardProc, module, 0)
 const mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouseProc, module, 0)
-if (!keyboardHook || !mouseHook) send({ type: 'error', message: 'Windows did not let Altype watch the keyboard' })
+if (!keyboardHook || !mouseHook) send({ type: 'error', message: 'Windows did not let Krya watch the keyboard' })
 // The main process learns where to wake this thread.
 send({ type: 'thread', tid })
 

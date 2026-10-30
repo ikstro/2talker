@@ -1,13 +1,16 @@
-// The files of Altype's local language models: llama.cpp's builds and the
-// models they run, Google's TranslateGemma 4B and 12B for the Accurate and Most
-// accurate translation levels (llmtranslator.ts) and Gemma 4 E4B for Check my
-// English (checker.ts). Nothing is downloaded before the person picks a level
-// or the checker. The engine is llama.cpp's Vulkan build (any graphics card,
-// or the processor), or its CUDA build for a model that does not fit an NVIDIA
-// card (`engineFor`; hardware.ts translationAdvice), each unpacked once into
+// The files of Krya's local language models: llama.cpp's builds and the
+// models they run, Google's Gemma 4 E4B (Accurate) and Gemma 4 12B (Most
+// accurate). The person uses one of them (`model` in the settings): it
+// translates (llmtranslator.ts) and checks English (checker.ts), so the two
+// never load a model each. Nothing is downloaded before the person picks one.
+// The engine is llama.cpp's Vulkan build (any graphics card, or the
+// processor), or its CUDA build for a model that does not fit an NVIDIA card
+// (`engineFor`; hardware.ts translationAdvice), each unpacked once into
 // <root>\engine\<build>-<sha256 head> and shared by every model; the models are
 // <root>\models\<sha256 head>-<file>. All pinned with size and SHA-256 in
 // llm-manifest.json. One server (llama.ts) serves them all, one model at a time.
+// A model file the manifest no longer names (TranslateGemma, until 0.10.1) is
+// `unused`: shown on the Storage page, deleted only when the person says so.
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -15,8 +18,9 @@ import * as path from 'node:path'
 import { fetchPinned, openStream, unzip, type Pinned } from './download'
 import type { LlamaServer, LlamaTarget } from './llama'
 import manifest from './llm-manifest.json'
+import type { LlmModel } from './settings'
 
-export type LlmModel = 'accurate' | 'most' | 'check'
+export type { LlmModel }
 export type LlmEngine = 'vulkan' | 'cuda'
 
 type Build = { name: string; files: Pinned[] }
@@ -24,12 +28,12 @@ export type ModelFile = Pinned & { name: string; file: string }
 export type LlmManifest = { engine: Record<LlmEngine, Build>; models: Record<LlmModel, ModelFile>; languages: Record<string, string> }
 
 const MANIFEST = manifest as LlmManifest
-const MODELS: readonly LlmModel[] = ['accurate', 'most', 'check']
+const MODELS: readonly LlmModel[] = ['accurate', 'most']
 const ENGINES: readonly LlmEngine[] = ['vulkan', 'cuda']
 
 /** Each model, and how it is named. */
 export const LLM_MODELS: Readonly<Record<LlmModel, ModelFile>> = MANIFEST.models
-/** TranslateGemma's names of the languages it translates, by code. */
+/** The languages the models are asked to translate, named in English, by code. */
 export const LLM_LANGUAGES: Readonly<Record<string, string>> = MANIFEST.languages
 
 /** Where the engines and the models are kept under `root`. */
@@ -70,6 +74,9 @@ export type LlmFiles = {
   target(model: LlmModel): LlamaTarget
   /** Deletes a model (an engine too once no model left needs it); its server is stopped and gone first, as Windows keeps a file in use. */
   remove(model: LlmModel): Promise<void>
+  /** Model files here that no model of the manifest is (an older Krya's), and deleting them. */
+  unused(): string[]
+  removeUnused(): void
   dispose(): void
 }
 
@@ -186,6 +193,17 @@ export function createLlmFiles(o: LlmFilesOptions): LlmFiles {
     return entry.running
   }
 
+  function unused(): string[] {
+    const dir = path.join(o.root, 'models')
+    const ours = new Set(MODELS.map(model => path.basename(paths.model(model))))
+    try {
+      // A download of ours still running is its file with .part after it.
+      return fs.readdirSync(dir).filter(name => !ours.has(name.replace(/\.part$/, ''))).map(name => path.join(dir, name))
+    } catch {
+      return []
+    }
+  }
+
   return {
     manifest: m,
     server,
@@ -207,6 +225,10 @@ export function createLlmFiles(o: LlmFilesOptions): LlmFiles {
         if (server.exe === paths.exe(kind)) await server.stop()
         removePath(paths.engineDir(kind))
       }
+    },
+    unused,
+    removeUnused() {
+      for (const file of unused()) removePath(file)
     },
     dispose: () => server.dispose(),
   }

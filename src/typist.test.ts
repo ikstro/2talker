@@ -82,7 +82,7 @@ class Desk {
         installed: () => ['en', 'ru', 'uk'],
         exeOf: () => this.exe,
         elevated: () => false,
-        ownExe: 'altype.exe',
+        ownExe: 'krya.exe',
         switchLayout: (_hwnd, id) => {
           this.layout = id
         },
@@ -198,6 +198,16 @@ describe('fixing as one types', () => {
     expect(desk.sent).toContainEqual({ type: 'keep', word: 'ghbdtn' })
     desk.tap(VK_BACK)
     expect(desk.text).toBe('ghbdtn')
+  })
+
+  test('a word fixed by itself is told to the main process, as typed and as fixed, never from a password field', () => {
+    const desk = new Desk({ autoFix: true })
+    desk.keys('ghbdtn ')
+    expect(desk.sent).toContainEqual({ type: 'autoFixed', word: 'ghbdtn', fixed: 'привет' })
+    const secret = new Desk({ autoFix: true })
+    secret.password = true
+    secret.keys('ghbdtn ')
+    expect(secret.sent.find(m => m.type === 'autoFixed')).toBeUndefined()
   })
 
   test('right words, and programs left out, are not touched', () => {
@@ -713,7 +723,7 @@ test('Alt tapped twice is the translate key, with a mask key from another progra
   expect(desk.sent).toContainEqual({ type: 'hotkey', action: 'translate' })
 })
 
-test('an Alt or Win tap that is a key of Altype\'s is let go behind a key that types nothing, so no menu takes the focus', () => {
+test('an Alt or Win tap that is a key of Krya\'s is let go behind a key that types nothing, so no menu takes the focus', () => {
   const desk = new Desk({ keys: { check: 'LeftAlt*2', snip: 'RightSuper' } })
   // Both taps of the double: the first cannot know a second comes.
   expect(desk.typist.key(0xa4, 0, true)).toBe(false)
@@ -732,10 +742,30 @@ test('an Alt or Win tap that is a key of Altype\'s is let go behind a key that t
   ctrl.tap(VK_LCONTROL)
   ctrl.tap(VK_LCONTROL)
   expect([desk.masked.length, ctrl.masked]).toEqual([3, []])
-  // A program left out of Altype's keys keeps its menu.
+  // A program left out of Krya's keys keeps its menu.
   const off = new Desk({ keys: { check: 'LeftAlt*2' }, apps: { 'notepad.exe': { off: ['keys'], layout: '' } } })
   off.tap(0xa4)
   expect(off.masked).toEqual([])
+})
+
+test('Right Alt tapped twice works in a layout with AltGr, which sends a made-up Left Ctrl with it', () => {
+  const desk = new Desk({ keys: { check: 'RightAlt*2' } })
+  for (let i = 0; i < 2; i++) {
+    desk.typist.key(VK_LCONTROL, 0x21d, true)
+    desk.typist.key(0xa5, 0x38, true)
+    desk.typist.key(VK_LCONTROL, 0x21d, false)
+    desk.typist.key(0xa5, 0x38, false)
+  }
+  expect(desk.sent).toContainEqual({ type: 'hotkey', action: 'check' })
+  // The real Left Ctrl with Right Alt is still a chord, no tap.
+  const real = new Desk({ keys: { check: 'RightAlt*2' } })
+  for (let i = 0; i < 2; i++) {
+    real.typist.key(VK_LCONTROL, 0x1d, true)
+    real.typist.key(0xa5, 0x38, true)
+    real.typist.key(0xa5, 0x38, false)
+    real.typist.key(VK_LCONTROL, 0x1d, false)
+  }
+  expect(real.sent.filter(m => m.type === 'hotkey')).toEqual([])
 })
 
 test('another program\'s keys between two taps (a switcher answering a Ctrl tap) do not break the double', () => {

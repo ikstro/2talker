@@ -1,4 +1,4 @@
-// The popup: what this tab is, whether Altype's speech engine is running, Record / Stop.
+// The popup: what this tab is, whether Krya's speech engine is running, Record / Stop.
 
 const main = document.getElementById('main')
 const engine = document.getElementById('engine')
@@ -54,7 +54,7 @@ async function render(error) {
     children.push(
       el('div', { class: 'title' }, tab?.title || 'Tab'),
       el('button', { disabled: !status.engine, onclick: () => act('start', tab) }, 'Record this tab'),
-      el('div', { class: 'muted' }, status.engine ? 'Or Alt+Shift+M on the meeting tab. The tab and your microphone are recorded as two tracks.' : 'Start Altype and turn on Transcribe: it makes the text on this computer.'),
+      el('div', { class: 'muted' }, status.engine ? 'Or Alt+Shift+M on the meeting tab. The tab and your microphone are recorded as two tracks.' : 'Start Krya and turn on Transcribe: it makes the text on this computer.'),
     )
     if (!mic) {
       children.push(
@@ -70,7 +70,7 @@ async function render(error) {
 async function act(type, tab) {
   for (const b of main.querySelectorAll('button')) b.disabled = true
   const answer = await ask(type === 'start' ? { type, tabId: tab.id } : { type })
-  await render(answer && !answer.ok ? answer.error : answer?.lost ? 'Part of the recording did not reach Altype' : undefined)
+  await render(answer && !answer.ok ? answer.error : answer?.lost ? 'Part of the recording did not reach Krya' : undefined)
   if (type === 'stop' && answer?.ok) main.prepend(el('div', { class: 'muted' }, 'Sent. The transcript is ready in a few minutes.'))
 }
 

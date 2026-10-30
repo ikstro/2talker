@@ -42,9 +42,9 @@ import {
 import type { Press } from './winkbd'
 
 /** What a key does: switch or fix the layout here, or go to one layout; the others are the main process's. */
-export type KeyAction = 'switch' | 'fix' | 'layout' | 'select' | 'snip' | 'translate' | 'text' | 'inPlace' | 'check' | 'dictate' | 'english' | 'note' | 'again' | 'practice' | 'pause' | 'window'
+export type KeyAction = 'switch' | 'fix' | 'layout' | 'select' | 'snip' | 'translate' | 'text' | 'inPlace' | 'check' | 'type' | 'typeCheck' | 'dictate' | 'english' | 'note' | 'again' | 'practice' | 'pause' | 'window'
 
-/** The parts of the keyboard helper a program can be left out of: fixing as one types, the switch and layout keys, the badge, every key of Altype's. */
+/** The parts of the keyboard helper a program can be left out of: fixing as one types, the switch and layout keys, the badge, every key of Krya's. */
 export type AppPart = 'fix' | 'switch' | 'badge' | 'keys'
 
 /** A word learned from the person's typing: as typed (lower case), and the language it goes into, or belongs to. */
@@ -102,6 +102,8 @@ export type KbdOut =
   | { type: 'layout'; layout: string; caps: boolean; badge: boolean; caret?: Caret }
   /** A fix was taken back: the word, as typed, is kept from now on. */
   | { type: 'keep'; word: string }
+  /** A word was fixed by itself, in a field not known to be a password: as typed (as Kept as typed would hold it) and what it became; the tray offers to keep it. */
+  | { type: 'autoFixed'; word: string; fixed: string }
   /** The person fixed a word by hand (the fix key, or erased and typed again in another layout): as typed, and the language it went into. */
   | { type: 'fixedByHand'; word: string; lang: string }
   /** A word of the person's, in no list, was typed right once more (`count` times by its fingerprint); at `LEARN_AFTER`, the word itself. */
@@ -167,12 +169,15 @@ const MOVES = new Set([0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, VK_DELETE
 
 /** Keys that type nothing, which programs press to keep Alt or Win from opening a menu (0xE8 is AutoHotkey's, 0xFF PowerToys'). */
 export const MASK_KEYS: ReadonlySet<number> = new Set([0x07, 0xe8, 0xff])
+const VK_LCONTROL = 0xa2
+/** The scan code of the Left Ctrl that AltGr sends with Right Alt. */
+const ALTGR_CTRL_SCAN = 0x21d
 /** Alt and Win, left and right: tapped alone, they open a program's menu or Start. */
 const MENU_KEYS: ReadonlySet<number> = new Set([0xa4, 0xa5, 0x5b, 0x5c])
 
 /** Caps Lock is asked of Windows again when the last answer is older than this (Windows may turn it off on Shift). */
 const CAPS_FRESH_MS = 1000
-/** After Altype switches a window's layout, Windows may go on naming the old one for a while: the new one is trusted until Windows agrees, or this long. */
+/** After Krya switches a window's layout, Windows may go on naming the old one for a while: the new one is trusted until Windows agrees, or this long. */
 const SWITCH_TRUST_MS = 3000
 
 /** A modifier tapped alone counts while held no longer than this. */
@@ -205,6 +210,8 @@ type Fix = {
   plain?: Press[]
   /** Undoes what deciding the fix changed, when it is called off. */
   undo?: () => void
+  /** A fix by itself, once typed: the word as typed and what it became, for the main process. */
+  report?: { word: string; fixed: string }
 }
 
 export class Typist {
@@ -249,7 +256,7 @@ export class Typist {
   private trustNext = false
   /** The layout the last key was typed in, in which window. */
   private lastLayout: { hwnd: bigint; layout: string } | undefined
-  /** The layout Altype switched to by itself, until the next key: a change to it is not the person's. */
+  /** The layout Krya switched to by itself, until the next key: a change to it is not the person's. */
   private ownSwitch: string | undefined
   /** What was done last: typing (the fix key fixes it), selecting (it converts the selection), or something else. */
   private last: 'typed' | 'selected' | 'none' = 'none'
@@ -291,7 +298,7 @@ export class Typist {
   /** Caps Lock, as last asked of Windows (or flipped by its key since), and when. */
   private caps = false
   private capsAt = Number.NEGATIVE_INFINITY
-  /** The layout Altype last switched a window to, trusted over Windows' late answer. */
+  /** The layout Krya last switched a window to, trusted over Windows' late answer. */
   private expected: { hwnd: bigint; layout: string; until: number } | undefined
 
   constructor(private readonly env: TypistEnv) {}
@@ -342,11 +349,13 @@ export class Typist {
   // ---------------------------------------------------------------- keys
 
   /**
-   * A key went down or up; `own`: pressed by Altype itself; `foreign`: by
+   * A key went down or up; `own`: pressed by Krya itself; `foreign`: by
    * another program. True keeps it from the program.
    */
   key(vk: number, scan: number, down: boolean, own = false, foreign = false): boolean {
     if (own) return false
+    // Right Alt in a layout with AltGr (Russian's ₽, Ukrainian's ґ) comes with a Left Ctrl Windows makes up: no key of the person's, or Right Alt would never be tapped alone.
+    if (vk === VK_LCONTROL && scan === ALTGR_CTRL_SCAN) return false
     if (foreign) {
       this.foreignKey(vk, down)
       return false
@@ -359,7 +368,7 @@ export class Typist {
     const mod = modOf(vk)
     if (!down) {
       this.held.delete(vk)
-      // An Alt or Win tap that is one of Altype's keys: its key-up is let go later, after a key that types nothing (VS Code's menu bar took the focus from its chat).
+      // An Alt or Win tap that is one of Krya's keys: its key-up is let go later, after a key that types nothing (VS Code's menu bar took the focus from its chat).
       if (mod && this.onModifierUp(vk)) {
         this.env.mask(vk)
         return true
@@ -369,7 +378,7 @@ export class Typist {
     const repeat = this.held.has(vk)
     this.held.add(vk)
     if (this.quiet()) {
-      // A game or a presentation: no key of Altype's, no fixing; modifiers are still followed, so none seems held after.
+      // A game or a presentation: no key of Krya's, no fixing; modifiers are still followed, so none seems held after.
       this.spoilTap()
       this.resetRun()
       this.last = 'none'
@@ -399,7 +408,7 @@ export class Typist {
   }
 
   /**
-   * A key another program pressed (another layout switcher, a macro tool, Altype's
+   * A key another program pressed (another layout switcher, a macro tool, Krya's
    * own copy and paste): it never makes or breaks a tap of the person's keys,
    * which another switcher reacting to a Ctrl tap would; a modifier still
    * counts as held; anything typed means the keys kept no longer match the text.
@@ -479,7 +488,7 @@ export class Typist {
     return this.keys.find(({ spec }) => spec.kind === kind && spec.vk === vk)
   }
 
-  /** Whether a key works in the program in front: a program can be left out of Altype's keys, or of switching; the pause key works everywhere. */
+  /** Whether a key works in the program in front: a program can be left out of Krya's keys, or of switching; the pause key works everywhere. */
   private allowed(key: Bound): boolean {
     if (key.action === 'pause') return true
     const front = this.env.foreground()
@@ -528,7 +537,7 @@ export class Typist {
     }
   }
 
-  /** True: the tap was Alt or Win as a key of Altype's, to be let go behind a key that types nothing. */
+  /** True: the tap was Alt or Win as a key of Krya's, to be let go behind a key that types nothing. */
   private onModifierUp(vk: number): boolean {
     const t = this.tap
     this.tap = undefined
@@ -686,8 +695,8 @@ export class Typist {
 
   /**
    * A key typed in another layout than the last one in this window, and not
-   * one Altype switched to by itself: the person switched (Windows' keys, the
-   * language bar, Altype's switch key). The words before are as they meant
+   * one Krya switched to by itself: the person switched (Windows' keys, the
+   * language bar, Krya's switch key). The words before are as they meant
    * them, and so is the next one.
    */
   private noticeSwitch(hwnd: bigint, layout: string): void {
@@ -821,6 +830,7 @@ export class Typist {
         hwnd: front.hwnd,
         ...(capsOff ? { toggleCaps: true } : {}),
         auto: true,
+        report: { word: coreOf(typed.text) ?? typed.text.toLowerCase(), fixed: coreOf(this.reading(keys, to).text) ?? this.reading(keys, to).text },
         plain: stroke ? (char === undefined ? [{ vk: stroke.vk }] : [{ char }]) : [],
         // Called off: the keys go back to how they were typed (unless a click started a new run meanwhile).
         undo: () => {
@@ -945,7 +955,7 @@ export class Typist {
     this.expected = { hwnd, layout, until: this.env.now() + SWITCH_TRUST_MS }
   }
 
-  /** The layout the window in front types in: the one Altype just switched it to, until Windows agrees; else Windows' answer. */
+  /** The layout the window in front types in: the one Krya just switched it to, until Windows agrees; else Windows' answer. */
   private layoutNow(front: Front): string {
     const named = this.env.layoutOf(front.tid)
     const e = this.expected
@@ -1095,6 +1105,8 @@ export class Typist {
     this.queued = []
     this.env.press(keys)
     if (fix.auto && this.config.fixSound) this.env.click()
+    // Typed only once the field is known to be no password (or never answered, which counts as none).
+    if (fix.auto && fix.report && this.secret !== true) this.env.send({ type: 'autoFixed', ...fix.report })
   }
 
   // ---------------------------------------------------------------- the clock, the badge and the program in front

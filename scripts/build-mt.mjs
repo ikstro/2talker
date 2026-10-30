@@ -4,7 +4,7 @@
 // the engine itself. Usage: node scripts/build-mt.mjs
 //
 // Writes src/mt-manifest.json (where each model file lies on Mozilla's
-// attachment server, its size and SHA-256; Altype downloads a language pair
+// attachment server, its size and SHA-256; Krya downloads a language pair
 // on its first use) and vendor/bergamot/ (the engine, WebAssembly and its
 // JavaScript loader, shipped inside the app). The engine and the models are
 // Mozilla's, under the Mozilla Public License 2.0.
@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 
 const SETTINGS = 'https://firefox.settings.services.mozilla.com/v1/buckets/main/collections'
 const LOADER_PATH = 'toolkit/components/translations/bergamot-translator/bergamot-translator.js'
-/** Altype's language code (languages.ts) → Firefox's. Firefox has no models for Georgian, Armenian, Kazakh. */
+/** Krya's language code (languages.ts) → Firefox's. Firefox has no models for Georgian, Armenian, Kazakh. */
 const LANGUAGES = {
   es: 'es', de: 'de', fr: 'fr', it: 'it', pt: 'pt', ru: 'ru', uk: 'uk', pl: 'pl', cs: 'cs', nl: 'nl', sv: 'sv', nb: 'nb',
   da: 'da', fi: 'fi', el: 'el', tr: 'tr', ro: 'ro', hu: 'hu', bg: 'bg', sr: 'sr', hr: 'hr', ar: 'ar', he: 'he', fa: 'fa',

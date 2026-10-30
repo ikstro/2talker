@@ -4,7 +4,7 @@ import { updateFailure } from './updatereason'
 
 describe('updateFailure', () => {
   it('says a private repository calmly, without the server’s answer', () => {
-    const error = Object.assign(new Error('HttpError: 404 "method: GET url: https://github.com/ikstro/altype/releases.atom\n\nHeaders: { "set-cookie": [ "_gh_sess=…" ] }'), { statusCode: 404 })
+    const error = Object.assign(new Error('HttpError: 404 "method: GET url: https://github.com/ikstro/krya/releases.atom\n\nHeaders: { "set-cookie": [ "_gh_sess=…" ] }'), { statusCode: 404 })
     expect(updateFailure(error)).toEqual({ status: 'unavailable', message: 'updates are off while the releases are private' })
   })
 

@@ -1,4 +1,4 @@
-// This computer's parts as Altype describes them (device.ts finds them out):
+// This computer's parts as Krya describes them (device.ts finds them out):
 // the types and what both the main process and the pages say of them.
 
 export type GpuVendor = 'nvidia' | 'amd' | 'intel' | 'other'
@@ -70,8 +70,8 @@ export function cardText(g: Gpu): string {
  */
 export type LevelFit = { where: 'card' | 'part' | 'processor'; slow: boolean; cuda: boolean }
 
-/** The model's own memory on the card, in MB, with its working room (TranslateGemma 4B and 12B, Q4_K_M; Gemma 4 E4B, q4_0, whose per-layer embeddings stay in the computer's memory: 3.1 GB measured). */
-const LEVEL_VRAM_MB = { accurate: 3500, most: 9000, check: 3500 }
+/** The model's own memory on the card, in MB, with its working room (Gemma 4 E4B, q4_0, whose per-layer embeddings stay in the computer's memory: 3.1 GB measured; Gemma 4 12B, q4_0, 7 GB of weights). */
+const LEVEL_VRAM_MB = { accurate: 3500, most: 9000 }
 
 /** An NVIDIA card llama.cpp's CUDA 12.4 build runs on: compute 5.0, a driver of 551 or newer (as nvidia-smi numbers it). */
 function cudaReady(g: Gpu | undefined): boolean {
@@ -81,9 +81,10 @@ function cudaReady(g: Gpu | undefined): boolean {
 }
 
 /**
- * How each accurate level fits this computer, and the level to advise: Most
- * accurate on a card that holds its 12B model, Accurate on one that holds the
- * 4B, Fast without one (Accurate takes half a minute a text on a processor).
+ * How each model fits this computer, and the level to advise: Most accurate on
+ * a card that holds its 12B model, Accurate on one that holds the E4B, Fast
+ * without one (Accurate takes half a minute a text on a processor). The same
+ * fit holds for checking English, which the same model does.
  * Any card with memory of its own counts, as llama.cpp's Vulkan build runs on
  * NVIDIA, AMD and Intel alike; a chip sharing the system's memory does not.
  */
@@ -104,9 +105,4 @@ export function translationAdvice(p: DeviceProfile | undefined): { advised: 'fas
   const accurate = fit(LEVEL_VRAM_MB.accurate)
   const most = fit(LEVEL_VRAM_MB.most)
   return { advised: most.where === 'card' ? 'most' : accurate.where === 'card' ? 'accurate' : 'fast', accurate, most }
-}
-
-/** How Check my English's model fits here: on a card that holds it, a text in under a second; on the processor, several. */
-export function checkAdvice(p: DeviceProfile | undefined): LevelFit {
-  return fitter(p)(LEVEL_VRAM_MB.check)
 }

@@ -8,7 +8,7 @@ import { DictationLog, LOG_DAYS, LOG_MOST } from './dictationlog'
 
 const dirs: string[] = []
 function tempFile(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'altype-dictation-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krya-dictation-'))
   dirs.push(dir)
   return path.join(dir, 'dictation.json')
 }
@@ -79,4 +79,12 @@ describe('DictationLog', () => {
     fs.writeFileSync(odd, JSON.stringify([{ at: 'never', mode: 'type', text: 'x' }, { at: new Date(START).toISOString(), mode: 'note', text: 'y' }, 7]), 'utf8')
     expect(new DictationLog(odd, () => START).list()).toEqual([])
   })
+})
+
+test('a backup’s phrases are added once, newest first', () => {
+  const log = new DictationLog(tempFile(), () => START)
+  const mine = log.add({ mode: 'type', text: 'Привет' })
+  const earlier = { at: new Date(START - DAY).toISOString(), mode: 'english', text: 'Hello', heard: 'Привет' }
+  expect(log.merge([mine, earlier, { at: 'never', mode: 'type', text: 'x' }])).toBe(1)
+  expect(log.list().map(e => e.text)).toEqual(['Привет', 'Hello'])
 })

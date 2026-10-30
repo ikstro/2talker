@@ -1,18 +1,19 @@
 // The tray's panel, in place of Windows' menu, drawn as the window's sidebar
-// and kept compact (2026-10-30): the way into the app window at the top (the
-// brand with the version, or Open) with Altype's state, then Actions (the
-// copied text, a text to type or check, a piece of the screen, with their
-// keys; the note and Transcripts once the engine is in), Quick settings, and
-// a footer of Pause, Settings and Quit. A menu
-// in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere puts it away
-// (the main process hides it, and after any command). Everything shown comes
-// in one `tray` message, sent again whenever any of it changes.
+// and given air (P1, 2026-10-30): the way into the app window at the top (the
+// brand with the version, or Open, a yellow button) with Krya's state, then
+// Actions (the copied text, a text to type or check, a piece of the screen,
+// with their keys as quiet text; the note and Transcripts once the engine is
+// in), Quick settings (with "Keep a word as typed…" under fixing as one types,
+// which opens into a field in place), and a footer of Pause, Settings and
+// Quit. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
+// puts it away (the main process hides it, and after any command). Everything
+// shown comes in one `tray` message, sent again whenever any of it changes.
 
 import { hotkeyLabel } from '../hotkey'
 import type { Settings } from '../settings'
 import type { ToHost, ToView, TrayCommand, TrayView, TutorHost } from '../protocol'
+import { logo } from './brand'
 import { dwmFlag, el } from './dom'
-import { caps } from './keycaps'
 import { lucide, type LucideName } from './lucide'
 
 declare global {
@@ -27,6 +28,12 @@ const post = (message: ToHost) => window.tutorHost.post(message)
 
 const root = document.getElementById('root') as HTMLDivElement
 
+/** A key as quiet text, as the row names it: "Control+Alt+S" → "Ctrl+Alt+S", "RightControl*2" → "Right Ctrl ×2". */
+function keyText(hotkey: string): HTMLElement {
+  const twice = hotkey.endsWith('*2')
+  return el('span', { class: 'kt' }, `${hotkeyLabel(hotkey.replace(/\*2$/, ''))}${twice ? ' ×2' : ''}`)
+}
+
 /** One command: a full-width row, its icon, its keys at the right end (none when it has no key). */
 function command(id: string, icon: LucideName, label: string, run: TrayCommand, hotkey = ''): HTMLElement {
   return el(
@@ -34,7 +41,7 @@ function command(id: string, icon: LucideName, label: string, run: TrayCommand, 
     { class: 'cmd', 'data-nav': true, 'data-id': id, onclick: () => post({ type: 'tray', command: run }) },
     lucide(icon, 's'),
     el('span', { class: 'l' }, label),
-    hotkey ? caps(hotkey) : null,
+    hotkey ? keyText(hotkey) : null,
   )
 }
 
@@ -65,7 +72,94 @@ function toggle(id: Switch, icon: LucideName, label: string, on: boolean): HTMLE
   return row
 }
 
-/** The footer's Pause: a switch that names what a press does, Resume (in amber) while paused; the panel stays. */
+// ---------------------------------------------------------------- Keep a word as typed
+
+/**
+ * The row's state: the row; its field, open in place (the panel stays); or
+ * "Kept: …" for a moment after Enter. A view that comes while the field is
+ * open waits, so what is typed is never redrawn away.
+ */
+let keep: { mode: 'row' } | { mode: 'field' } | { mode: 'kept'; word: string } = { mode: 'row' }
+let waiting: TrayView | undefined
+let keepTimer: number | undefined
+const KEPT_MS = 1500
+
+function keepRow(v: TrayView): HTMLElement {
+  if (keep.mode === 'kept')
+    return el('div', { class: 'cmd kept', 'data-id': 'keepWord', role: 'status' }, lucide('check', 's'), el('span', { class: 'l' }, `Kept: ${keep.word}`))
+  return el(
+    'button',
+    { class: 'cmd', 'data-nav': true, 'data-id': 'keepWord', title: 'Never fix this word by itself (Kept as typed)', onclick: () => openKeep(v) },
+    lucide('lock', 's'),
+    el('span', { class: 'l' }, 'Keep a word as typed…'),
+  )
+}
+
+/** The row turned into its field: the last word fixed by itself in it, as typed and all selected, what it became beside it. */
+function openKeep(v: TrayView): void {
+  const row = root.querySelector<HTMLElement>('[data-id="keepWord"]')
+  if (!row) return
+  keep = { mode: 'field' }
+  const note = v.keep.word && v.keep.fixed ? el('span', { class: 'kt keep-note', title: `${v.keep.word} → ${v.keep.fixed}` }, `→ ${v.keep.fixed}`) : null
+  const field = el('input', {
+    class: 'keep-field',
+    type: 'text',
+    value: v.keep.word,
+    placeholder: 'a word, as you type it',
+    'aria-label': 'Keep a word as typed',
+    spellcheck: 'false',
+    autocomplete: 'off',
+  }) as HTMLInputElement
+  // The word typed is no longer the one fixed: its fix goes.
+  field.addEventListener('input', () => note?.remove())
+  field.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      event.stopPropagation()
+      const word = field.value.trim().toLowerCase()
+      if (!word) return closeKeep()
+      post({ type: 'keepWord', word })
+      keep = { mode: 'kept', word }
+      redraw()
+      window.clearTimeout(keepTimer)
+      keepTimer = window.setTimeout(() => {
+        keep = { mode: 'row' }
+        redraw()
+      }, KEPT_MS)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      closeKeep(true)
+    } else event.stopPropagation()
+  })
+  field.addEventListener('blur', () => {
+    if (keep.mode === 'field') closeKeep()
+  })
+  const edit = el('div', { class: 'cmd keep-edit', 'data-id': 'keepWord' }, lucide('lock', 's'), field, note)
+  row.replaceWith(edit)
+  field.focus()
+  field.select()
+}
+
+/** Back to the row, nothing added; `refocus`: the keys go on from it (Esc). */
+function closeKeep(refocus = false): void {
+  keep = { mode: 'row' }
+  if (waiting) return redraw()
+  const edit = root.querySelector<HTMLElement>('[data-id="keepWord"]')
+  if (edit && last) edit.replaceWith(keepRow(last))
+  if (refocus) focusRow(root.querySelector<HTMLElement>('[data-id="keepWord"]'))
+}
+
+/** The last view drawn, or one that waited for the field. */
+function redraw(): void {
+  const v = waiting ?? last
+  waiting = undefined
+  if (v) render(v)
+}
+
+// ---------------------------------------------------------------- the panel
+
+/** The footer's Pause: a switch that names what a press does, Resume (in the paused indigo) while paused; the panel stays. */
 function pauseButton(paused: boolean): HTMLElement {
   return el(
     'button',
@@ -88,7 +182,7 @@ function group(label: string, ...rows: (HTMLElement | null)[]): HTMLElement {
   return el('section', { class: 'sec' }, el('div', { class: 'grp' }, label), ...rows)
 }
 
-/** Altype's state in a few words: paused, or whether the translator for the person's language is here; nothing when there is nothing to say. */
+/** Krya's state in a few words: paused, or whether the translator for the person's language is here; nothing when there is nothing to say. */
 function status(v: TrayView): HTMLElement | null {
   if (v.paused) return el('span', { class: 'st paused', title: 'Keys and Ctrl+C twice are off' }, el('span', { class: 'dot' }), 'paused')
   switch (v.translator) {
@@ -103,12 +197,15 @@ function status(v: TrayView): HTMLElement | null {
   }
 }
 
+let last: TrayView | undefined
+
 function render(v: TrayView): void {
+  last = v
   const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.id : undefined
   const openApp = () => post({ type: 'tray', command: 'open' })
   // The brand opens the window too; Open is the one the keys reach. The version beside it: a run from source says so, and when it was built.
   const version = el('span', { class: 'ver', title: `Built ${v.build}` }, v.dev ? `${v.version} dev` : v.version)
-  const brand = el('button', { class: 'brand', tabindex: '-1', title: 'Open Altype', onclick: openApp }, el('span', { class: 'key mark' }, 'alt'), el('span', { class: 'wm' }, 'altype'), version)
+  const brand = el('button', { class: 'brand', tabindex: '-1', title: 'Open Krya', onclick: openApp }, logo(), version)
   const open = el('button', { class: 'open', 'data-nav': true, 'data-id': 'open', onclick: openApp }, 'Open')
   const panel = el(
     'div',
@@ -118,19 +215,20 @@ function render(v: TrayView): void {
       'Actions',
       command('listenCopied', 'volume-2', 'Listen to the copied text', 'listenCopied', v.keys.listenCopied),
       command('translateCopied', 'languages', 'Translate the copied text', 'translateCopied'),
-      command('typeToTranslate', 'type', 'Type to translate…', 'typeToTranslate'),
-      command('checkEnglish', 'graduation-cap', 'Check my English…', 'checkEnglish'),
-      command('listenScreen', 'scan', 'Listen to a screen snip', 'listenScreen', v.keys.snipListen),
-      command('translateScreen', 'scan', 'Translate a screen snip', 'translateScreen', v.keys.snipTranslate),
+      command('typeToTranslate', 'pencil-line', 'Type to translate…', 'typeToTranslate', v.keys.typeToTranslate),
+      command('checkEnglish', 'graduation-cap', 'Check my English…', 'checkEnglish', v.keys.checkEnglish),
+      command('listenScreen', 'monitor-speaker', 'Listen to a screen snip', 'listenScreen', v.keys.snipListen),
+      command('translateScreen', 'scan-text', 'Translate a screen snip', 'translateScreen', v.keys.snipTranslate),
       v.speech.installed ? command('note', 'notebook-pen', v.speech.recording ? 'Save the note' : 'New note', 'note', v.speech.noteKey) : null,
       v.speech.installed ? command('transcripts', 'file-text', 'Transcripts', 'transcripts') : null,
     ),
     group(
       'Quick settings',
       toggle('autoFix', 'spell-check', 'Fix the layout as I type', v.autoFix),
+      v.keep.on ? keepRow(v) : null,
       v.keys.switch ? toggle('switchOn', 'keyboard', `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
-      toggle('layoutBadge', 'type', 'Show the layout by the cursor', v.layoutBadge),
-      toggle('trayLayout', 'keyboard', 'Show the layout in the tray', v.trayLayout),
+      toggle('layoutBadge', 'text-cursor', 'Show the layout by the cursor', v.layoutBadge),
+      toggle('trayLayout', 'panel-bottom', 'Show the layout in the tray', v.trayLayout),
       toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy),
     ),
     el(
@@ -143,7 +241,7 @@ function render(v: TrayView): void {
   )
   root.replaceChildren(panel)
   // A change while the panel is open keeps the focus where it was.
-  if (focused) focusRow(root.querySelector<HTMLElement>(`[data-id="${focused}"]`))
+  if (focused) focusRow(root.querySelector<HTMLElement>(`[data-id="${focused}"][data-nav]`))
 }
 
 /**
@@ -192,9 +290,17 @@ window.addEventListener('focusin', event => {
 window.addEventListener('message', (event: MessageEvent<ToView>) => {
   if (event.source !== window) return
   const m = event.data
-  if (m.type === 'tray') render(m.view)
-  else if (m.type === 'trayShown') {
+  if (m.type === 'tray') {
+    if (keep.mode === 'field') waiting = m.view
+    else render(m.view)
+  } else if (m.type === 'trayShown') {
     byKeys(false)
+    // Shown again: the field, or "Kept", is gone.
+    if (keep.mode !== 'row') {
+      window.clearTimeout(keepTimer)
+      keep = { mode: 'row' }
+      redraw()
+    }
     // The first command, not Open: the panel is mostly opened to run one.
     focusRow(root.querySelector<HTMLElement>('.cmd[data-nav]'))
   }

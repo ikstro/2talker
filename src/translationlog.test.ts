@@ -9,7 +9,7 @@ import { TranslationLog } from './translationlog'
 
 const dirs: string[] = []
 function tempFile(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'altype-translations-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krya-translations-'))
   dirs.push(dir)
   return path.join(dir, 'translations.json')
 }
@@ -156,4 +156,18 @@ describe('TranslationLog', () => {
     new TranslationLog(file, () => START).add({ from: 'en', to: 'ru', text: 'a', translation: 'б' })
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toHaveLength(1)
   })
+})
+
+test('a backup’s translations are added once, too old ones dropped as always', () => {
+  const now = Date.parse('2026-10-30T12:00:00Z')
+  const log = new TranslationLog(tempFile(), () => now)
+  log.add({ from: 'ru', to: 'en', text: 'Привет', translation: 'Hi' })
+  const at = (days: number) => new Date(now - days * DAY).toISOString()
+  const added = log.merge([
+    { at: at(1), from: 'ru', to: 'en', text: 'Привет', translation: 'Hello' },
+    { at: at(2), from: 'en', to: 'ru', text: 'Build', translation: 'Сборка' },
+    { at: at(LOG_DAYS + 1), from: 'en', to: 'ru', text: 'Old', translation: 'Старое' },
+  ])
+  expect(added).toBe(1)
+  expect(log.list().map(e => e.translation)).toEqual(['Hi', 'Сборка'])
 })

@@ -1,7 +1,7 @@
-// `npm run shots`: Altype's pages in offscreen windows with the real preload, fed view.ts's
+// `npm run shots`: Krya's pages in offscreen windows with the real preload, fed view.ts's
 // fixtures, pictured into .cache/shots/ (every page and second-level page in both themes, the
 // tray panel, the dictation badge with a fake microphone). It never touches the desktop or
-// the installed Altype, so it runs while that one runs.
+// the installed Krya, so it runs while that one runs.
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { englishHtml, textOutHtml, translationHtml } from '../../src/render'
@@ -57,11 +57,13 @@ async function focus(w: BrowserWindow, selector: string): Promise<string> {
 const colors = () => (nativeTheme.shouldUseDarkColors ? { bg: '#202020', surface: '#2b2b2b' } : { bg: '#f3f3f3', surface: '#fbfbfb' })
 
 // The pages' answers from "main": copies, Chrome, the speech engine's streaming session.
+/** Seconds of sound the engine has yet to recognize, as its answer to each chunk says (the amber dot past 4). */
+let pending = 0
 const heard = 'Привет, это проверка диктовки: бейдж показывает фразу целиком, пока её слышит движок'
 ipcMain.handle('host-call', async (_e, r: { call: string; method?: string; route?: string }) => {
   log.push(`host-call ${JSON.stringify(r).slice(0, 120)}`)
   if (r.call === 'speech') {
-    if (r.method === 'PUT') return { ok: true, status: 200, data: { pending: 0, heard } }
+    if (r.method === 'PUT') return { ok: true, status: 200, data: { pending, heard } }
     if (r.route?.endsWith('/finish')) return { ok: true, status: 200, data: { text: heard, language: 'ru', sure: true } }
     return { ok: true, status: 200, data: {} }
   }
@@ -174,7 +176,7 @@ async function cardShots(theme: 'dark' | 'light'): Promise<void> {
   const chest = 'Кнопки сундука и молнии поменять местами.'
   const level = (id: number, result: unknown) =>
     card(id, 'translate', { status: 'text', text: chest, from: 'ru', to: 'en', languages: ['en', 'ru', 'uk', 'de'], mine: ['ru', 'en'], result, canPaste: true }, 'accurate')
-  level(4, { status: 'downloading', language: 'ru', progress: 0.42, size: 2527 })
+  level(4, { status: 'downloading', language: 'ru', progress: 0.42, size: 5155 })
   await fit()
   await shot(w, `card-${theme}-accurate-downloading`)
   level(5, { status: 'ready', text: 'Swap the chest and lightning buttons.', from: 'ru', to: 'en', html: textOutHtml([{ prefix: '', pairs: [{ src: chest, out: 'Swap the chest and lightning buttons.' }] }]), sentences: [chest] })
@@ -184,7 +186,7 @@ async function cardShots(theme: 'dark' | 'light'): Promise<void> {
   // Check my English: the owner's sentence checked, its mistakes marked and the main one said in Russian; then a right one.
   const mine = 'I want to learn English and can we made tutor option? I dictate or tupe in English and you show my my mistake.'
   const right = 'I want to learn English, and can we make a tutor option? I dictate or type in English and you show me my mistakes.'
-  const check = (id: number, text: string, result: unknown) => card(id, 'check', { status: 'check', text, result, model: 'Gemma 4 E4B', canPaste: true })
+  const check = (id: number, text: string, result: unknown) => card(id, 'check', { status: 'check', text, result, model: 'Accurate', canPaste: true })
   check(6, mine, { status: 'downloading', progress: 0.3, size: 5155 })
   await fit()
   await shot(w, `card-${theme}-check-downloading`)
@@ -248,7 +250,13 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     await page('keyboard', ['fixing'])
     for (const name of ['words', 'mistakes', 'transcripts', 'translations', 'phrases', 'vocabulary', 'kept', 'learned', 'programs', 'layouts']) await page(name)
     await page('settings', ['languages'])
-    for (const name of ['engine', 'computer', 'about']) await page(name)
+    // The page's end: Backup and Reset.
+    await click(w, '.side [data-nav="settings"]')
+    await sleep(400)
+    await js(w, `document.querySelector('.pbody')?.scrollTo(0, 1e6)`)
+    await sleep(200)
+    await shot(w, tag('settings-end'))
+    for (const name of ['engine', 'storage', 'computer', 'about']) await page(name)
     await focused('kept')
     // The search, and a find opened with its line lit.
     log.push(`search: ${await js(w, `(() => { const f = document.querySelector('.find input'); f.value = 'caps'; f.dispatchEvent(new Event('input')); return 'ok' })()`)}`)
@@ -262,7 +270,7 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     send(w, { type: 'app', view: appView({ paused: true }) })
     await sleep(500)
     await shot(w, tag('home-paused'))
-    // Chrome holds an older copy of the extension than Altype's folder.
+    // Chrome holds an older copy of the extension than Krya's folder.
     const stale = appView()
     stale.speech = { ...stale.speech, extensionShipped: '0.2.1' }
     send(w, { type: 'app', view: stale })
@@ -282,11 +290,33 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     await home()
     await page('transcribe', ['speakers'], 'tr-switch')
   } else {
-    await page('transcribe')
+    await page('transcribe', ['meet'])
     await page('keyboard', ['fixing'])
     await focused('kept')
     await page('settings')
     await page('listen')
+    await page('check')
+    await page('storage')
+    await page('about')
+  }
+  if (!narrow) {
+    // A move from the old Altype folder that could not finish: two parts used from there, and why.
+    const left = appView()
+    const old = 'C:\\Users\\you\\AppData\\Local\\Altype'
+    left.storage = {
+      ...left.storage!,
+      parts: left.storage!.parts.map(p =>
+        p.id === 'speech' ? { ...p, path: `${old}\\speech`, away: true } : p.id === 'accurate' ? { ...p, path: `${old}\\translate\\models\\5f1e2a3b-gemma-4-E4B-it-qat-q4_0.gguf`, away: true } : p,
+      ),
+      old: { dir: old, why: 'a file in it is in use by python.exe', moving: false },
+    }
+    send(w, { type: 'app', view: left })
+    await sleep(300)
+    await home()
+    await page('storage', [], 'storage-old')
+    send(w, { type: 'app', view: { ...left, storage: { ...left.storage, old: { dir: old, moving: true } } } })
+    await sleep(300)
+    await shot(w, tag('storage-moving'))
   }
   w.destroy()
 }
@@ -327,28 +357,48 @@ async function setupShots(theme: 'dark' | 'light'): Promise<void> {
 
 async function trayShots(theme: 'dark' | 'light'): Promise<void> {
   nativeTheme.themeSource = theme
-  const w = win('tray.html', 340, 560, colors().bg)
+  const w = win('tray.html', 360, 620, colors().bg)
   await new Promise<void>(r => w.webContents.once('did-finish-load', () => r()))
   await sleep(300)
+  const fit = async () => {
+    await sleep(400)
+    const h = heights.get(w.webContents.id)
+    if (h) w.setSize(360, h)
+    await sleep(300)
+  }
   for (const [name, view] of [
     ['ready', trayView()],
     ['paused', trayView({ paused: true })],
   ] as const) {
     send(w, { type: 'tray', view })
     send(w, { type: 'trayShown' })
-    await sleep(400)
-    const h = heights.get(w.webContents.id)
-    if (h) w.setSize(340, h)
-    await sleep(300)
+    await fit()
     await shot(w, `tray-${theme}-${name}`)
-    if (theme === 'light') break
   }
+  // "Keep a word as typed…" opened into its field, the last fixed word in it; Enter; then with none.
+  send(w, { type: 'tray', view: trayView() })
+  await sleep(300)
+  log.push(`tray keep: ${await click(w, '[data-id="keepWord"]')}`)
+  log.push(`tray keep focus: ${await focus(w, '.keep-field')}`)
+  await fit()
+  await shot(w, `tray-${theme}-keep`)
+  log.push(`tray keep enter: ${await js(w, `(() => { const f = document.querySelector('.keep-field'); if (!f) return 'missing'; f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'ok' })()`)}`)
+  await sleep(300)
+  await shot(w, `tray-${theme}-kept`)
+  await sleep(1700)
+  send(w, { type: 'tray', view: trayView({ keep: { on: true, word: '', fixed: '' } }) })
+  await sleep(300)
+  log.push(`tray keep empty: ${await click(w, '[data-id="keepWord"]')}`)
+  log.push(`tray keep empty focus: ${await focus(w, '.keep-field')}`)
+  await fit()
+  await shot(w, `tray-${theme}-keep-empty`)
   w.destroy()
 }
 
 async function badgeShots(theme: 'dark' | 'light'): Promise<void> {
   nativeTheme.themeSource = theme
-  const w = win('dictation.html', 360, 64, colors().surface)
+  // A slate desktop behind the see-through window: the pill's round corners show against it, with no square behind them.
+  const w = win('dictation.html', 360, 64, '#5b6b80')
   await new Promise<void>(r => w.webContents.once('did-finish-load', () => r()))
   await sleep(300)
   const fit = async () => {
@@ -360,9 +410,17 @@ async function badgeShots(theme: 'dark' | 'light'): Promise<void> {
   await sleep(900)
   await fit()
   await shot(w, `badge-${theme}-listening`)
-  await sleep(2200)
+  // Half a second on: the dot blinks, so one of the two has it off.
+  await sleep(500)
+  await shot(w, `badge-${theme}-listening-blink`)
+  await sleep(1700)
   await fit()
   await shot(w, `badge-${theme}-phrase`)
+  // The engine behind the voice: the amber dot.
+  pending = 6
+  await sleep(700)
+  await shot(w, `badge-${theme}-behind`)
+  pending = 0
   send(w, { type: 'dictation', command: 'stop', mode: 'type', key: 'Control+Alt+D' })
   await sleep(250)
   await fit()
@@ -382,6 +440,7 @@ app.whenReady().then(async () => {
       await appShots('dark')
       await appShots('light')
       await appShots('dark', true)
+      await appShots('light', true)
       await setupShots('dark')
       await setupShots('light')
       await trayShots('dark')

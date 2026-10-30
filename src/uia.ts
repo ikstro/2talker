@@ -15,20 +15,40 @@ const GUID = koffi.struct('UiaGuid', { a: 'uint32', b: 'uint16', c: 'uint16', d:
 const CoInitializeEx = ole32.func('int32 __stdcall CoInitializeEx(void *reserved, uint32 flags)')
 const CoCreateInstance = ole32.func('int32 __stdcall CoCreateInstance(UiaGuid *clsid, void *outer, uint32 ctx, UiaGuid *iid, _Out_ void **out)')
 
+const oleaut32 = koffi.load('oleaut32.dll')
+const SysFreeString = oleaut32.func('void __stdcall SysFreeString(void *text)')
+
 const Release = koffi.proto('uint32 __stdcall UiaRelease(void *self)')
 const GetFocusedElement = koffi.proto('int32 __stdcall UiaGetFocusedElement(void *self, _Out_ void **element)')
 const GetBool = koffi.proto('int32 __stdcall UiaGetBool(void *self, _Out_ int32 *value)')
 const SetFocus = koffi.proto('int32 __stdcall UiaSetFocus(void *self)')
+const GetPatternAs = koffi.proto('int32 __stdcall UiaGetPatternAs(void *self, int32 pattern, UiaGuid *iid, _Out_ void **out)')
+const GetObject = koffi.proto('int32 __stdcall UiaGetObject(void *self, _Out_ void **out)')
+const GetInt = koffi.proto('int32 __stdcall UiaGetInt(void *self, _Out_ int32 *value)')
+const GetAt = koffi.proto('int32 __stdcall UiaGetAt(void *self, int32 index, _Out_ void **out)')
+const GetText = koffi.proto('int32 __stdcall UiaGetText(void *self, int32 max, _Out_ void **text)')
 
 const COINIT_MULTITHREADED = 0
 const CLSCTX_INPROC_SERVER = 1
 const CLSID_CUIAutomation = guid('ff48dba4-60ef-4201-aa87-54103eef594e')
 const IID_IUIAutomation = guid('30cbe57d-d9d0-452a-ab13-7ac5ac4825ee')
-/** IUnknown's Release; IUIAutomation's GetFocusedElement; IUIAutomationElement's SetFocus and get_CurrentIsPassword. */
+const IID_IUIAutomationTextPattern = guid('32eba289-3583-42c9-9c59-3b6d9a1e9b6a')
+const UIA_TextPatternId = 10014
+/**
+ * IUnknown's Release; IUIAutomation's GetFocusedElement; IUIAutomationElement's
+ * SetFocus, GetCurrentPatternAs and get_CurrentIsPassword; IUIAutomationTextPattern's
+ * GetSelection; IUIAutomationTextRangeArray's get_Length and GetElement;
+ * IUIAutomationTextRange's GetText (UIAutomationClient.h).
+ */
 const RELEASE = 2
 const GET_FOCUSED_ELEMENT = 8
 const SET_FOCUS = 3
+const GET_CURRENT_PATTERN_AS = 14
 const GET_CURRENT_IS_PASSWORD = 35
+const GET_SELECTION = 5
+const GET_LENGTH = 3
+const GET_ELEMENT = 4
+const GET_TEXT = 12
 
 function guid(text: string): Record<string, unknown> {
   const h = text.replace(/-/g, '')
@@ -78,6 +98,43 @@ export function release(element: unknown): void {
 /** Gives the keyboard back to an element (its window must be in front); false when it would not take it. */
 export function focus(element: unknown): boolean {
   return method<(self: unknown) => number>(element, SET_FOCUS, SetFocus)(element) >= 0
+}
+
+/**
+ * The text selected in an element, read without the clipboard: for a field that
+ * does not answer Ctrl+C (Claude's question box in VS Code). Empty when nothing
+ * is selected or the element has no text pattern.
+ */
+export function selectedText(element: unknown): string {
+  const held: unknown[] = []
+  const take = (object: unknown) => (held.push(object), object)
+  try {
+    const pattern: unknown[] = [null]
+    const getPattern = method<(self: unknown, id: number, iid: unknown, out: unknown[]) => number>(element, GET_CURRENT_PATTERN_AS, GetPatternAs)
+    if (getPattern(element, UIA_TextPatternId, IID_IUIAutomationTextPattern, pattern) < 0 || !pattern[0]) return ''
+    const text = take(pattern[0])
+    const ranges: unknown[] = [null]
+    if (method<(self: unknown, out: unknown[]) => number>(text, GET_SELECTION, GetObject)(text, ranges) < 0 || !ranges[0]) return ''
+    const array = take(ranges[0])
+    const length = [0]
+    if (method<(self: unknown, out: number[]) => number>(array, GET_LENGTH, GetInt)(array, length) < 0) return ''
+    const parts: string[] = []
+    for (let i = 0; i < (length[0] ?? 0); i++) {
+      const range: unknown[] = [null]
+      if (method<(self: unknown, index: number, out: unknown[]) => number>(array, GET_ELEMENT, GetAt)(array, i, range) < 0 || !range[0]) continue
+      const r = take(range[0])
+      const bstr: unknown[] = [null]
+      if (method<(self: unknown, max: number, out: unknown[]) => number>(r, GET_TEXT, GetText)(r, -1, bstr) < 0 || !bstr[0]) continue
+      // A BSTR is the characters themselves at that address (koffi gives the address as a number).
+      parts.push(koffi.decode(bstr[0], 'char16_t', -1) as string)
+      SysFreeString(bstr[0])
+    }
+    return parts.join('\n')
+  } catch {
+    return ''
+  } finally {
+    for (const object of held.reverse()) release(object)
+  }
 }
 
 /** Whether the field with the keyboard is a password field; undefined when UI Automation does not say. */

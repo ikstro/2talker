@@ -1,5 +1,5 @@
 /**
- * Altype's own glyphs, drawn on the 16 px grid of the design: codicons have
+ * Krya's own glyphs, drawn on the 16 px grid of the design: codicons have
  * no skip-to-sentence pair, play and stop must share one shape language (one
  * turns into the other in place), the card's pin stands upright, and the app
  * window's minimize and close sit beside them in the same strokes.

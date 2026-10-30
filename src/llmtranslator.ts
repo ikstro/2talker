@@ -1,26 +1,27 @@
-// The accurate translators: Google's TranslateGemma, 4B for Accurate and 12B
-// for Most accurate (GGUF, Q4_K_M), run by llama.cpp's server (llama.ts) from
-// the files llmfiles.ts downloads. The person picks a level on the Translate
-// page; nothing is downloaded before. Unlike Firefox's models they translate
-// between any two of their languages directly, one request per sentence, four
-// at a time.
+// The accurate translators: Google's Gemma 4, E4B for Accurate and 12B for
+// Most accurate (QAT q4_0 GGUF), run by llama.cpp's server (llama.ts) from the
+// files llmfiles.ts downloads; the same model checks English (checker.ts). The
+// person picks a level on the Translate page; nothing is downloaded before.
+// Unlike Firefox's models they translate between any two of their languages
+// directly, one request per sentence, four at a time. Measured on the owner's
+// texts (2026-10-30, RTX 2080 SUPER): E4B 0.7 s a sentence, as quick as
+// TranslateGemma 4B, which read "Сборка опять упала" as "The assembly figures
+// have fallen again" and could not check; the 12B the best wording, 6 s a
+// sentence on that 8 GB card. The whole paragraph given as context read a
+// little better, cost 40 % more and once repeated a sentence: not used.
 
-import { LLM_LANGUAGES, mapLimit, type LlmFiles } from './llmfiles'
+import { LLM_LANGUAGES, mapLimit, type LlmFiles, type LlmModel } from './llmfiles'
 import type { Translator } from './translator'
-
-export type LlmLevel = 'accurate' | 'most'
 
 const PARALLEL = 4
 /** A sentence on the processor with the 12B model may take minutes. */
 const REQUEST_MS = 10 * 60_000
 
-/** TranslateGemma's prompt for one text, as its chat template writes it. */
-export function promptFor(text: string, from: string, to: string): string {
-  const s = LLM_LANGUAGES[from]
-  const g = LLM_LANGUAGES[to]
+/** The instructions for one sentence from `from` into `to` (codes). */
+export function translatePrompt(from: string, to: string): string {
   return (
-    `<start_of_turn>user\nYou are a professional ${s} (${from}) to ${g} (${to}) translator. Your goal is to accurately convey the meaning and nuances of the original ${s} text while adhering to ${g} grammar, vocabulary, and cultural sensitivities.\n` +
-    `Produce only the ${g} translation, without any additional explanations or commentary. Please translate the following ${s} text into ${g}:\n\n\n${text.trim()}<end_of_turn>\n<start_of_turn>model\n`
+    `You translate from ${LLM_LANGUAGES[from]} into ${LLM_LANGUAGES[to]}. Reply with the translation only, nothing before or after it. ` +
+    'Keep names, @handles, e-mail addresses, links, numbers, code and product names exactly as they are. Keep the tone of the original.'
   )
 }
 
@@ -28,10 +29,10 @@ export type LlmOptions = {
   files: LlmFiles
   fetch?: typeof fetch
   /** A translation done: seconds a sentence, and the seconds it waited for the model to load, when it did. */
-  onTimed?: (level: LlmLevel, timed: { sentence: number; start?: number }) => void
+  onTimed?: (model: LlmModel, timed: { sentence: number; start?: number }) => void
 }
 
-export type LlmTranslators = Record<LlmLevel, Translator>
+export type LlmTranslators = Record<LlmModel, Translator>
 
 export function createLlmTranslators(o: LlmOptions): LlmTranslators {
   const { files } = o
@@ -40,20 +41,30 @@ export function createLlmTranslators(o: LlmOptions): LlmTranslators {
 
   async function one(base: string, text: string, from: string, to: string): Promise<string | undefined> {
     if (!text.trim()) return text
-    const response = await post(`${base}/completion`, {
+    const response = await post(`${base}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      // A translation is rarely longer in tokens than its source in letters; the cap stops a model that repeats itself.
-      // No prompt cache: llama.cpp keeps none for Gemma's sliding-window layers (measured: every sentence's instructions read again).
-      body: JSON.stringify({ prompt: promptFor(text, from, to), n_predict: Math.min(2048, 64 + text.length), temperature: 0, cache_prompt: false, stop: ['<end_of_turn>'] }),
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: translatePrompt(from, to) },
+          { role: 'user', content: text.trim() },
+        ],
+        temperature: 0,
+        // A translation is rarely twice its source's letters in tokens; the cap stops a model that repeats itself.
+        max_tokens: Math.min(2048, 64 + 2 * text.length),
+        // No prompt cache: llama.cpp keeps none for Gemma's sliding-window layers (measured: every sentence's instructions read again).
+        cache_prompt: false,
+        chat_template_kwargs: { enable_thinking: false },
+      }),
       signal: AbortSignal.timeout(REQUEST_MS),
     })
     if (!response.ok) throw new Error(`The translation engine answered ${response.status}`)
-    const data = (await response.json()) as { content?: unknown }
-    return typeof data.content === 'string' ? data.content.trim() || undefined : undefined
+    const data = (await response.json()) as { choices?: { message?: { content?: unknown } }[] }
+    const content = data.choices?.[0]?.message?.content
+    return typeof content === 'string' ? content.trim() || undefined : undefined
   }
 
-  function translator(level: LlmLevel): Translator {
+  function translator(level: LlmModel): Translator {
     return {
       direct: true,
       state: native => (languages[native] ? files.state(level) : { status: 'unsupported', progress: 0, size: 0 }),

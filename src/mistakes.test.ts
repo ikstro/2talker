@@ -46,3 +46,22 @@ describe('MistakeStore', () => {
     expect(new MistakeStore(f).list()).toEqual([])
   })
 })
+
+describe('MistakeStore.merge', () => {
+  it('adds the backup’s texts, the newer check of a text kept, newest first', () => {
+    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mistakes-')), 'mistakes.json')
+    const store = new MistakeStore(f, () => Date.parse('2026-10-30T10:00:00Z'))
+    store.add({ text: 'He go.', corrected: 'He goes.', note: 'here' })
+    const added = store.merge([
+      { at: '2026-10-29T10:00:00.000Z', text: 'He go.', corrected: 'He went.', note: 'older' },
+      { at: '2026-10-28T10:00:00.000Z', text: 'I has.', corrected: 'I have.', note: '' },
+      { text: 'no date' },
+    ])
+    expect(added).toBe(1)
+    expect(store.list().map(e => [e.text, e.note])).toEqual([
+      ['He go.', 'here'],
+      ['I has.', ''],
+    ])
+    fs.rmSync(path.dirname(f), { recursive: true, force: true })
+  })
+})

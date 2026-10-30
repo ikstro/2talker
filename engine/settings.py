@@ -1,8 +1,9 @@
-r"""The speech engine's settings: %APPDATA%\Altype\speech.json.
+r"""The speech engine's settings: %APPDATA%\Krya\speech.json.
 
-Altype's own settings (keys, theme) are its settings.json beside it; these are
-the ones the engine acts on. Altscribe, the app this engine came from, is
-adopted once: its settings and its downloaded models move over.
+Krya's own settings (keys, theme) are its settings.json beside it; these are
+the ones the engine acts on. Krya was Altype until 0.11: Altype's speech.json
+moves over once, when Krya itself could not move it. Altscribe, the app this
+engine came from, is adopted once too: its settings and its downloaded models.
 """
 
 from __future__ import annotations
@@ -18,24 +19,28 @@ from pathlib import Path
 
 from vocab import split_items
 
-log = logging.getLogger("altype.settings")
+log = logging.getLogger("krya.settings")
 
-# A test run gives its own folders; the real ones are Altype's.
-TEST_HOME = os.environ.get("ALTYPE_SPEECH_HOME")
-APP_DIR = Path(TEST_HOME or Path(os.environ.get("APPDATA", Path.home())) / "Altype")
-SPEECH_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Altype" / "speech"
+# A test run gives its own folders; the real ones are Krya's. ALTYPE_SPEECH_HOME is the old name's.
+TEST_HOME = os.environ.get("KRYA_SPEECH_HOME") or os.environ.get("ALTYPE_SPEECH_HOME")
+APP_DIR = Path(TEST_HOME or Path(os.environ.get("APPDATA", Path.home())) / "Krya")
+# Krya says where the engine is installed: %LOCALAPPDATA%\Krya\speech, or Altype's when it could not move.
+SPEECH_DIR = Path(os.environ.get("KRYA_SPEECH_DIR") or Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Krya" / "speech")
 MODELS_DIR = SPEECH_DIR / "models"
 SETTINGS_FILE = APP_DIR / "speech.json"
+
+# Krya's old name: its speech engine settings, and the transcripts folder it gave new users.
+ALTYPE_SETTINGS = Path(os.environ.get("APPDATA", Path.home())) / "Altype" / "speech.json"
 
 OLD_SETTINGS = Path(os.environ.get("APPDATA", Path.home())) / "Altscribe" / "engine.json"
 OLD_MODELS = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Altscribe" / "models"
 
-# The speech models Altype can use: engine/models.json, shared with src/speechplan.ts.
+# The speech models Krya can use: engine/models.json, shared with src/speechplan.ts.
 CATALOG = json.loads((Path(__file__).resolve().parent / "models.json").read_text("utf-8"))
 MODELS = tuple(m["name"] for m in CATALOG["models"] if m["backend"] == "whisper")
 # Every model, Whisper or not (Parakeet dictates on the processor), with where and for what it may run.
 ALL_MODELS = {m["name"]: m for m in CATALOG["models"]}
-# Dictation on the CPU while Altype has sent no plan (an older Altype, or the plan
+# Dictation on the CPU while Krya has sent no plan (an older Krya, or the plan
 # not made yet): large-v3-turbo takes ~6 s for a 7 s phrase there, small ~2 s.
 CPU_DICTATION = "small"
 LANGUAGES = ("auto", "ru", "en")
@@ -59,6 +64,12 @@ def documents_dir() -> Path:
     return Path.home() / "Documents"
 
 
+def default_data_dir() -> Path:
+    r"""New users' transcripts: Documents\Krya\Transcripts; Altype's, when its transcripts are there already."""
+    old = documents_dir() / "Altype" / "Transcripts"
+    return old if old.is_dir() else documents_dir() / "Krya" / "Transcripts"
+
+
 def defaults() -> dict:
     return {
         "model": "large-v3-turbo",
@@ -68,10 +79,10 @@ def defaults() -> dict:
         # Words to be spelled right: [{word, heard: [what the recognizer writes instead]}] (vocab.py).
         "vocabulary": [],
         "hfToken": "",
-        "dataDir": str(documents_dir() / "Altype" / "Transcripts"),
+        "dataDir": str(default_data_dir()),
         "kbDir": "",
         "kbInbox": "Inbox",
-        # What runs where, made by Altype from this computer's measurements (src/speechplan.ts):
+        # What runs where, made by Krya from this computer's measurements (src/speechplan.ts):
         # {threads, cpu: {dictation: {model, beam}, transcripts: {model}}, cuda: {... compute}}.
         "plan": {},
         # How fast each model runs here: {fingerprint, at, runs: {"model|device|compute": {phrase, rtf, n, at}}}.
@@ -79,10 +90,23 @@ def defaults() -> dict:
     }
 
 
+def adopt_altype(file: Path = SETTINGS_FILE, old: Path = ALTYPE_SETTINGS) -> None:
+    """Altype's speech.json, once, when Krya did not move it over itself (main.ts moves it at start)."""
+    if file.exists() or not old.exists():
+        return
+    try:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old), str(file))
+        log.info("adopted Altype's speech settings")
+    except OSError as error:
+        log.warning("could not adopt Altype's speech settings: %s", error)
+
+
 def adopt_altscribe(file: Path = SETTINGS_FILE) -> None:
     """Altscribe's settings (its library folder, knowledge base, Hugging Face key) and models, once."""
     if TEST_HOME:
         return
+    adopt_altype(file)
     if not file.exists() and OLD_SETTINGS.exists():
         try:
             file.parent.mkdir(parents=True, exist_ok=True)
@@ -100,7 +124,7 @@ def adopt_altscribe(file: Path = SETTINGS_FILE) -> None:
 
 
 def clean_plan(plan: dict) -> dict:
-    """A plan as Altype sends it, with anything this engine does not know left out."""
+    """A plan as Krya sends it, with anything this engine does not know left out."""
     out: dict = {}
     if isinstance(plan.get("fingerprint"), str):
         out["fingerprint"] = plan["fingerprint"][:64]
@@ -138,7 +162,7 @@ def _alias(raw) -> str | None:
 
 
 def clean_vocabulary(raw) -> list[dict]:
-    """The vocabulary as Altype sends it, as [{word, heard}]; a bare string is a word heard no other way.
+    """The vocabulary as Krya sends it, as [{word, heard}]; a bare string is a word heard no other way.
 
     Anything else (an empty word, a line break, a fourth word in an alias) is left out without a word:
     the list is typed by a person, and one slip should not cost the rest."""

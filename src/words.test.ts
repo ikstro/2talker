@@ -62,3 +62,17 @@ describe('export', () => {
     expect(wordsText(words)).toBe('walk — verb ходить; noun прогулка\nnice — adj хороший')
   })
 })
+
+test('a backup’s words are added once by their dictionary form, in the order they were saved', () => {
+  const file = tempFile()
+  const store = new WordStore(file)
+  store.add({ word: 'went', base: 'go', senses: [], sentence: 'We went home.' })
+  const old = { id: 7, word: 'Ran', base: 'RUN', senses: [], sentence: 'She ran.', addedAt: '2026-01-01T00:00:00.000Z' }
+  expect(store.merge([old, { id: 8, word: 'going', base: 'go', senses: [], sentence: '', addedAt: '2026-02-01T00:00:00.000Z' }, 'junk'])).toBe(1)
+  expect(store.list().map(w => [w.base, w.sentence])).toEqual([
+    ['go', 'We went home.'],
+    ['run', 'She ran.'],
+  ])
+  expect(new Set(store.list().map(w => w.id)).size).toBe(2)
+  expect(new WordStore(file).merge([old])).toBe(0)
+})

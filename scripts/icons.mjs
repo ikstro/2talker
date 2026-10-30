@@ -1,16 +1,19 @@
-// Draws the Altype mark ("alt" on a keycap in a rounded frame, the shapes of
-// build/icon.svg) into the pictures the app uses: build/icon.png (512 px),
-// build/icon.ico (16, 24, 32, 48, 256: the installer and the program),
-// media/icon.png (128 px, the window and About), media/tray.png and
-// tray@2x.png (16 and 32 px), tray-paused.png and its @2x (the same at 45 %,
-// while Altype is paused), and copies the SVG to media/. From 32 px up the
-// mark is drawn from the SVG's numbers; at 16 and 24 the legend is set pixel
-// by pixel, so "alt" stays a word in the tray. It is drawn on a canvas, whose
-// pixels keep their transparency in an ordinary page. Run under Electron:
+// Draws Krya's pictures. The app icon is K3, the duck {•> on a black rounded
+// tile, white braces and eye and a duck-yellow beak, as the tray on a dark
+// taskbar (build/icon.svg; I1's yellow tile until 2026-10-30): build/icon.png (512 px),
+// build/icon.ico (16, 24, 32, 48, 256: the installer and the program) and
+// media/icon.png (128 px, the window); from 24 px up it is drawn from the SVG's
+// numbers, at 16 the whole picture is set pixel by pixel, the tile's corners too. The tray's icon is T2, {•>
+// without a tile, the braces and the eye in ink and the beak in the duck's
+// colour, for either taskbar: media/tray-light.png (ink on a light taskbar)
+// and tray-dark.png, each with its @2x (32 px), tray-*-paused.png (the same at
+// 45 %, while Krya is paused), and tray-recording.png, a red dot, while
+// anything records. The tray's pictures are pixels at 16, each pixel doubled
+// at 32. All of it is drawn on a canvas, whose pixels keep their transparency
+// in an ordinary page; the SVG is copied to media/. Run under Electron:
 // npm run icons.
 
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -18,60 +21,79 @@ import { app, BrowserWindow } from 'electron'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const INK = { tile: '#1c2128', edge: '#444c56', cap: '#cdd9e5', ledge: '#768390', ink: '#1c2128' }
-// "alt", 8 × 5 pixels: a double-storey a, l, a short t.
-const GLYPH = ['....X.X.', 'XX..X.XX', '.XX.X.X.', 'X.X.X.X.', 'XXX.X..X']
+/** The tile's black, the drawing's white and the beak's yellow (build/icon.svg); the characters of TILE_16. */
+const TILE = { k: '#141414', w: '#FFFFFF', y: '#FFD60A' }
+/** The tray's colours by the taskbar's theme: the ink of Windows' own glyphs there, and the duck's colour (theme.css `--duck`). */
+const TASKBAR = {
+  light: { '#': '#1b1b1b', y: '#F2A100' },
+  dark: { '#': '#f2f2f2', y: '#FFD60A' },
+}
+/** Recording: a plain red dot, Windows' own record red; the same as theme.css `--rec` (the dictation badge's dot). */
+const RECORD = { r: '#E81123' }
 
-/** Runs in the page: draws the mark at `size`, `alpha` opaque, and returns it as a PNG data URL. */
-function draw(size, ink, glyph, alpha = 1) {
+// K3 at 16 px, pixel by pixel (the lab's K3-16): k the tile, w the braces and the eye, y the beak, . clear.
+const TILE_16 = [
+  '..kkkkkkkkkkkk..',
+  '.kkkkkkkkkkkkkk.',
+  'kkkkkkkkkkkkkkkk',
+  'kkkkwwkkkkkkkkkk',
+  'kkkwwkwwkyykkkkk',
+  'kkkwwkwwkkyykkkk',
+  'kkkwwkkkkkkyykkk',
+  'kkwwkkkkkkkkyykk',
+  'kkwwkkkkkkkkyykk',
+  'kkkwwkkkkkkyykkk',
+  'kkkwwkkkkkyykkkk',
+  'kkkwwkkkkyykkkkk',
+  'kkkkwwkkkkkkkkkk',
+  'kkkkkkkkkkkkkkkk',
+  '.kkkkkkkkkkkkkk.',
+  '..kkkkkkkkkkkk..',
+]
+// T2: {•> without a tile; the brace's point high, the beak's tip level with it, 2 px between the eye and the beak.
+const BARE = ['', '', '....###', '...##.....yy', '...##.##...yy', '...##.##....yy', '..##.........yy', '..##.........yy', '...##.......yy', '...##......yy', '...##.....yy', '...##', '...##', '....###']
+/** A round dot of radius `r` on a `size` grid, as rows. */
+const disc = (size, r) => [...Array(size)].map((_, y) => [...Array(size)].map((_, x) => ((x + 0.5 - size / 2) ** 2 + (y + 0.5 - size / 2) ** 2 <= r * r ? 'r' : '.')).join(''))
+
+/** Runs in the page: the app icon at `size` (24 px and up), as a PNG data URL. */
+function drawTile(size, c) {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const g = canvas.getContext('2d')
-  const box = (x, y, w, h, r, fill, stroke, width) => {
-    g.beginPath()
-    g.roundRect(x, y, w, h, r)
-    g.fillStyle = fill
-    g.fill()
-    if (stroke) {
-      g.strokeStyle = stroke
-      g.lineWidth = width
-      g.stroke()
-    }
-  }
-  const legend = (ox, oy) => {
-    g.fillStyle = ink.ink
-    glyph.forEach((row, y) => [...row].forEach((c, x) => c === 'X' && g.fillRect(ox + x, oy + y, 1, 1)))
-  }
-  if (size === 16) {
-    box(0, 0, 16, 16, 3.5, ink.tile)
-    box(2, 2, 12, 12, 2, ink.ledge)
-    box(2, 2, 12, 10, 2, ink.cap)
-    legend(4, 4)
-  } else if (size === 24) {
-    box(0.5, 0.5, 23, 23, 5, ink.tile, ink.edge, 1)
-    box(3, 3, 18, 18, 3.5, ink.ledge)
-    box(3, 3, 18, 15, 3.5, ink.cap)
-    legend(8, 8)
-  } else {
-    // build/icon.svg's numbers, on its 64-unit grid.
-    g.scale(size / 64, size / 64)
-    box(1, 1, 62, 62, 14, ink.tile, ink.edge, size >= 128 ? 0.75 : 1.5)
-    box(9, 9, 46, 46, 10, ink.ledge)
-    box(9, 9, 46, 41, 10, ink.cap)
-    g.fillStyle = ink.ink
-    g.font = `800 ${size >= 48 ? 17 : 19}px "JetBrains Mono"`
-    g.letterSpacing = '-0.5px'
-    g.textAlign = 'center'
-    g.fillText('alt', 32, 36.5)
-  }
-  if (alpha === 1) return canvas.toDataURL('image/png')
-  // Faded as a whole, so the cap does not let the tile show through.
-  const faded = document.createElement('canvas')
-  faded.width = faded.height = size
-  const f = faded.getContext('2d')
-  f.globalAlpha = alpha
-  f.drawImage(canvas, 0, 0)
-  return faded.toDataURL('image/png')
+  // build/icon.svg's numbers, on its 256-unit grid.
+  g.scale(size / 256, size / 256)
+  g.fillStyle = c.k
+  g.beginPath()
+  g.roundRect(16, 16, 224, 224, 52)
+  g.fill()
+  g.lineWidth = 18
+  g.lineCap = g.lineJoin = 'round'
+  g.translate(-4, -2)
+  g.strokeStyle = c.w
+  g.stroke(new Path2D('M118 58C92 58 84 68 84 88V96C84 108 78 114 62 114C78 114 84 120 84 132V174C84 194 92 202 118 202'))
+  g.strokeStyle = c.y
+  g.stroke(new Path2D('M166 86L202 114L166 142'))
+  g.fillStyle = c.w
+  g.beginPath()
+  g.arc(136, 98, 13, 0, Math.PI * 2)
+  g.fill()
+  return canvas.toDataURL('image/png')
+}
+
+/** Runs in the page: `rows` of pixels on a 16 grid in `colours` (by character), each pixel `scale` wide, `alpha` opaque. */
+function drawPixels(rows, colours, scale, alpha) {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = rows.length * scale
+  const g = canvas.getContext('2d')
+  g.globalAlpha = alpha
+  rows.forEach((row, y) =>
+    [...row].forEach((ch, x) => {
+      if (!colours[ch]) return
+      g.fillStyle = colours[ch]
+      g.fillRect(x * scale, y * scale, scale, scale)
+    }),
+  )
+  return canvas.toDataURL('image/png')
 }
 
 /** An .ico holding PNG pictures, smallest first. */
@@ -95,32 +117,31 @@ function ico(pngs) {
 }
 
 async function main() {
-  // The page is a file beside the mark's face, which the canvas draws the legend in.
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'altype-icons-'))
-  fs.copyFileSync(path.join(root, 'media', 'fonts', 'jbmono-latin.woff2'), path.join(work, 'jbmono.woff2'))
-  fs.writeFileSync(
-    path.join(work, 'icons.html'),
-    `<!DOCTYPE html><html><head><style>@font-face { font-family: 'JetBrains Mono'; src: url(jbmono.woff2) format('woff2'); font-weight: 100 800; }</style></head><body></body></html>`,
-  )
   const win = new BrowserWindow({ width: 320, height: 240, show: false, webPreferences: { offscreen: true } })
-  await win.loadFile(path.join(work, 'icons.html'))
-  await win.webContents.executeJavaScript(`document.fonts.load('800 17px "JetBrains Mono"').then(() => true)`)
-  const at = async (size, alpha = 1) => {
-    const url = await win.webContents.executeJavaScript(`(${draw.toString()})(${size}, ${JSON.stringify(INK)}, ${JSON.stringify(GLYPH)}, ${alpha})`)
-    return Buffer.from(url.split(',')[1], 'base64')
-  }
+  await win.loadURL('data:text/html,<!DOCTYPE html><html><body></body></html>')
+  const png = url => Buffer.from(url.split(',')[1], 'base64')
+  const run = async (fn, ...args) => png(await win.webContents.executeJavaScript(`(${fn.toString()})(${args.map(a => JSON.stringify(a)).join(', ')})`))
+  const pad = rows => [...Array(16)].map((_, y) => (rows[y] || '').padEnd(16, '.'))
+  const tile = size => (size === 16 ? run(drawPixels, TILE_16, TILE, 1, 1) : run(drawTile, size, TILE))
   const pngs = []
-  for (const size of [16, 24, 32, 48, 256]) pngs.push([size, await at(size)])
+  for (const size of [16, 24, 32, 48, 256]) pngs.push([size, await tile(size)])
   fs.writeFileSync(path.join(root, 'build', 'icon.ico'), ico(pngs))
-  fs.writeFileSync(path.join(root, 'build', 'icon.png'), await at(512))
-  fs.writeFileSync(path.join(root, 'media', 'icon.png'), await at(128))
-  fs.writeFileSync(path.join(root, 'media', 'tray.png'), pngs[0][1])
-  fs.writeFileSync(path.join(root, 'media', 'tray@2x.png'), pngs[2][1])
-  fs.writeFileSync(path.join(root, 'media', 'tray-paused.png'), await at(16, 0.45))
-  fs.writeFileSync(path.join(root, 'media', 'tray-paused@2x.png'), await at(32, 0.45))
+  fs.writeFileSync(path.join(root, 'build', 'icon.png'), await tile(512))
+  fs.writeFileSync(path.join(root, 'media', 'icon.png'), await tile(128))
+  // The tray: 16 px and its @2x, which Electron takes on a screen at 200 %.
+  const tray = async (name, rows, colours, alpha = 1) => {
+    fs.writeFileSync(path.join(root, 'media', `${name}.png`), await run(drawPixels, rows, colours, 1, alpha))
+    fs.writeFileSync(path.join(root, 'media', `${name}@2x.png`), await run(drawPixels, rows, colours, 2, alpha))
+  }
+  for (const [theme, colours] of Object.entries(TASKBAR)) {
+    await tray(`tray-${theme}`, pad(BARE), colours)
+    await tray(`tray-${theme}-paused`, pad(BARE), colours, 0.45)
+  }
+  // The dot is round at either size: its 32 px picture is drawn on a 32 grid, not doubled.
+  fs.writeFileSync(path.join(root, 'media', 'tray-recording.png'), await run(drawPixels, disc(16, 5.5), RECORD, 1, 1))
+  fs.writeFileSync(path.join(root, 'media', 'tray-recording@2x.png'), await run(drawPixels, disc(32, 11), RECORD, 1, 1))
   fs.copyFileSync(path.join(root, 'build', 'icon.svg'), path.join(root, 'media', 'icon.svg'))
   win.destroy()
-  fs.rmSync(work, { recursive: true, force: true })
 }
 
 app.whenReady().then(main).then(

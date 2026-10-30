@@ -296,7 +296,6 @@
   // src/webview/dictation.ts
   var host = window.tutorHost;
   var root = document.getElementById("badge");
-  document.documentElement.classList.toggle("dwm", new URLSearchParams(location.search).get("frame") === "dwm");
   var TITLES = { type: "Dictate", english: "Dictate in English", note: "A note", check: "Practice English" };
   var recorder;
   var mode = "type";
@@ -370,7 +369,7 @@
     if (!c) return;
     c.setTransform(ratio, 0, 0, ratio, 0, 0);
     c.clearRect(0, 0, w, h);
-    c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--mark").trim();
     c.globalAlpha = 0.7;
     const shown = Math.min(WAVE, Math.floor(w / STEP));
     for (let i = 0; i < shown; i++) {

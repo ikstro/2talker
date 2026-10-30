@@ -51,6 +51,21 @@ export class MistakeStore {
     return true
   }
 
+  /** Mistakes from a backup: a text not here is added, one here keeps its newer check; how many came. */
+  merge(list: readonly unknown[]): number {
+    const byText = new Map(this.entries.map(e => [e.text, e]))
+    let added = 0
+    for (const e of list.filter(isEntry)) {
+      const here = byText.get(e.text)
+      if (!here) added++
+      if (!here || Date.parse(e.at) > Date.parse(here.at)) byText.set(e.text, e)
+    }
+    if (added === 0) return 0
+    this.entries = [...byText.values()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, MISTAKES_MOST)
+    this.save()
+    return added
+  }
+
   remove(at: string): void {
     const n = this.entries.length
     this.entries = this.entries.filter(e => e.at !== at)
@@ -68,7 +83,7 @@ export class MistakeStore {
       fs.mkdirSync(path.dirname(this.file), { recursive: true })
       fs.writeFileSync(this.file, JSON.stringify(this.entries, null, 2) + '\n', 'utf8')
     } catch (error) {
-      console.warn('Altype: could not save the mistakes', error)
+      console.warn('Krya: could not save the mistakes', error)
     }
   }
 }

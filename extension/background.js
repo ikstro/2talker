@@ -1,4 +1,4 @@
-// Altype's meeting recorder, the service worker: starts and stops a recording of
+// Krya's meeting recorder, the service worker: starts and stops a recording of
 // a tab. The recording itself lives in the offscreen document (offscreen.js),
 // which outlives this worker; chrome.storage.session remembers which tab it is.
 
@@ -9,8 +9,8 @@ async function port() {
   return port || 8765
 }
 
-// Every call to /health says which version of the extension this is, so Altype can show "Installed in Chrome".
-const SELF = () => ({ 'X-Altype-Extension': chrome.runtime.getManifest().version })
+// Every call to /health says which version of the extension this is, so Krya can show "Installed in Chrome".
+const SELF = () => ({ 'X-Krya-Extension': chrome.runtime.getManifest().version })
 
 async function engineReady() {
   try {
@@ -50,7 +50,7 @@ async function ensureOffscreen() {
   await chrome.offscreen.createDocument({
     url: OFFSCREEN,
     reasons: ['USER_MEDIA'],
-    justification: 'Records the tab and the microphone for a transcript in Altype',
+    justification: 'Records the tab and the microphone for a transcript in Krya',
   })
 }
 
@@ -70,7 +70,7 @@ function titleOf(tab) {
 async function start(tab) {
   if (await current()) return { ok: false, error: 'Already recording' }
   if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) return { ok: false, error: 'This tab cannot be recorded' }
-  if (!(await engineReady())) return { ok: false, error: "Altype's speech engine is not running: open Altype → Transcribe to install or start it" }
+  if (!(await engineReady())) return { ok: false, error: "Krya's speech engine is not running: open Krya → Transcribe to install or start it" }
   let streamId
   try {
     streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id })

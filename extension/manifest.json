@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Altype: meeting recorder",
-  "version": "0.2.1",
-  "description": "Records a tab's sound (Google Meet or any other) and your microphone. Altype makes the transcript on this computer.",
+  "name": "Krya: meeting recorder",
+  "version": "0.3.0",
+  "description": "Records a tab's sound (Google Meet or any other) and your microphone. Krya makes the transcript on this computer.",
   "permissions": ["tabCapture", "offscreen", "storage", "activeTab", "alarms"],
   "host_permissions": ["http://127.0.0.1/*"],
   "background": { "service_worker": "background.js" },
   "action": {
-    "default_title": "Altype: record this tab",
+    "default_title": "Krya: record this tab",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
   },

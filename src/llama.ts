@@ -1,12 +1,12 @@
 // llama.cpp's server (llama-server.exe of a build llmtranslator.ts
-// downloads) as a process of Altype's own: one model at a time, on a free port
+// downloads) as a process of Krya's own: one model at a time, on a free port
 // of 127.0.0.1, started by the first request, stopped after ten idle minutes
-// and with Altype. On Vulkan llama.cpp puts as many of the model's layers on
+// and with Krya. On Vulkan llama.cpp puts as many of the model's layers on
 // the graphics card as its memory holds (its own `--fit`); CUDA takes them all
 // (`allLayers`), NVIDIA's driver lending the card the computer's memory for
 // the rest, which is far quicker than splitting. A card that cannot take the
 // model at all (an old driver, a broken Vulkan) leaves it on the processor
-// (`--device none`) until Altype starts again.
+// (`--device none`) until Krya starts again.
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -64,7 +64,7 @@ export class LlamaServer {
   private running: Running | undefined
   private busy = 0
   private idle: NodeJS.Timeout | undefined
-  /** Builds and models the card could not take: on the processor until Altype starts again. */
+  /** Builds and models the card could not take: on the processor until Krya starts again. */
   private readonly cpuOnly = new Set<string>()
 
   constructor(private readonly o: LlamaOptions) {}

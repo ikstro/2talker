@@ -33,7 +33,7 @@ from diarize import Diarizer, NeedsPart, NeedsToken
 from settings import CPU_DICTATION, Settings
 from store import Store
 
-log = logging.getLogger("altype.jobs")
+log = logging.getLogger("krya.jobs")
 
 IDLE_UNLOAD = 600     # seconds without work before the models leave the GPU
 # Seconds without a phrase before dictation's model is let go: longer when there is memory to spare.
@@ -118,7 +118,7 @@ class Worker:
         self.fallback: str | None = None
         # Grows with every phrase and job started: the speed test sees it was disturbed.
         self.activity = 0
-        self._thread = threading.Thread(target=self._run, name="altype-worker", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="krya-worker", daemon=True)
 
     def start(self) -> None:
         store = self.get_store()
@@ -143,7 +143,7 @@ class Worker:
         return int(self.settings["plan"].get("threads") or max(1, (os.cpu_count() or 2) // 2))
 
     def entry(self, feature: str, device: str | None = None) -> tuple[str, dict]:
-        """The device and {model, compute?, beam?} for dictation or transcripts: Altype's plan, else the rule before plans."""
+        """The device and {model, compute?, beam?} for dictation or transcripts: Krya's plan, else the rule before plans."""
         device = device or ("cuda" if self.use_cuda() else "cpu")
         planned = self.settings["plan"].get(device, {}).get(feature)
         if planned:

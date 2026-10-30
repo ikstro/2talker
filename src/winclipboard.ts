@@ -1,11 +1,11 @@
 // The clipboard through user32 itself, for what Electron's clipboard cannot
 // do: keep every kind of thing on it (copied files, Office's own formats, not
-// only text, HTML and a picture) to put back, mark what Altype puts there so
+// only text, HTML and a picture) to put back, mark what Krya puts there so
 // Windows' clipboard history (Win+V) and the cloud clipboard leave it out,
 // and tell one change of the clipboard from another (its sequence number).
 // A text to paste is promised rather than put (Windows' delayed rendering):
 // Windows asks the owner window for it (WM_RENDERFORMAT) when a program reads
-// it, which tells Altype the paste has landed and the person's clipboard can
+// it, which tells Krya the paste has landed and the person's clipboard can
 // go back.
 
 import koffi from 'koffi'
@@ -170,7 +170,7 @@ export function render(): boolean {
   return true
 }
 
-/** The owner window is going while its text is still promised (WM_RENDERALLFORMATS): handed over for good, if the clipboard is still Altype's. */
+/** The owner window is going while its text is still promised (WM_RENDERALLFORMATS): handed over for good, if the clipboard is still Krya's. */
 export function renderAll(): void {
   const p = promised
   if (!p) return

@@ -27,7 +27,7 @@ const BADGE = { width: 36, height: 22 }
 /** With Caps Lock on, the badge says so too ("EN ⇪"). */
 const BADGE_CAPS_WIDTH = 54
 const BADGE_MS = 900
-/** A word the badge says while Altype works stays up to this long, unless taken down sooner. */
+/** A word the badge says while Krya works stays up to this long, unless taken down sooner. */
 const SAY_MS = 15_000
 
 type MainAction = Exclude<KeyAction, 'switch' | 'fix' | 'layout'>
@@ -35,6 +35,8 @@ type MainAction = Exclude<KeyAction, 'switch' | 'fix' | 'layout'>
 export type KeyboardEvents = {
   /** A fix was taken back: keep the word as typed from now on. */
   keep(word: string): void
+  /** A word was fixed by itself: as typed, and what it became. */
+  autoFixed(word: string, fixed: string): void
   /** The person fixed a word by hand; a word of theirs was typed right again (learning.ts). */
   fixedByHand(learned: Learned): void
   tally(hash: string, count: number, word?: Learned): void
@@ -101,6 +103,8 @@ export class KeyboardHelper {
         ['text', s.textKey],
         ['inPlace', s.inPlaceKey],
         ['check', s.checkKey],
+        ['type', s.typeKey],
+        ['typeCheck', s.typeCheckKey],
         ['dictate', s.dictateKey],
         ['english', s.englishKey],
         ['note', s.noteKey],
@@ -203,6 +207,9 @@ export class KeyboardHelper {
       case 'keep':
         this.events.keep(message.word)
         return
+      case 'autoFixed':
+        this.events.autoFixed(message.word, message.fixed)
+        return
       case 'fixedByHand':
         this.events.fixedByHand({ word: message.word, lang: message.lang })
         return
@@ -234,7 +241,7 @@ export class KeyboardHelper {
     return this.shorts.get(layout) ?? '?'
   }
 
-  /** A word in the badge by the text cursor while Altype works there (Translate in place); empty hides it. */
+  /** A word in the badge by the text cursor while Krya works there (Translate in place); empty hides it. */
   say(text: string): void {
     if (!text) {
       if (this.badgeTimer) clearTimeout(this.badgeTimer)

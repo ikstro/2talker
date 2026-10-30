@@ -1,7 +1,7 @@
 """Words the person wants spelled right: surnames, product names, their own terms.
 
 The vocabulary is a list of {word, heard}: `word` is the spelling, `heard` what
-the recognizer writes instead ("альтайп", "all type" for Altype). Whisper is
+the recognizer writes instead ("кря", "края" for Krya). Whisper is
 told the spellings beforehand (`hotwords`), and whatever it still writes its
 own way is put right afterwards (`correct`, `correct_segments`): first what it
 was heard as, then the spelling in another case, then, for a long word, a near
@@ -114,7 +114,7 @@ class Matcher:
                     self.runs.setdefault(tokens, word)
                     self.known.update(tokens)
             spellings.append((tuple(_norm(t) for t in TOKEN.findall(word)), word))
-        # A spelling is also what it is heard as, in any case ("ALTYPE", "visual studio"); after the aliases, which come first.
+        # A spelling is also what it is heard as, in any case ("KRYA", "visual studio"); after the aliases, which come first.
         for tokens, word in spellings:
             if 1 <= len(tokens) <= LONGEST_RUN:
                 self.runs.setdefault(tokens, word)
