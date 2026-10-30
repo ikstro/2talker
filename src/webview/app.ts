@@ -1638,7 +1638,7 @@ function translationsPage(v: AppView): HTMLElement[] {
             el(
               'div',
               { class: 'l' },
-              el('span', { class: 'said', title: `${e.text}\n\n${e.translation}` }, e.translation),
+              el('span', { class: 'said translated', title: `${e.text}\n\n${e.translation}` }, e.translation),
               el('small', {}, `${e.text.length > 80 ? `${e.text.slice(0, 80)}…` : e.text} · ${whenSaid(e.at, Date.now())}`),
             ),
             linkBtn('Copy', () => copyText(e.translation)),

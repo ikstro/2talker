@@ -22,12 +22,13 @@ import type { DictationMode, ToHost, ToView } from './protocol'
 import type { Settings } from './settings'
 import type { SpeechHost } from './speechhost'
 import { handleOf } from './winclip'
-import { foreground, putOnTop, sightOf, windowRect, type Sight } from './winkbd'
+import { foreground, fullScreenNow, putOnTop, sightOf, windowRect, type Sight } from './winkbd'
 
 /** The badge is as wide as this; as tall as its page, from one line of words to about six (then they scroll). */
 const BADGE = { width: 360, min: 64, max: 180 }
 /** How soon after it shows, then how often while it is up, the badge asks whether Windows shows it too. */
-const LOOK_MS = { first: 500, every: 2000 }
+/** When the badge is looked at: first after it shows, then every so often; quicker while something lies over it (a picture opened full screen in Telegram is kept on top too). */
+const LOOK_MS = { first: 500, every: 2000, covered: 400 }
 const NOTE_WAIT_MS = 5 * 60_000
 /** The most languages the engine weighs a phrase against. */
 const MOST_EXPECTED = 8
@@ -372,11 +373,11 @@ export class Dictation {
       const sight = this.sight(b)
       if (!sight) return
       const trouble = troubleOf(sight)
-      if (trouble !== this.trouble) log(trouble ? `badge: Windows has it ${trouble}` : 'badge: Windows has it on top again')
+      if (trouble !== this.trouble) log(trouble ? `badge: Windows has it ${trouble}${fullScreenNow() ? ', a program on the full screen' : ''}` : 'badge: Windows has it on top again')
       this.trouble = trouble
       if (sight.cloaked) this.stale = true
       if (trouble) this.raise(b)
-      this.look(LOOK_MS.every)
+      this.look(trouble && !sight.cloaked ? LOOK_MS.covered : LOOK_MS.every)
     }, after)
   }
 

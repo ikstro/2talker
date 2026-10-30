@@ -2473,7 +2473,10 @@ function setUpSpeechEngine(): void {
     balloon,
     needsEngine: () => openApp('dictate'),
     openTranscript,
-    onChange: () => refreshTray(),
+    onChange: () => {
+      keyboard?.dictating(dictation.state !== 'idle')
+      refreshTray()
+    },
     log: dictationLog,
     logged: () => postApp(),
     offset: () => settings.dictationBadge,

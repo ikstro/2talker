@@ -2909,3 +2909,8 @@ li + li > .ti::before {
 .row.notice.old > .lu {
   color: var(--amber);
 }
+
+/* A recent translation: the translation's own tone, as in the cards. */
+.row.phrase .said.translated {
+  color: var(--translation);
+}

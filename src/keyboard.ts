@@ -142,14 +142,26 @@ export class KeyboardHelper {
       quietFullScreen: s.quietFullScreen,
       words: Object.fromEntries(FIX_LANGUAGES.map(code => [code, path.join(this.wordsDir, `${code}.txt`)])),
     }
-    if (!this.worker) this.start()
+    const fresh = !this.worker
+    if (fresh) this.start()
     this.post({ type: 'config', config })
+    // A thread started during a dictation learns of it at once.
+    if (fresh && this.dictatingNow) this.post({ type: 'dictating', on: true })
   }
 
   /** The main process converted the selection and selected it again: the fix key goes on with it. */
   selected(): void {
     this.post({ type: 'selected' })
   }
+
+  /** A dictation started or ended: its keys then work in full screen too. */
+  dictating(on: boolean): void {
+    if (on === this.dictatingNow) return
+    this.dictatingNow = on
+    if (this.worker) this.post({ type: 'dictating', on })
+  }
+
+  private dictatingNow = false
 
   /** Switches the window in front to a layout. */
   switchTo(layout: string): void {

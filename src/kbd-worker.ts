@@ -145,6 +145,7 @@ function drainPort(): void {
     if (message.type === 'quit') running = false
     else if (message.type === 'switchTo') typist.switchTo(message.layout)
     else if (message.type === 'selected') typist.selected()
+    else if (message.type === 'dictating') typist.setDictating(message.on)
     else {
       const badgeWas = config?.badge || config?.trayLayout
       config = message.config

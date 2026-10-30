@@ -3940,7 +3940,7 @@
           el(
             "div",
             { class: "l" },
-            el("span", { class: "said", title: `${e.text}
+            el("span", { class: "said translated", title: `${e.text}
 
 ${e.translation}` }, e.translation),
             el("small", {}, `${e.text.length > 80 ? `${e.text.slice(0, 80)}\u2026` : e.text} \xB7 ${whenSaid(e.at, Date.now())}`)

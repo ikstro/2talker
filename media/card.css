@@ -634,7 +634,7 @@ body.no-voice [data-play] {
 
 .translation {
   padding: 0 0 4px var(--gutter);
-  color: var(--muted);
+  color: var(--translation);
   font-size: var(--t-body);
   line-height: 1.6;
   overflow-wrap: anywhere;
@@ -938,11 +938,16 @@ body.maximized .text-field {
 
 /* The translation: a paragraph per line, every sentence a span whose click marks its side in the field. */
 .text-out {
-  color: var(--strong);
+  color: var(--translation);
   font-size: 15px;
   line-height: 1.6;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+/* Check my English writes the person's own text corrected, not a translation: full tone. */
+.text-out.check-out {
+  color: var(--strong);
 }
 
 .text-out p {

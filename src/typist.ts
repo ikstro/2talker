@@ -47,6 +47,9 @@ export type KeyAction = 'switch' | 'fix' | 'layout' | 'select' | 'snip' | 'trans
 /** The parts of the keyboard helper a program can be left out of: fixing as one types, the switch and layout keys, the badge, every key of Krya's. */
 export type AppPart = 'fix' | 'switch' | 'badge' | 'keys'
 
+/** The keys that start and stop a dictation. */
+const DICTATION_ACTIONS: ReadonlySet<KeyAction> = new Set(['dictate', 'english', 'note', 'practice'])
+
 /** A word learned from the person's typing: as typed (lower case), and the language it goes into, or belongs to. */
 export type Learned = { word: string; lang: string }
 
@@ -93,6 +96,8 @@ export type KbdIn =
   | { type: 'switchTo'; layout: string }
   /** The main process converted the selection and selected it again: the fix key goes on with it. */
   | { type: 'selected' }
+  /** A dictation started or ended: while it runs, its keys work on the full screen too, so it can always be stopped. */
+  | { type: 'dictating'; on: boolean }
   | { type: 'quit' }
 
 export type KbdOut =
@@ -346,6 +351,23 @@ export class Typist {
     return this.config.quietFullScreen && this.env.fullScreen()
   }
 
+  /** A dictation is running (the main process says): its keys stay on in full screen. */
+  private dictating = false
+
+  setDictating(on: boolean): void {
+    this.dictating = on
+  }
+
+  /**
+   * Full screen and no dictation running: no key of Krya's at all. A dictation
+   * started before a picture or a video went full screen (Telegram's viewer)
+   * must still stop with its key, so then the keys are read and only the
+   * dictation's act (`allowed`).
+   */
+  private keysQuiet(): boolean {
+    return !this.dictating && this.quiet()
+  }
+
   // ---------------------------------------------------------------- keys
 
   /**
@@ -377,7 +399,7 @@ export class Typist {
     }
     const repeat = this.held.has(vk)
     this.held.add(vk)
-    if (this.quiet()) {
+    if (this.keysQuiet()) {
       // A game or a presentation: no key of Krya's, no fixing; modifiers are still followed, so none seems held after.
       this.spoilTap()
       this.resetRun()
@@ -432,7 +454,7 @@ export class Typist {
     if (event === 'x-down') {
       this.spoilTap()
       const mods = this.heldMods()
-      const hit = this.quiet() ? undefined : this.keys.find(k => k.spec.kind === 'mouse' && k.spec.button === button && sameMods(mods, k.spec.mods))
+      const hit = this.keysQuiet() ? undefined : this.keys.find(k => k.spec.kind === 'mouse' && k.spec.button === button && sameMods(mods, k.spec.mods))
       if (hit && this.allowed(hit)) {
         this.swallowedButtons.add(button)
         this.act(hit)
@@ -491,6 +513,7 @@ export class Typist {
   /** Whether a key works in the program in front: a program can be left out of Krya's keys, or of switching; the pause key works everywhere. */
   private allowed(key: Bound): boolean {
     if (key.action === 'pause') return true
+    if (this.quiet() && !DICTATION_ACTIONS.has(key.action)) return false
     const front = this.env.foreground()
     if (this.offHere('keys', front)) return false
     return !((key.action === 'switch' || key.action === 'layout') && this.offHere('switch', front))
