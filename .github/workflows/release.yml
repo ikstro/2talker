@@ -63,7 +63,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+        # A job run again finds its release there and replaces the installer in it.
         run: |
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/Krya-Setup-*.exe --repo "$REPO" --clobber
+            exit 0
+          fi
           prerelease=""
           case "$TAG" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$TAG" out/Krya-Setup-*.exe --repo "$REPO" --draft $prerelease \

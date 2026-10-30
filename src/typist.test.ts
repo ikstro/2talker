@@ -629,8 +629,6 @@ describe('learning from the person\'s typing', () => {
     // The fix is typed after the wait, the field never having answered.
     desk.typist.typeFix()
     expect(desk.text).toBe('qzxvbkt qzxvbkt qzxvbkt привет ')
-    // Its word as typed does not go to the tray's "Keep a word" either.
-    expect(desk.sent.find(m => m.type === 'autoFixed')).toBeUndefined()
   })
 
   test('a field that says it cannot tell teaches nothing', () => {

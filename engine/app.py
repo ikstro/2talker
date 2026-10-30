@@ -99,7 +99,7 @@ def load_extension() -> dict | None:
     try:
         found = json.loads(EXTENSION_FILE.read_text("utf-8"))
         if found.get("id") != auth.EXTENSION_ID:
-            return None  # an older copy, with the id Chrome gave its folder: it is refused now, so it is not "installed"
+            found["id"] = ""  # an older copy, with the id Chrome gave its folder: refused now, the app says to load it again
         return {"id": str(found["id"]), "version": str(found["version"]), "seen": float(found["seen"])}
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -115,8 +115,10 @@ def note_extension(origin: str, version: str) -> None:
     is new, as the extension pings every 15 minutes.
     """
     global extension
-    # Only Krya's own extension gets this far (guard), so its id is known even when a call comes without an Origin.
-    seen = {"id": auth.EXTENSION_ID, "version": version.strip()[:32], "seen": time.time()}
+    # A copy before the fixed id (its hello comes without an Origin, so only its version tells): no id, and the app
+    # says to remove it and load it again; from 0.4.0 on, the id is the fixed one.
+    version = version.strip()[:32]
+    seen = {"id": auth.EXTENSION_ID if auth.fixed_id(version) else "", "version": version, "seen": time.time()}
     changed = extension is None or extension["id"] != seen["id"] or extension["version"] != seen["version"] or not EXTENSION_FILE.exists()
     extension = seen
     if changed:

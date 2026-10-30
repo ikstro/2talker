@@ -2041,6 +2041,14 @@ const extensionStale = (v: AppView) => {
   return !!ext && !!v.speech.extensionShipped && olderVersion(ext.version, v.speech.extensionShipped)
 }
 
+/** The first version with a fixed id (the manifest's key, engine/auth.py): an older copy is refused, and Reload cannot help. */
+const FIXED_ID_SINCE = '0.4.0'
+/** Chrome runs a copy from before the fixed id: it must be removed and loaded again. */
+const extensionReload = (v: AppView) => {
+  const ext = extensionSeen(v)
+  return !!ext && olderVersion(ext.version, FIXED_ID_SINCE)
+}
+
 /** The extensions page, at Krya's own card when Chrome has told its id. */
 const extensionsPage = (v: AppView) => {
   const id = extensionSeen(v)?.id
@@ -2051,7 +2059,13 @@ const extensionsPage = (v: AppView) => {
 function meetCard(v: AppView): HTMLElement {
   const ext = extensionSeen(v)
   const stale = extensionStale(v)
-  const value = !ext ? 'set up in Chrome' : stale ? `Reload in Chrome · v${ext.version} → v${v.speech.extensionShipped}` : `Installed · v${ext.version}`
+  const value = !ext
+    ? 'set up in Chrome'
+    : extensionReload(v)
+      ? `Load again in Chrome · v${ext.version} → v${v.speech.extensionShipped}`
+      : stale
+        ? `Reload in Chrome · v${ext.version} → v${v.speech.extensionShipped}`
+        : `Installed · v${ext.version}`
   return navCard('video', 'Google Meet', 'record a call in Chrome with the Krya extension', value, () => openSub('meet'), 'meet', !!ext && !stale)
 }
 
@@ -2062,7 +2076,14 @@ function meetPage(v: AppView): HTMLElement[] {
   const offer = engineRows(v, 'Google Meet')
   const status = !ext
     ? card('video', 'Not set up yet', [running(v) ? 'three steps in Chrome, once; this line says when the extension is in' : 'the speech engine must run for the extension to work'], null)
-    : extensionStale(v)
+    : extensionReload(v)
+      ? card(
+          'rotate-cw',
+          `Chrome runs v${ext.version}, which Krya no longer takes recordings from`,
+          ['remove it on Chrome’s extensions page (Remove on its card), then Load unpacked again: steps 1 and 2 below; Chrome asks for the microphone once more'],
+          btn('Open in Chrome', () => openChrome('chrome://extensions/'), 'primary'),
+        )
+      : extensionStale(v)
       ? card('rotate-cw', `Chrome runs v${ext.version}; Krya has v${v.speech.extensionShipped}`, ['press Reload on the extension’s card in Chrome: Open in Chrome goes straight to it'], btn('Open in Chrome', () => openChrome(extensionsPage(v)), 'primary'))
       : card('circle-check', `Installed in Chrome · v${ext.version}`, [el('small', { class: 'ok' }, `seen ${ago(ext.seen)} · the call’s sound and your microphone go to the speech engine on this computer`)], caps(MEET_KEY))
   return [

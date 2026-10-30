@@ -74,15 +74,21 @@ const tid = GetCurrentThreadId() as number
 let config: KbdConfig | undefined
 let fullScreen = false
 
-/** The thread that asks whether the field typed in is a password, started at the first question. */
+/**
+ * The thread that asks whether the field typed in is a password: started with fixing or learning, so
+ * its first answer is not late (an answer later than 300 ms teaches nothing, typist.ts FieldAnswer).
+ */
 let field: { worker: Worker; port: MessagePort } | undefined
-function askField(): void {
+function fieldThread(): { worker: Worker; port: MessagePort } {
   if (!field) {
     const { port1, port2 } = new MessageChannel()
     const worker = new Worker(path.join(__dirname, 'field-worker.js'), { workerData: { port: port2, tid }, transferList: [port2] })
     field = { worker, port: port1 }
   }
-  field.port.postMessage('ask')
+  return field
+}
+function askField(): void {
+  fieldThread().port.postMessage('ask')
 }
 
 /** Each layout Windows has: its handle, language and what its keys type, read once. */
@@ -150,6 +156,7 @@ function drainPort(): void {
       config = message.config
       readLayouts()
       typist.configure(config, lexicons)
+      if (config.autoFix || config.learn) fieldThread()
       // The word lists of the cycle's languages, for fixing; read once, then given the person's own words.
       let read = false
       if (config.autoFix || config.keys.fix) {

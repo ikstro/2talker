@@ -1142,8 +1142,8 @@ export class Typist {
     this.env.press(keys)
     if (fix.auto && this.config.fixSound) this.env.click()
     // Typed only once the field is known to be no password (or never answered, which counts as none).
-    // The word as typed goes to the tray's "Keep a word" only from a field that said it is no password.
-    if (fix.auto && fix.report && this.secret === false) this.env.send({ type: 'autoFixed', ...fix.report })
+    // The tray's "Keep a word" offers it (in memory only), unless the field said it is a password.
+    if (fix.auto && fix.report && this.secret !== true) this.env.send({ type: 'autoFixed', ...fix.report })
   }
 
   // ---------------------------------------------------------------- the clock, the badge and the program in front

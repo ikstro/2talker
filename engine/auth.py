@@ -31,6 +31,17 @@ TOKEN_FILE = APP_DIR / "speech-token"
 # The id Chrome gives extension/ (from the public key in its manifest), wherever it is loaded from.
 EXTENSION_ID = "phokhlmnodckgejnaogjgpmfjnjkefpa"
 EXTENSION_ORIGIN = f"chrome-extension://{EXTENSION_ID}"
+# The first version with that fixed id: an older copy has the id Chrome gave its folder, and is refused.
+FIXED_ID_SINCE = (0, 4, 0)
+
+
+def fixed_id(version: str) -> bool:
+    """Whether a copy of this version has the fixed id (an older one must be removed and loaded again)."""
+    try:
+        return tuple(int(p) for p in version.strip().split(".")[:3]) >= FIXED_ID_SINCE
+    except ValueError:
+        return False
+
 
 # What the extension does: say hello, then record a meeting chunk by chunk.
 _EXTENSION_ROUTES = [
