@@ -267,4 +267,8 @@ describe('translatePairs', () => {
     expect(plainText(lines)).toBe(await translatePlain('Hallo. Wie geht es?\n\n- Gut', 'de', 'ru', translate))
     expect(plainText(lines)).toBe('ru(en(Hallo.)) ru(en(Wie geht es?))\n\n- ru(en(Gut))')
   })
+
+  test('a direct translator goes from one language into the other without English between', async () => {
+    expect(await translatePlain('Hallo. Wie geht es?', 'de', 'ru', translate, true)).toBe('ru(Hallo.) ru(Wie geht es?)')
+  })
 })

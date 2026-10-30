@@ -148,14 +148,17 @@ export type TextLine = { prefix: string; pairs: { src: string; out: string }[] }
 
 /**
  * A text translated from one language into another, by codes, sentence by
- * sentence: through English when neither is English, as the translator only
- * goes to and from it. Lines, list markers and empty lines are kept.
+ * sentence: through English when neither is English, as Firefox's translator
+ * only goes to and from it (`direct`: one that goes between any two). Lines,
+ * list markers and empty lines are kept.
  */
-export async function translatePairs(text: string, from: string, to: string, translate: Translate): Promise<TextLine[]> {
+export async function translatePairs(text: string, from: string, to: string, translate: Translate, direct = false): Promise<TextLine[]> {
   const lines = unwrapLines(text.replace(/\r\n?/g, '\n').split('\n')).map(lineUnits)
   const all = lines.flatMap(l => l.sentences)
   let done: (string | undefined)[] = all
-  if (from !== to && all.length > 0) {
+  if (from !== to && all.length > 0 && direct) {
+    done = await translate(all, from, to)
+  } else if (from !== to && all.length > 0) {
     const english = from === 'en' ? all : (await translate(all, from, 'en')).map((s, i) => s?.trim() || all[i])
     done = to === 'en' ? english : await translate(english as string[], 'en', to)
   }
@@ -169,6 +172,6 @@ export function plainText(lines: readonly TextLine[]): string {
   return lines.map(line => line.prefix + line.pairs.map(p => p.out).join(' ')).join('\n')
 }
 
-export async function translatePlain(text: string, from: string, to: string, translate: Translate): Promise<string> {
-  return plainText(await translatePairs(text, from, to, translate))
+export async function translatePlain(text: string, from: string, to: string, translate: Translate, direct = false): Promise<string> {
+  return plainText(await translatePairs(text, from, to, translate, direct))
 }

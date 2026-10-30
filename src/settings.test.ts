@@ -14,6 +14,12 @@ describe('normalize', () => {
     expect(normalize({ rate: 1.5, theme: 'dark', oneAtATime: true })).toMatchObject({ rate: 1.5, theme: 'dark', oneAtATime: true })
   })
 
+  test('the translation level is Fast until another one is picked', () => {
+    expect(normalize({}).translationLevel).toBe('fast')
+    expect(normalize({ translationLevel: 'most' }).translationLevel).toBe('most')
+    expect(normalize({ translationLevel: 'best' }).translationLevel).toBe('fast')
+  })
+
   test('a shortcut may be cleared; a missing one is the default', () => {
     expect(normalize({ snipKey: ' ', selectKey: ' Control+Alt+T ' })).toMatchObject({ snipKey: '', selectKey: 'Control+Alt+T' })
     expect(normalize({}).snipKey).toBe('Control+Alt+S')

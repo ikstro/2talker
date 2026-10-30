@@ -168,7 +168,10 @@ export async function probeDevice(): Promise<DeviceProfile> {
 
 /** How fast the natural voice makes speech here: seconds per second of sound, over `n` sentences. */
 export type VoiceSpeed = { rtf: number; n: number }
-type DeviceFile = { profile?: DeviceProfile; voice?: VoiceSpeed }
+/** How fast an accurate translation level works here, in seconds: a sentence on a model already loaded, and loading it; the latest few of each. */
+export type LevelSpeed = { sentence: number[]; start: number[] }
+export type LevelSpeeds = Partial<Record<'accurate' | 'most', LevelSpeed>>
+type DeviceFile = { profile?: DeviceProfile; voice?: VoiceSpeed; translate?: LevelSpeeds }
 
 function readDeviceFile(file: string): DeviceFile {
   try {
@@ -193,11 +196,11 @@ export function loadProfile(file: string): DeviceProfile | undefined {
   return p && Array.isArray(p.gpus) && p.cpu ? p : undefined
 }
 
-/** A new profile; another computer's voice speed goes with the old one. */
+/** A new profile; another computer's voice and translation speeds go with the old one. */
 export function saveProfile(file: string, profile: DeviceProfile): void {
   const old = readDeviceFile(file)
   const same = old.profile && fingerprint(old.profile) === fingerprint(profile)
-  writeDeviceFile(file, same ? { profile } : { profile, voice: undefined })
+  writeDeviceFile(file, same ? { profile } : { profile, voice: undefined, translate: undefined })
 }
 
 export function loadVoiceSpeed(file: string): VoiceSpeed | undefined {
@@ -216,6 +219,36 @@ export function nextVoiceSpeed(old: VoiceSpeed | undefined, took: number, second
   if (!old) return { rtf, n: 1 }
   const weight = Math.max(0.15, 1 / (old.n + 1))
   return { rtf: old.rtf + (rtf - old.rtf) * weight, n: old.n + 1 }
+}
+
+/** Seconds of each kind kept: the median of the latest few, so one slow first run (Vulkan preparing its shaders) does not decide. */
+const LEVEL_KEPT = 9
+
+export function loadLevelSpeeds(file: string): LevelSpeeds {
+  const t = readDeviceFile(file).translate
+  const out: LevelSpeeds = {}
+  for (const level of ['accurate', 'most'] as const) {
+    const s = t?.[level]
+    if (s && Array.isArray(s.sentence) && Array.isArray(s.start)) out[level] = s
+  }
+  return out
+}
+
+export function saveLevelSpeeds(file: string, speeds: LevelSpeeds): void {
+  writeDeviceFile(file, { translate: speeds })
+}
+
+/** A translation timed: seconds a sentence, and the seconds it waited for the model to load, when it did. */
+export function nextLevelSpeed(old: LevelSpeed | undefined, timed: { sentence: number; start?: number }): LevelSpeed {
+  const keep = (list: number[], value: number | undefined) => (value === undefined || value <= 0 ? list : [...list, value].slice(-LEVEL_KEPT))
+  return { sentence: keep(old?.sentence ?? [], timed.sentence), start: keep(old?.start ?? [], timed.start) }
+}
+
+export function median(values: readonly number[]): number | undefined {
+  if (values.length === 0) return undefined
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = sorted.length >> 1
+  return sorted.length % 2 ? sorted[mid] : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2
 }
 
 /** Free space, in MB, on the drive a folder is (or will be) on. */

@@ -59,9 +59,17 @@ describe('sentences', () => {
     expect(splitSentences('Is it 5? No.')).toEqual(['Is it 5?', 'No.'])
   })
 
-  test('a full stop before a lower-case word does not split', () => {
+  test('a full stop inside a word or after an abbreviation does not split before lower case', () => {
     expect(splitSentences('Open file.txt and read it.')).toEqual(['Open file.txt and read it.'])
     expect(splitSentences('see you at 5 p.m. tomorrow')).toEqual(['see you at 5 p.m. tomorrow'])
+    expect(splitSentences('the U.S. army came, e.g. today')).toEqual(['the U.S. army came, e.g. today'])
+    expect(splitSentences('см. ниже, напр. так')).toEqual(['см. ниже, напр. так'])
+  })
+
+  test('a sentence written in lower case starts after the full stop of a word', () => {
+    expect(splitSentences('the build broke again. so we leaned in. fine!')).toEqual(['the build broke again.', 'so we leaned in.', 'fine!'])
+    expect(splitSentences('Сборка упала. проверь API.')).toEqual(['Сборка упала.', 'проверь API.'])
+    expect(splitSentences('Well... maybe so.')).toEqual(['Well... maybe so.'])
   })
 
   test('a link or a file name with dots stays inside its sentence', () => {

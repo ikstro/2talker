@@ -12,8 +12,8 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { Readable, Transform } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+
+import { fetchPinned } from './download'
 
 export type SpeechPart = 'core' | 'gpu' | 'speakers'
 
@@ -210,25 +210,7 @@ export class SpeechPack {
     const dir = path.dirname(this.uvExe)
     fs.mkdirSync(dir, { recursive: true })
     const zip = path.join(dir, 'uv.zip')
-    const hash = createHash('sha256')
-    let got = 0
-    const body = await this.o.open(UV.url)
-    await pipeline(
-      Readable.from(body),
-      new Transform({
-        transform: (chunk: Buffer, _encoding, callback) => {
-          got += chunk.length
-          hash.update(chunk)
-          this.tick(got / UV.bytes)
-          callback(null, chunk)
-        },
-      }),
-      fs.createWriteStream(zip),
-    )
-    if (got !== UV.bytes || hash.digest('hex') !== UV.sha256) {
-      fs.rmSync(zip, { force: true })
-      throw new Error('The Python manager did not arrive whole')
-    }
+    await fetchPinned({ url: UV.url, size: UV.bytes, sha256: UV.sha256 }, zip, 'The Python manager', got => this.tick(got / UV.bytes), this.o.open)
     // Windows' own tar reads zip files.
     const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
     const unzip = this.runner(tar, ['-xf', zip, '-C', dir], {})

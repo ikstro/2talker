@@ -1,6 +1,25 @@
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import { fingerprint, mainCard, nextVoiceSpeed, parseNvidiaSmi, parseWindows, quickProfile, vendorOf, withNvidia } from './device'
+import {
+  fingerprint,
+  loadLevelSpeeds,
+  mainCard,
+  median,
+  nextLevelSpeed,
+  nextVoiceSpeed,
+  parseNvidiaSmi,
+  parseWindows,
+  quickProfile,
+  saveLevelSpeeds,
+  saveProfile,
+  vendorOf,
+  withNvidia,
+} from './device'
+import { translationAdvice, type DeviceProfile } from './hardware'
 
 const base = { cpu: { name: 'node cpu', cores: 8, threads: 16 }, ramGb: 32, gpus: [], laptop: false, at: 0 }
 
@@ -74,10 +93,66 @@ describe('device profile', () => {
     expect(v!.rtf).toBeGreaterThan(1.1)
   })
 
+  it('keeps the latest translation times; their median sets aside one slow first run', () => {
+    let s = nextLevelSpeed(undefined, { sentence: 9.5, start: 7.5 })
+    expect(s).toEqual({ sentence: [9.5], start: [7.5] })
+    for (const sentence of [0.3, 0.35, 0.3]) s = nextLevelSpeed(s, { sentence })
+    expect(s.start).toEqual([7.5])
+    expect(median(s.sentence)).toBeCloseTo(0.325, 5)
+    for (let i = 0; i < 12; i++) s = nextLevelSpeed(s, { sentence: 0.4, start: 3 })
+    expect(s.sentence).toHaveLength(9)
+    expect(median(s.start)).toBe(3)
+    expect(median([])).toBeUndefined()
+  })
+
+  it('another computer’s speeds go with its profile', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-'))
+    const file = path.join(dir, 'device.json')
+    try {
+      const p = { ...base, gpus: [] }
+      saveProfile(file, p)
+      saveLevelSpeeds(file, { accurate: { sentence: [0.3], start: [3] } })
+      saveProfile(file, p)
+      expect(loadLevelSpeeds(file).accurate?.sentence).toEqual([0.3])
+      saveProfile(file, { ...p, ramGb: p.ramGb + 16 })
+      expect(loadLevelSpeeds(file)).toEqual({})
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('knows the processor and memory at once', () => {
     const p = quickProfile()
     expect(p.cpu.threads).toBeGreaterThan(0)
     expect(p.ramGb).toBeGreaterThan(0)
     expect(p.at).toBe(0)
+  })
+})
+
+describe('translationAdvice', () => {
+  const pc = (vramMb: number[], vendor: 'amd' | 'nvidia' = 'amd', driver = '1'): DeviceProfile => ({
+    cpu: { name: 'cpu', cores: 8, threads: 16 },
+    ramGb: 32,
+    gpus: vramMb.map(v => ({ name: 'card', vendor, vramMb: v, driver })),
+    laptop: false,
+    at: 1,
+  })
+  const on = { slow: false, cuda: false }
+
+  it('advises the most accurate level whose model the card holds', () => {
+    expect(translationAdvice(pc([24576]))).toEqual({ advised: 'most', accurate: { where: 'card', ...on }, most: { where: 'card', ...on } })
+    expect(translationAdvice(pc([0, 8192]))).toEqual({ advised: 'accurate', accurate: { where: 'card', ...on }, most: { where: 'part', slow: true, cuda: false } })
+  })
+
+  it('a model partly on an NVIDIA card goes to its CUDA build, when the driver takes CUDA 12.4', () => {
+    // The RTX 2080 SUPER: 4B on the card, 12B only partly, quicker with CUDA.
+    expect(translationAdvice(pc([8192], 'nvidia', '610.88')).most).toEqual({ where: 'part', slow: true, cuda: true })
+    expect(translationAdvice(pc([8192], 'nvidia', '610.88')).accurate).toEqual({ where: 'card', ...on })
+    expect(translationAdvice(pc([8192], 'nvidia', '537.42')).most.cuda).toBe(false)
+  })
+
+  it('advises Fast without a card of its own memory, the others slow on the processor', () => {
+    expect(translationAdvice(pc([0]))).toEqual({ advised: 'fast', accurate: { where: 'processor', slow: true, cuda: false }, most: { where: 'processor', slow: true, cuda: false } })
+    expect(translationAdvice(undefined).advised).toBe('fast')
   })
 })

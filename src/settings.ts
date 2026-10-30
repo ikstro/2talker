@@ -19,6 +19,11 @@ export const RATES: readonly number[] = [0.75, 0.9, 1, 1.15, 1.3, 1.5]
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
+export type TranslationLevel = 'fast' | 'accurate' | 'most'
+
+/** The levels as the pages and the card name them. */
+export const LEVEL_NAMES: Readonly<Record<TranslationLevel, string>> = { fast: 'Fast', accurate: 'Accurate', most: 'Most accurate' }
+
 export const CARD_WIDTH = { min: 320, max: 1200 }
 /** A card's height cap set by hand; 0 is automatic (most of the screen). */
 export const CARD_HEIGHT = { min: 160, max: 2400 }
@@ -115,6 +120,12 @@ export type Settings = {
    * ("Altype (альтайп, all type)"); vocabulary.ts reads them.
    */
   vocabulary: string[]
+  /**
+   * Which translator every card and key uses: Fast (Firefox's models), Accurate
+   * or Most accurate (TranslateGemma 4B or 12B, llmtranslator.ts), downloaded
+   * when picked. A card waits for the level picked, never another.
+   */
+  translationLevel: TranslationLevel
   /** Speech models: the most accurate this computer runs in time, or quicker ones. */
   speechPrefer: Prefer
   /** A speech model the person picked for dictation and for transcripts (models.json names); empty: chosen for this computer. */
@@ -189,6 +200,7 @@ export const DEFAULTS: Settings = {
   againKey: '',
   dictationBadge: { dx: 0, dy: 0 },
   vocabulary: [],
+  translationLevel: 'fast',
   speechPrefer: 'accuracy',
   dictationModel: '',
   transcriptsModel: '',
@@ -323,6 +335,7 @@ export function normalize(raw: unknown, native = DEFAULTS.native): Settings {
     againKey: key(r.againKey, DEFAULTS.againKey),
     dictationBadge: badgeOffset(r.dictationBadge),
     vocabulary: vocabularyLines(r.vocabulary),
+    translationLevel: r.translationLevel === 'accurate' || r.translationLevel === 'most' ? r.translationLevel : 'fast',
     speechPrefer: r.speechPrefer === 'speed' ? 'speed' : 'accuracy',
     dictationModel: key(r.dictationModel, DEFAULTS.dictationModel),
     transcriptsModel: key(r.transcriptsModel, DEFAULTS.transcriptsModel),

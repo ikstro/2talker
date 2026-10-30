@@ -5,7 +5,7 @@ import type { DeviceProfile } from './hardware'
 import type { WordTime } from './kokoro'
 import type { Gloss } from './lemma'
 import type { NaturalState } from './natural'
-import type { Settings } from './settings'
+import type { Settings, TranslationLevel } from './settings'
 import type { SpeechPackState, SpeechPart } from './speechpack'
 import type { Choice, Feature, FeaturePlan, SpeechPlan } from './speechplan'
 import type { SpeechHealth, SpeechResult, SpeechServiceState } from './speechservice'
@@ -81,6 +81,8 @@ export type CardView = {
   /** The learned language (English) and the person's own. */
   target: string
   native: string
+  /** The translation level the card translates with (Settings). */
+  level: TranslationLevel
   /** Read the English aloud as soon as the card has it. */
   autoRead: boolean
   /**
@@ -189,6 +191,10 @@ export type AppView = {
   dictation: { recent: DictationEntry[] }
   /** The translator for the person's language with its download's progress and size (MB), for the setup's list. */
   translatorState: TranslatorState
+  /** Each translation level's models for the person's language (Fast: Firefox's pair), for the Translate page. */
+  translation: Record<TranslationLevel, TranslatorState>
+  /** Seconds an accurate level takes here, measured once a few translations were done: a sentence, and loading the model after it was let go. */
+  translationSpeed: Partial<Record<Exclude<TranslationLevel, 'fast'>, { sentence: number; start?: number }>>
   /** The word dictionary for the person's language. */
   dictionary: { status: DictionaryStatus }
 }
@@ -321,6 +327,9 @@ export type ToHost =
   | { type: 'installSpeech'; parts: SpeechPart[]; models?: string[] }
   /** The first-run setup: the translator for the person's language and its word dictionary, downloaded ahead of use. */
   | { type: 'prepareTranslator' }
+  /** The translation level picked on the Translate page: saved, and its models downloaded; a level's model deleted (Fast in its place when it was in use). */
+  | { type: 'translationLevel'; level: TranslationLevel }
+  | { type: 'removeTranslation'; level: Exclude<TranslationLevel, 'fast'> }
   | { type: 'prepareDictionary' }
   /** Run the speed test (the person agreed), or not now. */
   | { type: 'testSpeech' }

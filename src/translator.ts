@@ -13,6 +13,8 @@ export type TranslatorState = {
 }
 
 export interface Translator {
+  /** It translates between any two of its languages, not only to and from English. */
+  readonly direct?: boolean
   /** How the models for translating between English and `native` (a language code) stand. */
   state(native: string): TranslatorState
   /** Downloads what is missing for the pair; resolves once it can translate. */

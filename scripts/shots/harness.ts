@@ -118,8 +118,8 @@ async function cardShots(theme: 'dark' | 'light'): Promise<void> {
     if (h) w.setSize(440, Math.min(700, h))
     await sleep(350)
   }
-  const card = (id: number, kind: string, state: unknown) =>
-    send(w, { type: 'card', card: { id, kind, state, target: 'English', native: 'Russian', autoRead: false, via: kind === 'selection' ? 'Control+C*2' : 'RightControl*2' }, config: CONFIG, pinned: false, maximized: false })
+  const card = (id: number, kind: string, state: unknown, level = 'fast') =>
+    send(w, { type: 'card', card: { id, kind, state, target: 'English', native: 'Russian', level, autoRead: false, via: kind === 'selection' ? 'Control+C*2' : 'RightControl*2' }, config: CONFIG, pinned: false, maximized: false })
 
   // Listen: the English on top with Copy and the remote, the translation with its Copy.
   const english = `${PHRASES[0]![0]} ${PHRASES[1]![0]}\n\n${PHRASES[2]![0]}`
@@ -168,6 +168,17 @@ async function cardShots(theme: 'dark' | 'light'): Promise<void> {
   log.push(`typed pair: ${await clickWord(w, '.text-field', 'sail')}`)
   await sleep(300)
   await shot(w, `card-${theme}-translate-typed`)
+
+  // Accurate picked: its model downloading the first time, then the translation said to be its.
+  const chest = 'Кнопки сундука и молнии поменять местами.'
+  const level = (id: number, result: unknown) =>
+    card(id, 'translate', { status: 'text', text: chest, from: 'ru', to: 'en', languages: ['en', 'ru', 'uk', 'de'], mine: ['ru', 'en'], result, canPaste: true }, 'accurate')
+  level(4, { status: 'downloading', language: 'ru', progress: 0.42, size: 2527 })
+  await fit()
+  await shot(w, `card-${theme}-accurate-downloading`)
+  level(5, { status: 'ready', text: 'Swap the chest and lightning buttons.', from: 'ru', to: 'en', html: textOutHtml([{ prefix: '', pairs: [{ src: chest, out: 'Swap the chest and lightning buttons.' }] }]), sentences: [chest] })
+  await fit()
+  await shot(w, `card-${theme}-accurate-done`)
   w.destroy()
 }
 

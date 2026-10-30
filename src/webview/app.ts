@@ -17,14 +17,15 @@ import { NATURAL_PREFIX, NATURAL_VOICES, naturalLabel } from '../natural'
 import { DOUBLE_MS, HotkeyRecorder, hotkeyLabel, type Recorded } from '../hotkey'
 import type { AppTab, AppView, KeyboardLayout, SavedWord, Settings, ToView, TutorHost, UpdateStatus } from '../protocol'
 import { LANGUAGES } from '../languages'
-import { myLanguages, RATES, type AppRule, type ThemeMode } from '../settings'
+import { translationAdvice, type LevelFit } from '../hardware'
+import { LEVEL_NAMES, myLanguages, RATES, type AppRule, type ThemeMode, type TranslationLevel } from '../settings'
 import type { AppPart } from '../typist'
 import { parseEntry } from '../vocabulary'
 import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
 import { lucide, type LucideName } from './lucide'
-import { aside, bad, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, warn } from './ui'
+import { aside, bad, bar, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, warn } from './ui'
 import { seconds } from '../speechplan'
 import { resetSetup, setupNodes } from './setup'
 import { api, cardNote, computerRows, DEVICE_NAMES, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, size as speechSize, speakerRows, testOffer, toast } from './speech'
@@ -1421,18 +1422,88 @@ const TRY_TRANSLATE: Record<string, string> = {
 }
 
 function translatorChip(v: AppView): [HTMLElement, string] {
+  const level = v.settings.translationLevel
+  const from = level === 'fast' ? 'Mozilla' : 'Hugging Face'
   switch (v.translator) {
     case 'ready':
-      return [chip('ready'), 'translator · on this computer']
+      return [chip('ready'), `${LEVEL_NAMES[level]} · on this computer`]
     case 'absent':
-      return [chip('on first use', 'off'), 'downloads once from Mozilla on the first translation, then works offline']
+      return [chip('on first use', 'off'), `downloads once from ${from} on the first translation, then works offline`]
     case 'downloading':
-      return [chip('downloading'), 'downloading once from Mozilla']
+      return [chip('downloading'), `downloading once from ${from}`]
     case 'failed':
       return [chip('failed', 'bad'), 'could not download; the next translation tries again']
     case 'unsupported':
       return [chip('not offered', 'off'), 'Firefox Translations has no offline model for this language yet']
   }
+}
+
+const LEVEL_ABOUT: Record<TranslationLevel, string> = {
+  fast: 'Firefox Translations · at once, though a short phrase may come out word for word',
+  accurate: 'TranslateGemma 4B by Google · reads the phrase as a whole',
+  most: 'TranslateGemma 12B · the best wording, and the slowest',
+}
+
+const FIT_WHERE: Record<LevelFit['where'], string> = {
+  card: 'on the graphics card',
+  part: 'partly on the graphics card',
+  processor: 'on the processor',
+}
+
+/** The time expected before any is measured here. */
+const FIT_GUESS: Record<LevelFit['where'], string> = {
+  card: 'a text in a second or two',
+  part: 'possible, but slow here',
+  processor: 'possible, but slow here: half a minute a text or more',
+}
+
+/** A model partly on an NVIDIA card, through llama.cpp's CUDA build (in its download). */
+const CUDA_WHERE = 'partly on the graphics card, with NVIDIA’s own build (670 MB of the download)'
+const CUDA_GUESS = 'a short text in a few seconds, a long one in 15–20 s'
+
+/** A sentence slower than this reads as slow. */
+const SLOW_SENTENCE_S = 2
+
+/** Where a level runs here and how long it takes: measured, once it has been, else expected. */
+function levelFitText(fit: LevelFit, measured: { sentence: number; start?: number } | undefined): string {
+  const where = fit.cuda ? CUDA_WHERE : FIT_WHERE[fit.where]
+  if (!measured) return `${where} · ${fit.cuda ? CUDA_GUESS : FIT_GUESS[fit.where]}`
+  const start = measured.start !== undefined ? `, ${seconds(measured.start)} to load after 10 idle minutes` : ''
+  const pace = `${seconds(measured.sentence)} a sentence${start}`
+  return `${where} · ${measured.sentence > SLOW_SENTENCE_S ? 'slow here' : 'here'}: ${pace}`
+}
+
+/**
+ * The three translators, one in use: Fast (Firefox's models), Accurate and
+ * Most accurate (TranslateGemma, run by llama.cpp on this computer). Picking
+ * one downloads it; nothing downloads before. The advice comes from this
+ * computer's graphics card (hardware.ts translationAdvice).
+ */
+function levelRows(v: AppView): HTMLElement[] {
+  const advice = translationAdvice(v.speech.device)
+  const inUse = v.settings.translationLevel
+  return (['fast', 'accurate', 'most'] as const).map(level => {
+    const t = v.translation[level]
+    const fit = level === 'fast' ? undefined : advice[level]
+    const fetching = t.status === 'downloading'
+    const notes: (string | HTMLElement | null)[] = [
+      fit ? `${LEVEL_ABOUT[level]} · ${levelFitText(fit, level === 'fast' ? undefined : v.translationSpeed[level])}` : LEVEL_ABOUT[level],
+      t.status === 'failed'
+        ? bad('the download failed · Use tries again')
+        : t.status === 'ready' || fetching
+          ? null
+          : `${speechSize(t.size)}, ${level === inUse ? 'downloads with the next translation' : 'downloads when picked'}`,
+      fetching ? bar(t.progress) : null,
+    ]
+    const label = el('span', {}, LEVEL_NAMES[level], advice.advised === level ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
+    const control = fetching
+      ? el('span', { class: 'pct' }, `${Math.round(t.progress * 100)}%`)
+      : level === inUse
+        ? chip('in use', 'lit')
+        : linkBtn('Use', () => post({ type: 'translationLevel', level }))
+    const remove = level !== 'fast' && t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[level]} (${speechSize(t.size)})`, () => post({ type: 'removeTranslation', level })) : null
+    return row(label, notes, control, remove)
+  })
 }
 
 function translatePage(v: AppView): HTMLElement[] {
@@ -1446,6 +1517,8 @@ function translatePage(v: AppView): HTMLElement[] {
     keyRow('inPlaceKey', 'Translate in place', 'the selection becomes its translation, no card', !v.keysOk.inPlace, 'wand-sparkles'),
     keyRow('textKey', 'A piece of the screen', 'draw a box over the words', !v.keysOk.text, 'scan'),
     fixedKey('Paste the translation over the selection', 'Enter'),
+    grp('Translation'),
+    ...levelRows(v),
     grp('Languages'),
     card('globe', pairOf(v), [note], state),
     languagesCard(v),
@@ -2382,7 +2455,7 @@ function aboutPage(v: AppView): HTMLElement[] {
         ...fact('made by', 'Yevhen Peshynskyi · Design automation engineer', el('br'), link('https://ikstro.com', 'ikstro.com')),
         ...fact(
           'on this computer',
-          'Firefox Translations by Mozilla · Kokoro-82M by hexgrad, eSpeak NG · Windows OCR · WikDict, from Wiktionary · FrequencyWords by Hermit Dave ',
+          'Firefox Translations by Mozilla · TranslateGemma by Google (Gemma Terms of Use), run by llama.cpp · Kokoro-82M by hexgrad, eSpeak NG · Windows OCR · WikDict, from Wiktionary · FrequencyWords by Hermit Dave ',
           el('span', { class: 'q' }, '— your text is never sent anywhere'),
         ),
         ...fact('made with', 'Inter and JetBrains Mono (SIL OFL) · Electron · VS Code icons'),

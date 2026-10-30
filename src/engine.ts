@@ -7,14 +7,11 @@
 // models\<language>\<sha256 head>-<name>: the hash in the name keeps a file
 // of a newer model from passing for the old one.
 
-import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { Readable, Transform } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 import { Worker } from 'node:worker_threads'
 
-import { openStream } from './download'
+import { fetchPinned } from './download'
 import manifest from './mt-manifest.json'
 import type { ModelFiles, MtIn, MtOut } from './mt-worker'
 import type { Translator, TranslatorState } from './translator'
@@ -59,28 +56,8 @@ export function createTranslator(root: string, workerPath: string, engineFiles: 
     return { status: failed.has(native) ? 'failed' : 'absent', progress: 0, size }
   }
 
-  async function fetchFile(native: string, file: ModelFile, onBytes: (got: number) => void): Promise<void> {
-    const target = localPath(native, file)
-    const part = `${target}.part`
-    const hash = createHash('sha256')
-    let got = 0
-    await pipeline(
-      Readable.from(await openStream(MODELS.base + file.url)),
-      new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
-          got += chunk.length
-          hash.update(chunk)
-          onBytes(got)
-          callback(null, chunk)
-        },
-      }),
-      fs.createWriteStream(part),
-    )
-    if (got !== file.size || hash.digest('hex') !== file.sha256) {
-      fs.rmSync(part, { force: true })
-      throw new Error(`${file.name} did not arrive whole`)
-    }
-    fs.renameSync(part, target)
+  function fetchFile(native: string, file: ModelFile, onBytes: (got: number) => void): Promise<void> {
+    return fetchPinned({ ...file, url: MODELS.base + file.url }, localPath(native, file), file.name, onBytes)
   }
 
   /** Files of this language left from older models. */

@@ -59,3 +59,44 @@ export function cardText(g: Gpu): string {
   const name = g.name.replace(/\((R|TM)\)/gi, '').replace(/\s+/g, ' ').trim()
   return g.vramMb >= 1024 ? `${name} · ${Math.round(g.vramMb / 1024)} GB` : name
 }
+
+/**
+ * Where an accurate translator's model runs here: all on the card, partly on
+ * it, or on the processor; `slow` when it takes long. `cuda`: the model does
+ * not fit an NVIDIA card, whose own build (llama.cpp's CUDA, +670 MB) still
+ * runs it about four times quicker than Vulkan (the driver lends it the
+ * computer's memory: the 12B on the RTX 2080 SUPER, 12 tokens a second
+ * against 3).
+ */
+export type LevelFit = { where: 'card' | 'part' | 'processor'; slow: boolean; cuda: boolean }
+
+/** The model's own memory on the card, in MB, with its working room (TranslateGemma 4B and 12B, Q4_K_M). */
+const LEVEL_VRAM_MB = { accurate: 3500, most: 9000 }
+
+/** An NVIDIA card llama.cpp's CUDA 12.4 build runs on: compute 5.0, a driver of 551 or newer (as nvidia-smi numbers it). */
+function cudaReady(g: Gpu | undefined): boolean {
+  if (!g) return false
+  if (g.computeCap && g.computeCap < 5) return false
+  return !/^\d{3}\.\d+$/.test(g.driver) || Number(g.driver.split('.')[0]) >= 551
+}
+
+/**
+ * How each accurate level fits this computer, and the level to advise: Most
+ * accurate on a card that holds its 12B model, Accurate on one that holds the
+ * 4B, Fast without one (Accurate takes half a minute a text on a processor).
+ * Any card with memory of its own counts, as llama.cpp's Vulkan build runs on
+ * NVIDIA, AMD and Intel alike; a chip sharing the system's memory does not.
+ */
+export function translationAdvice(p: DeviceProfile | undefined): { advised: 'fast' | 'accurate' | 'most'; accurate: LevelFit; most: LevelFit } {
+  const vram = p?.gpus.reduce((most, g) => Math.max(most, g.vramMb), 0) ?? 0
+  const nvidia = cudaReady(nvidiaCard(p)) && (nvidiaCard(p)?.vramMb ?? 0) === vram
+  const fit = (need: number): LevelFit =>
+    vram >= need
+      ? { where: 'card', slow: false, cuda: false }
+      : vram >= need / 2
+        ? { where: 'part', slow: true, cuda: nvidia }
+        : { where: 'processor', slow: true, cuda: false }
+  const accurate = fit(LEVEL_VRAM_MB.accurate)
+  const most = fit(LEVEL_VRAM_MB.most)
+  return { advised: most.where === 'card' ? 'most' : accurate.where === 'card' ? 'accurate' : 'fast', accurate, most }
+}

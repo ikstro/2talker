@@ -34,6 +34,21 @@ export function watchClipboard(window: BrowserWindow, onChange: () => void): () 
   }
 }
 
+const WM_RENDERFORMAT = 0x0305
+const WM_RENDERALLFORMATS = 0x0306
+
+/** The window owns Altype's promised text (winclipboard.ts): `onRead` when a program asks for it, `onGoing` when the window goes first. */
+export function watchRendering(window: BrowserWindow, onRead: () => void, onGoing: () => void): () => void {
+  // Called within Windows' message: the text must be handed over before the hook returns.
+  window.hookWindowMessage(WM_RENDERFORMAT, () => onRead())
+  window.hookWindowMessage(WM_RENDERALLFORMATS, () => onGoing())
+  return () => {
+    if (window.isDestroyed()) return
+    window.unhookWindowMessage(WM_RENDERFORMAT)
+    window.unhookWindowMessage(WM_RENDERALLFORMATS)
+  }
+}
+
 const keybd_event = user32.func('void __stdcall keybd_event(uint8_t vk, uint8_t scan, uint32_t flags, uintptr_t extra)')
 const KEYEVENTF_KEYUP = 0x0002
 const VK_SHIFT = 0x10

@@ -238,8 +238,38 @@
     return SCRIPT_BY_CODE[language.code] ?? "Latin";
   }
 
+  // src/hardware.ts
+  function nvidiaCard(p) {
+    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function mainCard(p) {
+    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
+  }
+  function shortCpu(name) {
+    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
+  }
+  function cardText(g) {
+    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
+    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
+  }
+  var LEVEL_VRAM_MB = { accurate: 3500, most: 9e3 };
+  function cudaReady(g) {
+    if (!g) return false;
+    if (g.computeCap && g.computeCap < 5) return false;
+    return !/^\d{3}\.\d+$/.test(g.driver) || Number(g.driver.split(".")[0]) >= 551;
+  }
+  function translationAdvice(p) {
+    const vram = p?.gpus.reduce((most2, g) => Math.max(most2, g.vramMb), 0) ?? 0;
+    const nvidia = cudaReady(nvidiaCard(p)) && (nvidiaCard(p)?.vramMb ?? 0) === vram;
+    const fit = (need) => vram >= need ? { where: "card", slow: false, cuda: false } : vram >= need / 2 ? { where: "part", slow: true, cuda: nvidia } : { where: "processor", slow: true, cuda: false };
+    const accurate = fit(LEVEL_VRAM_MB.accurate);
+    const most = fit(LEVEL_VRAM_MB.most);
+    return { advised: most.where === "card" ? "most" : accurate.where === "card" ? "accurate" : "fast", accurate, most };
+  }
+
   // src/settings.ts
   var RATES = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
+  var LEVEL_NAMES = { fast: "Fast", accurate: "Accurate", most: "Most accurate" };
   function myLanguages(s) {
     return [...new Set([findLanguage(s.native)?.code ?? "", "en", ...s.languages].filter(Boolean))];
   }
@@ -773,21 +803,6 @@
       }
     ]
   };
-
-  // src/hardware.ts
-  function nvidiaCard(p) {
-    return p?.gpus.filter((g) => g.vendor === "nvidia").sort((a, b) => b.vramMb - a.vramMb)[0];
-  }
-  function mainCard(p) {
-    return nvidiaCard(p) ?? p?.gpus.slice().sort((a, b) => b.vramMb - a.vramMb)[0];
-  }
-  function shortCpu(name) {
-    return name.replace(/\((R|TM|C)\)/gi, "").replace(/\s+@.*$/, "").replace(/\b(CPU|Processor)\b/gi, "").replace(/\s+with\s+.*graphics.*$/i, "").replace(/\s+\d+-Core\b/gi, "").replace(/\s+/g, " ").trim();
-  }
-  function cardText(g) {
-    const name = g.name.replace(/\((R|TM)\)/gi, "").replace(/\s+/g, " ").trim();
-    return g.vramMb >= 1024 ? `${name} \xB7 ${Math.round(g.vramMb / 1024)} GB` : name;
-  }
 
   // src/speechplan.ts
   var MODELS = models_default.models;
@@ -3570,18 +3585,63 @@
     Ukrainian: "\u0417\u0432\u0456\u0441\u043D\u043E, \u043D\u0430\u0434\u0456\u0448\u043B\u044E \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u0456 \u043C\u0430\u043A\u0435\u0442\u0438 \u0434\u043E \u0434\u0437\u0432\u0456\u043D\u043A\u0430."
   };
   function translatorChip(v) {
+    const level = v.settings.translationLevel;
+    const from = level === "fast" ? "Mozilla" : "Hugging Face";
     switch (v.translator) {
       case "ready":
-        return [chip("ready"), "translator \xB7 on this computer"];
+        return [chip("ready"), `${LEVEL_NAMES[level]} \xB7 on this computer`];
       case "absent":
-        return [chip("on first use", "off"), "downloads once from Mozilla on the first translation, then works offline"];
+        return [chip("on first use", "off"), `downloads once from ${from} on the first translation, then works offline`];
       case "downloading":
-        return [chip("downloading"), "downloading once from Mozilla"];
+        return [chip("downloading"), `downloading once from ${from}`];
       case "failed":
         return [chip("failed", "bad"), "could not download; the next translation tries again"];
       case "unsupported":
         return [chip("not offered", "off"), "Firefox Translations has no offline model for this language yet"];
     }
+  }
+  var LEVEL_ABOUT = {
+    fast: "Firefox Translations \xB7 at once, though a short phrase may come out word for word",
+    accurate: "TranslateGemma 4B by Google \xB7 reads the phrase as a whole",
+    most: "TranslateGemma 12B \xB7 the best wording, and the slowest"
+  };
+  var FIT_WHERE = {
+    card: "on the graphics card",
+    part: "partly on the graphics card",
+    processor: "on the processor"
+  };
+  var FIT_GUESS = {
+    card: "a text in a second or two",
+    part: "possible, but slow here",
+    processor: "possible, but slow here: half a minute a text or more"
+  };
+  var CUDA_WHERE = "partly on the graphics card, with NVIDIA\u2019s own build (670 MB of the download)";
+  var CUDA_GUESS = "a short text in a few seconds, a long one in 15\u201320 s";
+  var SLOW_SENTENCE_S = 2;
+  function levelFitText(fit, measured) {
+    const where2 = fit.cuda ? CUDA_WHERE : FIT_WHERE[fit.where];
+    if (!measured) return `${where2} \xB7 ${fit.cuda ? CUDA_GUESS : FIT_GUESS[fit.where]}`;
+    const start3 = measured.start !== void 0 ? `, ${seconds(measured.start)} to load after 10 idle minutes` : "";
+    const pace2 = `${seconds(measured.sentence)} a sentence${start3}`;
+    return `${where2} \xB7 ${measured.sentence > SLOW_SENTENCE_S ? "slow here" : "here"}: ${pace2}`;
+  }
+  function levelRows(v) {
+    const advice = translationAdvice(v.speech.device);
+    const inUse = v.settings.translationLevel;
+    return ["fast", "accurate", "most"].map((level) => {
+      const t = v.translation[level];
+      const fit = level === "fast" ? void 0 : advice[level];
+      const fetching = t.status === "downloading";
+      const notes = [
+        fit ? `${LEVEL_ABOUT[level]} \xB7 ${levelFitText(fit, level === "fast" ? void 0 : v.translationSpeed[level])}` : LEVEL_ABOUT[level],
+        t.status === "failed" ? bad("the download failed \xB7 Use tries again") : t.status === "ready" || fetching ? null : `${size(t.size)}, ${level === inUse ? "downloads with the next translation" : "downloads when picked"}`,
+        fetching ? bar(t.progress) : null
+      ];
+      const label = el("span", {}, LEVEL_NAMES[level], advice.advised === level ? el("span", { class: "chip good" }, lucide("check", "s"), "Recommended") : null);
+      const control = fetching ? el("span", { class: "pct" }, `${Math.round(t.progress * 100)}%`) : level === inUse ? chip("in use", "lit") : linkBtn("Use", () => post({ type: "translationLevel", level }));
+      const remove2 = level !== "fast" && t.status === "ready" ? ib("x", `Remove ${LEVEL_NAMES[level]} (${size(t.size)})`, () => post({ type: "removeTranslation", level })) : null;
+      return row(label, notes, control, remove2);
+    });
   }
   function translatePage(v) {
     const s = v.settings;
@@ -3594,6 +3654,8 @@
       keyRow("inPlaceKey", "Translate in place", "the selection becomes its translation, no card", !v.keysOk.inPlace, "wand-sparkles"),
       keyRow("textKey", "A piece of the screen", "draw a box over the words", !v.keysOk.text, "scan"),
       fixedKey("Paste the translation over the selection", "Enter"),
+      grp("Translation"),
+      ...levelRows(v),
       grp("Languages"),
       card("globe", pairOf(v), [note], state),
       languagesCard(v),
@@ -4397,7 +4459,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
           ...fact("made by", "Yevhen Peshynskyi \xB7 Design automation engineer", el("br"), link("https://ikstro.com", "ikstro.com")),
           ...fact(
             "on this computer",
-            "Firefox Translations by Mozilla \xB7 Kokoro-82M by hexgrad, eSpeak NG \xB7 Windows OCR \xB7 WikDict, from Wiktionary \xB7 FrequencyWords by Hermit Dave ",
+            "Firefox Translations by Mozilla \xB7 TranslateGemma by Google (Gemma Terms of Use), run by llama.cpp \xB7 Kokoro-82M by hexgrad, eSpeak NG \xB7 Windows OCR \xB7 WikDict, from Wiktionary \xB7 FrequencyWords by Hermit Dave ",
             el("span", { class: "q" }, "\u2014 your text is never sent anywhere")
           ),
           ...fact("made with", "Inter and JetBrains Mono (SIL OFL) \xB7 Electron \xB7 VS Code icons"),

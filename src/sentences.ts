@@ -5,10 +5,13 @@
 const PREFIX = /^(\s*(?:(?:[-*+•]|\d+[.)])\s+(?:\[[ xX]\]\s+)?|>\s*)+)?(.*)$/s
 // A sentence ends at . ! ? … before a space and a capital (any script), a
 // digit, an opening quote or bracket, or a letter of a script without case
-// (Chinese, Arabic, Hebrew, Thai…); or right after a full-width 。！？.
-const SENTENCE_BREAK = /(?<=[.!?…])\s+(?=[\p{Lu}\p{Lo}\p{N}"'«„“(\[*_`])|(?<=[。！？])\s*(?=\S)/u
+// (Chinese, Arabic, Hebrew, Thai…); or right after a full-width 。！？. Before
+// a lower-case letter too, after . ! ? that ends a word of two letters or
+// more (a post written in lower case: Firefox's models drop such a sentence
+// when it comes glued to the one before); never after p.m. or U.S.
+const SENTENCE_BREAK = /(?<=[.!?…])\s+(?=[\p{Lu}\p{Lo}\p{N}"'«„“(\[*_`])|(?<=[。！？])\s*(?=\S)|(?<=(?<![\p{L}\p{N}.])\p{L}{2,}[.!?])\s+(?=\p{Ll})/u
 // Abbreviations whose dot ends no sentence; protected before the split.
-const ABBREVIATIONS = /(?<![\p{L}\p{N}])(e\.g|i\.e|etc|vs|cf|approx|Mr|Mrs|Ms|Dr|No|St|т\.е|т\.д|т\.п|др|см|г)\./gu
+const ABBREVIATIONS = /(?<![\p{L}\p{N}])(e\.g|i\.e|etc|vs|cf|approx|incl|fig|vol|Mr|Mrs|Ms|Dr|No|St|т\.е|т\.д|т\.п|др|см|напр|прим|стр|рис|тыс|млн|млрд|руб|ул|г)\./gu
 const DOT = '\u0001'
 
 export function splitSentences(body: string): string[] {

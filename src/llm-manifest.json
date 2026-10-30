@@ -1,0 +1,53 @@
+{
+  "engine": {
+    "vulkan": {
+      "name": "llama.cpp b11929 (Vulkan)",
+      "files": [
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11929/llama-b11929-bin-win-vulkan-x64.zip",
+          "size": 37156292,
+          "sha256": "5b0bfec979a97102e9d8cacbedc37444c5bb8d1b90b5ecdec92098776097b5bb"
+        }
+      ]
+    },
+    "cuda": {
+      "name": "llama.cpp b11929 (CUDA 12.4)",
+      "files": [
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11929/llama-b11929-bin-win-cuda-12.4-x64.zip",
+          "size": 279418899,
+          "sha256": "ca1782bdf0031d4605975a2e616f49fa64518d3c383927a6be4eb1c325120b1a"
+        },
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11929/cudart-llama-bin-win-cuda-12.4-x64.zip",
+          "size": 391443627,
+          "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+        }
+      ]
+    }
+  },
+  "models": {
+    "accurate": {
+      "name": "TranslateGemma 4B",
+      "file": "translategemma-4b-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bullerwins/translategemma-4b-it-GGUF/resolve/7c938465a870d8624bcfa98a8e4a3510053c19a8/translategemma-4b-it-Q4_K_M.gguf",
+      "size": 2489909312,
+      "sha256": "7f7357c14abd9da4eb200b38b05da502cd6e10d7e1d403fbc9f78c19f3209b72"
+    },
+    "most": {
+      "name": "TranslateGemma 12B",
+      "file": "translategemma-12b-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bullerwins/translategemma-12b-it-GGUF/resolve/d7d1d8cc4ff53d4bc883ef33eae3894f07833b63/translategemma-12b-it-Q4_K_M.gguf",
+      "size": 7300793664,
+      "sha256": "9196d728812afbf5efc10b539298585725edc3a4ecc092c22fdde5bbaf41879e"
+    }
+  },
+  "languages": {
+    "en": "English", "es": "Spanish", "de": "German", "fr": "French", "it": "Italian", "pt": "Portuguese",
+    "ru": "Russian", "uk": "Ukrainian", "pl": "Polish", "cs": "Czech", "nl": "Dutch", "sv": "Swedish",
+    "nb": "Norwegian Bokmål", "da": "Danish", "fi": "Finnish", "el": "Greek", "tr": "Turkish", "ro": "Romanian",
+    "hu": "Hungarian", "bg": "Bulgarian", "sr": "Serbian", "hr": "Croatian", "ka": "Georgian", "hy": "Armenian",
+    "kk": "Kazakh", "ar": "Arabic", "he": "Hebrew", "fa": "Persian", "hi": "Hindi", "zh": "Chinese",
+    "ja": "Japanese", "ko": "Korean", "vi": "Vietnamese", "th": "Thai", "id": "Indonesian"
+  }
+}

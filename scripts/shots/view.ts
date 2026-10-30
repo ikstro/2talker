@@ -136,6 +136,9 @@ function full(over: Partial<AppView['settings']>, plan: AppView['speech']['plan'
       ],
     },
     translatorState: { status: 'ready', progress: 1, size: 84 },
+    // Fast in use, Accurate on its way, Most accurate removed after it was timed here.
+    translation: { fast: { status: 'ready', progress: 1, size: 84 }, accurate: { status: 'downloading', progress: 0.42, size: 2527 }, most: { status: 'absent', progress: 0, size: 7301 } },
+    translationSpeed: { most: { sentence: 2.2, start: 7.1 } },
     dictionary: { status: 'ready' },
   }
 }

@@ -28,32 +28,37 @@
 //   models\         the translator's models, one folder per language pair
 //   speech.json     the speech engine's settings (engine/settings.py), speech.log
 // %LOCALAPPDATA%\Altype\speech\   the speech engine's Python, packages and models
+// %LOCALAPPDATA%\Altype\translate\   llama.cpp and the TranslateGemma models (Accurate, Most accurate)
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 import { execFile } from 'node:child_process'
 
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, screen, shell, Tray, type Rectangle } from 'electron'
 
 import { openInChrome } from './chrome'
 import { DoubleCopy } from './clipboard'
+import { ClipboardGuard } from './clipguard'
 import { Dictation } from './dictation'
 import { DictationLog } from './dictationlog'
 import { DOWNLOADABLE, DictionaryStore } from './dictstore'
 import { openStream } from './download'
 import { frameWindow, WIN11 } from './dwm'
 import { createTranslator, NATIVES } from './engine'
+import { translationAdvice } from './hardware'
 import { hotkeyLabel, isAccelerator } from './hotkey'
-import { KeyboardHelper, keyboardLayouts } from './keyboard'
-import { loadVoiceSpeed, nextVoiceSpeed, saveVoiceSpeed, type VoiceSpeed } from './device'
+import { FIX_LANGUAGES, KeyboardHelper, keyboardLayouts } from './keyboard'
+import { loadLevelSpeeds, loadVoiceSpeed, median, nextLevelSpeed, nextVoiceSpeed, saveLevelSpeeds, saveVoiceSpeed, type LevelSpeeds, type VoiceSpeed } from './device'
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { LearnStore } from './learning'
 import { lookup, type Dictionary } from './lemma'
+import { createLlmTranslators, type LlmLevel, type LlmTranslators } from './llmtranslator'
 import { log, logTo } from './log'
 import { systemVoiceName, type NaturalState } from './natural'
 import { recognize } from './ocr'
+import { pickLines } from './ocrpick'
 import { adoptOldFolders } from './oldfolder'
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
@@ -71,7 +76,17 @@ import { Updater } from './update'
 import manifest from './voice-manifest.json'
 import { VoiceStore, type VoiceManifest } from './voicestore'
 import { focus, focusedElement, release } from './uia'
-import { allowForeground, ctrlHeld, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard } from './winclip'
+import { allowForeground, ctrlHeld, handleOf, inFront, keysLetGo, pressAddressBar, pressCopy, pressEnter, pressPaste, pressSelectBack, watchClipboard, watchRendering } from './winclip'
+import {
+  readers as clipboardReaders,
+  render as renderClipboardText,
+  renderAll as renderAllClipboardText,
+  restore as restoreClipboardSnapshot,
+  sequence as clipboardSequence,
+  snapshot as clipboardSnapshot,
+  writeText as writeClipboardText,
+  type ClipboardSnapshot,
+} from './winclipboard'
 import { exeOf, focusWindow, foreground, installedLayouts, layoutTable, windowedApps } from './winkbd'
 import { ankiTsv, WordStore, wordsText } from './words'
 
@@ -158,6 +173,8 @@ if (TEST_HOME) app.setPath('userData', TEST_HOME)
 const speechPort = TEST_HOME ? Number(process.env.ALTYPE_TEST_PORT) || 8797 : SPEECH_PORT
 
 const userDir = () => app.getPath('userData')
+/** %LOCALAPPDATA%\Altype: what is big and downloaded (the speech engine, the translation models), never roamed. */
+const localDir = () => TEST_HOME ?? path.join(process.env.LOCALAPPDATA ?? path.join(app.getPath('appData'), '..', 'Local'), 'Altype')
 const settingsFile = () => path.join(userDir(), 'settings.json')
 /** A file the packaged app keeps outside its archive: the workers run as separate processes. */
 const unpacked = (...parts: string[]) => path.join(app.getAppPath(), ...parts).replace(/app\.asar([\\/])/, 'app.asar.unpacked$1')
@@ -187,6 +204,16 @@ let snipFor: Purpose = 'listen'
 let snipVia: string | undefined
 /** Altype is using the clipboard itself (converting a selection, pasting, putting it back): its changes are no requests. */
 let clipboardBusy = false
+/** What the person had on the clipboard, kept while Altype borrows it and put back after; the card's window owns Altype's writes. */
+const clipGuard = new ClipboardGuard<ClipboardSnapshot>({
+  sequence: clipboardSequence,
+  snapshot: () => clipboardSnapshot(clipboardOwner()),
+  restore: saved => restoreClipboardSnapshot(clipboardOwner(), saved),
+  writeText: (text, paste) => writeClipboardText(clipboardOwner(), text, paste),
+})
+function clipboardOwner(): bigint {
+  return card && !card.isDestroyed() ? handleOf(card) : 0n
+}
 /** Its last write is announced a moment later, until then. */
 let ownClipboardUntil = 0
 let stopWatching: (() => void) | undefined
@@ -220,10 +247,13 @@ let trayShownAt = 0
 let trayHiddenAt = 0
 /**
  * A selection key pressed Ctrl+C: the next copy is the selection, shown by
- * the pointer to listen to or translate; the window it was selected in, and
- * the clipboard as it was, to put back.
+ * the pointer to listen to or translate, and the window it was selected in
+ * (the clipboard as it was is kept by `clipGuard`).
  */
-let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; field: unknown; saved: Record<string, Blob>[]; via?: string } | undefined
+let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; field: unknown; via?: string } | undefined
+/** A selection key found nothing copied: a copy that still comes this soon after, with Ctrl up (not the person's own Ctrl+C), is the program's late answer and is taken back. */
+let lateCopyUntil = 0
+const LATE_COPY_MS = 1500
 /**
  * The translator open on a selection: the window to paste its translation
  * into, and the field the selection was in (UI Automation's element), to give
@@ -231,6 +261,8 @@ let copyWanted: { since: number; at: Point; purpose: Purpose; window: bigint; fi
  * take it back by itself.
  */
 let pasteTarget: { id: number; window: bigint; field: unknown } | undefined
+/** The window in front when the card opened, which gets the keyboard back when the card is closed (Esc, ✕). */
+let cameFrom: bigint | undefined
 /** The card's bounds when its edge began to be dragged; the content's height, which the card follows otherwise. */
 let resizeFrom: Rectangle | undefined
 let contentHeight = 160
@@ -404,6 +436,28 @@ function voiceMade(took: number, seconds: number): void {
   if (before === undefined ? after !== undefined : (before > 1) !== ((after ?? 0) > 1)) postApp()
 }
 
+/** How fast each accurate level translates on this computer, measured on real translations. */
+let levelSpeeds: LevelSpeeds = {}
+/** Shown once a few translations were timed. */
+const LEVEL_SURE_AFTER = 3
+
+function levelTimed(level: LlmLevel, timed: { sentence: number; start?: number }): void {
+  levelSpeeds = { ...levelSpeeds, [level]: nextLevelSpeed(levelSpeeds[level], timed) }
+  saveLevelSpeeds(deviceFile(), levelSpeeds)
+  postApp()
+}
+
+function levelSpeedView(): AppView['translationSpeed'] {
+  const out: AppView['translationSpeed'] = {}
+  for (const level of ['accurate', 'most'] as const) {
+    const s = levelSpeeds[level]
+    const sentence = s && s.sentence.length >= LEVEL_SURE_AFTER ? median(s.sentence) : undefined
+    const start = s && s.start.length >= LEVEL_SURE_AFTER ? median(s.start) : undefined
+    if (sentence !== undefined) out[level] = { sentence, ...(start !== undefined ? { start } : {}) }
+  }
+  return out
+}
+
 function naturalState(): NaturalState {
   const rtf = voiceSpeed && voiceSpeed.n >= VOICE_SURE_AFTER ? Math.round(voiceSpeed.rtf * 100) / 100 : undefined
   return { ...voiceStore.state, dismissed: settings.naturalDismissed, ...(rtf !== undefined ? { rtf } : {}) }
@@ -417,10 +471,10 @@ function dictionaryStatus(): DictionaryStatus {
   return status
 }
 
-/** The translator for the person's language downloaded ahead of its first use; the window follows it at most four times a second. */
-function prepareTranslator(): void {
+/** A translator's models for the person's language downloaded ahead of their first use; the window follows it at most four times a second. */
+function prepareTranslator(t: Translator): void {
   let last = 0
-  translator
+  t
     .prepare(langCode(settings.native), () => {
       if (Date.now() - last < 250) return
       last = Date.now()
@@ -614,6 +668,28 @@ function languageWords(): LanguageWords {
   return languageWordsRead
 }
 
+/** The word lists of the person's languages, read once each: a line read off the screen is judged by them. */
+const ocrLists = new Map<string, ReadonlySet<string>>()
+function ocrKnown(): (word: string) => boolean {
+  const lists = myLanguages(settings).map(code => {
+    if (code === 'en') return languageWords().english
+    let list = ocrLists.get(code)
+    if (!list) {
+      list = languageWords().common[code] ?? new Set<string>()
+      if (FIX_LANGUAGES.includes(code)) {
+        try {
+          list = new Set(fs.readFileSync(path.join(app.getAppPath(), 'media', 'layout', `${code}.txt`), 'utf8').split('\n'))
+        } catch {
+          // Its common words stay.
+        }
+      }
+      ocrLists.set(code, list)
+    }
+    return list
+  })
+  return word => lists.some(list => list.has(word))
+}
+
 function commonWords(): string[] {
   if (!common) {
     try {
@@ -639,8 +715,14 @@ function appView(): AppView {
     words: words.list(),
     update: updater.status,
     keysOk,
-    translator: translator.state(langCode(settings.native)).status,
+    translator: activeTranslator().state(langCode(settings.native)).status,
     translatorState: translator.state(langCode(settings.native)),
+    translation: {
+      fast: translator.state(langCode(settings.native)),
+      accurate: llm.accurate.state(langCode(settings.native)),
+      most: llm.most.state(langCode(settings.native)),
+    },
+    translationSpeed: levelSpeedView(),
     dictionary: { status: dictionaryStatus() },
     layouts: keyboardLayouts(),
     ...(keyboardTrouble ? { keyboardTrouble } : {}),
@@ -736,7 +818,7 @@ function postCard(): void {
   if (!shown) return
   post({
     type: 'card',
-    card: { ...shown, target: TARGET, native: settings.native, autoRead: settings.autoRead },
+    card: { ...shown, target: TARGET, native: settings.native, level: settings.translationLevel, autoRead: settings.autoRead },
     config: config(),
     pinned,
     maximized: !!maximizedFrom,
@@ -751,6 +833,10 @@ function openCard(kind: CardKind, state: CardState, at: Point, via?: string): nu
   postCard()
   const win = card
   if (!win) return id
+  // A card open already (pinned) keeps the window it came from.
+  const front = foreground().hwnd
+  const ours = [win, trayPanel].some(w => w && !w.isDestroyed() && handleOf(w) === front)
+  if (!ours && front !== 0n) cameFrom = front
   if (!win.isVisible()) {
     const area = screen.getDisplayNearestPoint(at).workArea
     win.setBounds(placeNear(at, { width: settings.cardWidth, height: Math.max(CARD_MIN, win.getBounds().height) }, area))
@@ -783,6 +869,29 @@ function hideCard(): void {
     card.setBounds(maximizedFrom)
   }
   maximizedFrom = undefined
+}
+
+/**
+ * Esc or ✕: the card goes and the window it was called from gets the keyboard
+ * back (hidden alone, the card leaves Windows to bring up a window of its
+ * choosing), brought to the front while the card still is, as Windows allows;
+ * a translator's field gets it too (VS Code's chat does not take it back by
+ * itself). A click elsewhere only hides the card: that window was chosen.
+ */
+async function closeCard(): Promise<void> {
+  const target = shown && pasteTarget?.id === shown.id ? pasteTarget : undefined
+  const back = target?.window ?? cameFrom
+  cameFrom = undefined
+  pasteTarget = undefined
+  if (back && card?.isFocused()) focusWindow(back)
+  hideCard()
+  if (!target?.field) return
+  try {
+    await inFront(target.window)
+    focus(target.field)
+  } finally {
+    releaseField(target.field)
+  }
 }
 
 /**
@@ -867,7 +976,18 @@ function onMessage(message: ToHost): void {
       )
       return
     case 'prepareTranslator':
-      prepareTranslator()
+      prepareTranslator(translator)
+      return
+    case 'translationLevel':
+      saveSettings({ translationLevel: message.level })
+      prepareTranslator(activeTranslator())
+      return
+    case 'removeTranslation':
+      if (settings.translationLevel === message.level) saveSettings({ translationLevel: 'fast' })
+      llm
+        .remove(message.level)
+        .catch(error => console.warn('Altype: could not remove the translation model', error))
+        .finally(postApp)
       return
     case 'prepareDictionary':
       dictionaries.get(langCode(settings.native), true)
@@ -938,7 +1058,7 @@ function onMessage(message: ToHost): void {
       maximizeCard(message.on)
       return
     case 'close':
-      hideCard()
+      closeCard().catch(error => console.warn('Altype: could not give the keyboard back', error))
       return
     case 'retry':
       if (last && shown?.id === last.id) void translateInto(last.id, last.text, last.kind, last.note)
@@ -947,7 +1067,7 @@ function onMessage(message: ToHost): void {
       void translateTextCard(message.id, message.text, message.from, message.to)
       return
     case 'copyText':
-      void clipboard.writeText(message.text)
+      clipboard.writeText(message.text).catch(error => console.warn('Altype: could not copy', error))
       return
     case 'pasteText':
       pasteTranslation(message.id, message.text).catch(error => console.warn('Altype: could not paste the translation', error))
@@ -981,7 +1101,7 @@ function onMessage(message: ToHost): void {
       exportWords().catch(error => console.warn('Altype: could not save the words', error))
       return
     case 'copyWords':
-      clipboard.writeText(wordsText(words.list()))
+      clipboard.writeText(wordsText(words.list())).catch(error => console.warn('Altype: could not copy the words', error))
       return
     case 'checkUpdates':
       updater.check()
@@ -1025,7 +1145,14 @@ async function sendHostVoices(): Promise<void> {
 
 // ---------------------------------------------------------------- translating
 
+/** Firefox's models (Fast), and TranslateGemma's two levels. */
 let translator: Translator
+let llm: LlmTranslators
+
+/** The translator of the level picked in Settings; a card waits for it, never another. */
+function activeTranslator(): Translator {
+  return settings.translationLevel === 'fast' ? translator : llm[settings.translationLevel]
+}
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -1045,15 +1172,16 @@ async function translateInto(id: number, text: string, kind: CardKind, note?: st
   const early = englishReady(split) ? englishHtml(split.lines) : undefined
   const pending = (translation: Exclude<TranslationState, { status: 'ready' }>) =>
     setState(id, early ? { status: 'done', html: early, translation, ...noted } : translation)
+  const t = activeTranslator()
   try {
     pending({ status: 'translating' })
-    if (translator.state(native).status !== 'ready') {
-      await translator.prepare(native, s => {
+    if (t.state(native).status !== 'ready') {
+      await t.prepare(native, s => {
         if (s.status === 'downloading') pending({ status: 'downloading', progress: s.progress, size: s.size })
       })
       pending({ status: 'translating' })
     }
-    const lines = await translateLines(split, settings.native, translator.translate)
+    const lines = await translateLines(split, settings.native, t.translate)
     setState(id, { status: 'done', html: englishHtml(lines), translation: { status: 'ready', html: translationHtml(lines) }, ...noted })
   } catch (error) {
     pending({ status: 'failed', message: messageOf(error) })
@@ -1076,12 +1204,13 @@ async function recognizeSnip(id: number, png: Buffer): Promise<{ text: string; m
   try {
     fs.writeFileSync(file, png)
     const native = langCode(settings.native)
-    // The first of the person's languages Windows reads (their own first: its engine reads Latin too), English last.
+    // Every one of the person's languages Windows reads (their own first), English last; each line from the one that reads it best.
     const result = await recognize(file, [...new Set([native, ...settings.languages, 'en'].filter(Boolean))])
-    if (!result.lang) return void setState(id, { status: 'no-ocr' })
-    const text = paragraphsOf(result.lines)
+    if (result.readings.length === 0) return void setState(id, { status: 'no-ocr' })
+    const text = paragraphsOf(pickLines(result.readings, ocrKnown()))
     if (!text.trim()) return void setState(id, { status: 'empty' })
-    return { text, misread: scriptFor(settings.native) !== 'Latin' && result.lang.split('-')[0]?.toLowerCase() !== native }
+    const nativeRead = result.readings.some(r => r.lang.split('-')[0]?.toLowerCase() === native)
+    return { text, misread: scriptFor(settings.native) !== 'Latin' && !nativeRead }
   } finally {
     fs.rmSync(file, { force: true })
   }
@@ -1168,12 +1297,14 @@ async function pasteInto(window: bigint, field: unknown, text: string): Promise<
     }
     releaseField(field)
   }
-  const saved = await saveClipboard()
-  await ownClipboard(async () => {
-    await clipboard.writeText(text)
-    await pressPaste()
-  })
-  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+  await borrowClipboard(() => pasteText(text))
+}
+
+/** `text` pasted in the program in front: written to paste, Ctrl+V, the guard told. */
+async function pasteText(text: string): Promise<void> {
+  await clipGuard.write(text, true)
+  await pressPaste()
+  clipGuard.pasted()
 }
 
 /**
@@ -1185,11 +1316,12 @@ async function pasteInto(window: bigint, field: unknown, text: string): Promise<
  */
 async function translateInPlace(text: string, at: Point, window: bigint, via?: string): Promise<void> {
   const { from, to } = textState(text)
-  const missing = [from, to].some(code => code !== 'en' && translator.state(code).status !== 'ready')
+  const t = activeTranslator()
+  const missing = [from, to].some(code => code !== 'en' && t.state(code).status !== 'ready')
   if (missing) return translateWindow(text, at, window, via)
   keyboard.say('…')
   try {
-    const out = await translatePlain(text.slice(0, MAX_TEXT_CHARS), from, to, translator.translate)
+    const out = await translatePlain(text.slice(0, MAX_TEXT_CHARS), from, to, t.translate, t.direct)
     keyboard.say('')
     if (!out.trim()) return
     logTranslation(text, out, from, to)
@@ -1232,16 +1364,17 @@ async function translateTextCard(id: number, text: string, from: string, to: str
   }
   const asked = ++textAsked
   const current = () => asked === textAsked
+  const t = activeTranslator()
   try {
     set({ status: 'translating' })
     for (const code of [from, to]) {
-      if (code === 'en' || translator.state(code).status === 'ready') continue
-      await translator.prepare(code, state => {
+      if (code === 'en' || t.state(code).status === 'ready') continue
+      await t.prepare(code, state => {
         if (current() && state.status === 'downloading') set({ status: 'downloading', language: code, progress: state.progress, size: state.size })
       })
       if (current()) set({ status: 'translating' })
     }
-    const lines = await translatePairs(text.slice(0, MAX_TEXT_CHARS), from, to, translator.translate)
+    const lines = await translatePairs(text.slice(0, MAX_TEXT_CHARS), from, to, t.translate, t.direct)
     const sentences = lines.flatMap(line => line.pairs.map(p => p.src))
     if (current()) set({ status: 'ready', text: plainText(lines), from, to, html: textOutHtml(lines), sentences })
   } catch (error) {
@@ -1255,7 +1388,15 @@ function snip(purpose: Purpose = 'listen', via?: string): void {
   snipFor = purpose
   snipVia = via
   snipSince = Date.now()
+  // The snip lands on the clipboard: what the person had there goes back once it is read.
+  clipGuard.hold()
   void shell.openExternal('ms-screenclip:')
+}
+
+/** The snip waited for is not coming (a copy without a picture): the clipboard was the person's to change, nothing to put back. */
+function endSnip(): void {
+  snipSince = 0
+  clipGuard.drop()
 }
 
 /** Shows a picked text by the pointer: the card to listen to, or the translator; `window`: where it was selected (`field`, the field in it), or pastes its translation over it. */
@@ -1278,16 +1419,19 @@ async function useSelection(purpose: Purpose, via?: string): Promise<void> {
   const window = foreground().hwnd
   // The translator's Paste gives the keyboard back to this field.
   const field = purpose === 'translate' ? focusedField() : undefined
-  const saved = await saveClipboard()
+  snipSince = 0
+  clipGuard.hold()
   await pressCopy()
   const since = Date.now()
   releaseField(copyWanted?.field)
-  copyWanted = { since, at, purpose, window, field, saved, ...(via ? { via } : {}) }
+  copyWanted = { since, at, purpose, window, field, ...(via ? { via } : {}) }
   setTimeout(() => {
     if (copyWanted?.since !== since) return
     releaseField(copyWanted.field)
     copyWanted = undefined
-    void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error))
+    lateCopyUntil = Date.now() + LATE_COPY_MS
+    // Put back once a late copy has had its time; nothing changed, nothing is written.
+    clipGuard.release(LATE_COPY_MS)
     tray?.displayBalloon({ title: 'Altype', content: 'Nothing was copied. Select a text, then press the shortcut.' })
   }, SELECT_WAIT_MS)
 }
@@ -1309,30 +1453,52 @@ function afterSettling(read: () => Promise<void>): void {
 
 function onClipboardChange(): void {
   const now = Date.now()
-  if (clipboardBusy || now < ownClipboardUntil) return
-  if (snipSince && now - snipSince < SNIP_WAIT_MS) {
-    afterSettling(async () => {
-      const png = await clipboardPng()
-      if (!png || !snipSince) return
-      snipSince = 0
-      await (snipFor === 'translate' ? readScreenText(png, snipVia) : readScreenshot(png, snipVia))
-    })
-    return
-  }
+  if (clipboardBusy || now < ownClipboardUntil || clipGuard.isOurs()) return
+  const ctrl = ctrlHeld()
   if (copyWanted && now - copyWanted.since < SELECT_WAIT_MS) {
-    const { at, purpose, window, field, saved, via } = copyWanted
+    const { at, purpose, window, field, via } = copyWanted
     copyWanted = undefined
     afterSettling(async () => {
+      // The copy Altype pressed: taken back once read.
+      clipGuard.claim()
       const text = (await clipboard.readText()).trim()
-      await restoreClipboard(saved)
+      await clipGuard.putBack()
       if (text) showText(text, purpose, at, window, via, field)
       else releaseField(field)
     })
     return
   }
+  if (now < lateCopyUntil && !ctrl) {
+    // The program's late answer to Altype's Ctrl+C: put back with the rest, when clipGuard's wait ends.
+    lateCopyUntil = 0
+    clipGuard.claim()
+    return
+  }
+  if (snipSince && now - snipSince < SNIP_WAIT_MS) {
+    afterSettling(async () => {
+      const png = await clipboardPng()
+      if (!snipSince) return
+      // A copy without a picture is the person's own: the snip is not coming.
+      if (!png) {
+        endSnip()
+        return doubleCopyChange(now, ctrl)
+      }
+      snipSince = 0
+      // The picture is read; what the person had goes back.
+      clipGuard.claim()
+      await clipGuard.putBack()
+      await (snipFor === 'translate' ? readScreenText(png, snipVia) : readScreenshot(png, snipVia))
+    })
+    return
+  }
+  doubleCopyChange(now, ctrl)
+}
+
+/** A change of the clipboard by the person: Ctrl+C twice asks for the card. */
+function doubleCopyChange(now: number, ctrl: boolean): void {
   // Copying from the card itself is not a request, nor is any copy while Altype is paused.
   if (card?.isFocused() || !settings.doubleCopy || settings.paused) return
-  if (!copies.change(now, ctrlHeld())) return
+  if (!copies.change(now, ctrl)) return
   const at = screen.getCursorScreenPoint()
   afterSettling(async () => {
     const text = (await clipboard.readText()).trim()
@@ -1424,21 +1590,22 @@ function tableFor(id: string): KeyTable | undefined {
   return tables.get(id)
 }
 
-/** The clipboard as it is, every kind of thing on it, to put back. */
-async function saveClipboard(): Promise<Record<string, Blob>[]> {
-  const saved: Record<string, Blob>[] = []
-  for (const item of await clipboard.read()) {
-    const entry: Record<string, Blob> = {}
-    for (const type of item.types) {
-      try {
-        entry[type] = (await item.getType(type)) as Blob
-      } catch {
-        // A kind the clipboard announces but will not give is left behind.
-      }
-    }
-    saved.push(entry)
+/**
+ * Altype pastes through the clipboard: what the person had there is kept
+ * (once for a run of such pastes) and goes back once `work` is done, or has
+ * failed: a moment after the program read the pasted text, or `after` ms;
+ * a snip still awaited is no longer.
+ */
+async function borrowClipboard<T>(work: () => Promise<T>, after: (result: T | undefined) => number | undefined = () => undefined): Promise<T> {
+  snipSince = 0
+  clipGuard.hold()
+  let result: T | undefined
+  try {
+    result = await ownClipboard(work)
+    return result
+  } finally {
+    clipGuard.release(after(result))
   }
-  return saved
 }
 
 /** Runs Altype's own use of the clipboard; the changes it makes, until a moment after, are not taken for requests. */
@@ -1452,13 +1619,6 @@ async function ownClipboard<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-function restoreClipboard(saved: Record<string, Blob>[]): Promise<void> {
-  return ownClipboard(async () => {
-    if (saved.length === 0) clipboard.clear()
-    else await clipboard.write(saved.map(entry => new ClipboardItem(entry)))
-  })
-}
-
 /**
  * The fix key with a selection: Altype copies it, types it again in the
  * next layout of `cycle` (the one after the layout it was typed in), pastes
@@ -1466,17 +1626,17 @@ function restoreClipboard(saved: Record<string, Blob>[]): Promise<void> {
  * next layout), switches the layout and puts the clipboard back.
  */
 async function convertSelection(cycle: string[]): Promise<void> {
-  const saved = await saveClipboard()
-  const restore = await ownClipboard(() => convertOver(cycle))
-  if (restore === 'now') return restoreClipboard(saved)
-  // The program reads the clipboard when it gets Ctrl+V: the old content goes back after.
-  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+  // Nothing pasted (or a failure): the clipboard goes back at once.
+  await borrowClipboard(
+    () => convertOver(cycle),
+    restore => (restore === 'later' ? undefined : 0),
+  )
 }
 
 /** Copies the selection, pastes it converted; 'now' when nothing was pasted and the clipboard can go back at once. */
 async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
   const marker = `Altype ${Date.now()}`
-  await clipboard.writeText(marker)
+  await clipGuard.write(marker)
   await pressCopy()
   let text = ''
   for (let i = 0; i < 25 && !text; i++) {
@@ -1484,6 +1644,8 @@ async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
     const now = await clipboard.readText()
     if (now !== marker) text = now
   }
+  // The copy Altype pressed is its own to take back.
+  if (text) clipGuard.claim()
   const layouts = cycle.map(id => ({ id, table: tableFor(id) })).filter((l): l is { id: string; table: KeyTable } => !!l.table)
   const from = text ? sourceLayout(text, layouts) : undefined
   const to = nextLayout(cycle, from)
@@ -1491,8 +1653,7 @@ async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
   const toTable = to ? tableFor(to) : undefined
   if (!fromTable || !toTable || !to || from === to) return 'now'
   const converted = convertText(text, fromTable, toTable)
-  await clipboard.writeText(converted)
-  await pressPaste()
+  await pasteText(converted)
   keyboard.switchTo(to)
   // Selected again, unless it is long or runs over lines (Shift+Left walks a line end differently in each program).
   const chars = [...converted].length
@@ -1543,7 +1704,7 @@ function trayView(): TrayView {
     doubleCopy: settings.doubleCopy,
     paused: settings.paused,
     speech: { installed: speech?.installed ?? false, recording: dictation?.state === 'recording', noteKey: settings.noteKey },
-    translator: translator.state(langCode(settings.native)).status,
+    translator: activeTranslator().state(langCode(settings.native)).status,
     native: settings.native,
   }
 }
@@ -1778,12 +1939,7 @@ function runCommand(argv: readonly string[]): boolean {
 /** Types a text in the program in front, through the clipboard, which is put back as it was. */
 async function typeText(text: string): Promise<void> {
   await keysLetGo()
-  const saved = await saveClipboard()
-  await ownClipboard(async () => {
-    await clipboard.writeText(text)
-    await pressPaste()
-  })
-  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
+  await borrowClipboard(() => pasteText(text))
 }
 
 /**
@@ -1791,17 +1947,16 @@ async function typeText(text: string): Promise<void> {
  * completed into another one, as typed letters may be), Enter; the clipboard put back after.
  */
 async function typeAddress(url: string): Promise<void> {
-  const saved = await saveClipboard()
   const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-  await ownClipboard(async () => {
-    await clipboard.writeText(url)
+  await borrowClipboard(async () => {
+    await clipGuard.write(url, true)
     await pressAddressBar()
     await pause(120)
     await pressPaste()
+    clipGuard.pasted()
     await pause(120)
     pressEnter()
   })
-  setTimeout(() => void restoreClipboard(saved).catch(error => console.warn('Altype: could not put the clipboard back', error)), 500)
 }
 
 function balloon(title: string, content: string, click?: () => void): void {
@@ -1811,7 +1966,7 @@ function balloon(title: string, content: string, click?: () => void): void {
 
 function setUpSpeechEngine(): void {
   speech = new SpeechHost({
-    root: TEST_HOME ? path.join(TEST_HOME, 'speech') : path.join(process.env.LOCALAPPDATA ?? path.join(app.getPath('appData'), '..', 'Local'), 'Altype', 'speech'),
+    root: path.join(localDir(), 'speech'),
     userDir: userDir(),
     engineDir: unpacked('engine'),
     extensionDir: unpacked('extension'),
@@ -1832,7 +1987,10 @@ function setUpSpeechEngine(): void {
     border: borderColor,
     speech,
     paste: typeText,
-    toEnglish: (text, from) => translatePlain(text, from, 'en', translator.translate),
+    toEnglish: (text, from) => {
+      const t = activeTranslator()
+      return translatePlain(text, from, 'en', t.translate, t.direct)
+    },
     expected: () => myLanguages(settings),
     languageOf: text => languageOf(text, settings.native, languageWords(), myLanguages(settings)),
     balloon,
@@ -1873,7 +2031,7 @@ async function hostCall(request: HostCall): Promise<unknown> {
       return filePath
     }
     case 'copy':
-      clipboard.writeText(request.text)
+      await clipboard.writeText(request.text)
       return null
     case 'openChrome': {
       const opened = await openInChrome(request.url, { front: foreground, exeOf, allowFront: allowForeground, typeAddress })
@@ -1919,6 +2077,14 @@ function start(): void {
     loader: unpacked('vendor', 'bergamot', 'bergamot-translator.js'),
     wasm: unpacked('vendor', 'bergamot', 'bergamot.wasm'),
   })
+  llm = createLlmTranslators({
+    root: path.join(localDir(), 'translate'),
+    log: path.join(userDir(), 'translate.log'),
+    // A model that does not fit an NVIDIA card goes to llama.cpp's CUDA build, far quicker there than Vulkan.
+    engineFor: level => (translationAdvice(speech?.profile)[level].cuda ? 'cuda' : 'vulkan'),
+    onTimed: levelTimed,
+  })
+  levelSpeeds = loadLevelSpeeds(deviceFile())
   tray = createTray()
   tray.on('balloon-click', () => balloonClick?.())
   setUpSpeechEngine()
@@ -1984,8 +2150,22 @@ function start(): void {
   card = createCard()
   ipcMain.on('to-host', (_event, message: ToHost) => onMessage(message))
   ipcMain.handle('host-call', (_event, request: HostCall) => hostCall(request))
+  // The card's window owns Altype's pasted text: handed over when the paste's program reads it.
+  const stopRendering = watchRendering(
+    card,
+    () => {
+      const { reader, front } = clipboardReaders()
+      if (clipGuard.read(reader, front)) renderClipboardText()
+    },
+    renderAllClipboardText,
+  )
+  stopWatching = stopRendering
   try {
-    stopWatching = watchClipboard(card, onClipboardChange)
+    const stopChanges = watchClipboard(card, onClipboardChange)
+    stopWatching = () => {
+      stopChanges()
+      stopRendering()
+    }
   } catch (error) {
     tray.displayBalloon({ title: 'Altype', content: `Ctrl+C twice will not work: ${messageOf(error)}. Use the tray menu.` })
   }
@@ -2008,6 +2188,8 @@ if (!theOnlyOne) {
   })
   app.on('before-quit', () => {
     quitting = true
+    // Quitting within a paste's moment: what the person had goes back now, while the card's window can still own the clipboard.
+    clipGuard.flush()
   })
   // The card is hidden, never closed: Altype keeps running in the tray.
   app.on('window-all-closed', () => undefined)
@@ -2021,6 +2203,7 @@ if (!theOnlyOne) {
       ['clipboard', () => stopWatching?.()],
       ['voice', () => natural?.dispose()],
       ['translator', () => translator?.dispose()],
+      ['translation models', () => llm?.dispose()],
       ['keyboard', () => keyboard?.dispose()],
       ['learning', () => learned?.flush()],
     ]

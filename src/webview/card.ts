@@ -12,6 +12,7 @@
 import { hotkeyLabel } from '../hotkey'
 import { findLanguage, labelCode, langCode, voiceMatches } from '../languages'
 import { chosenNatural } from '../natural'
+import { LEVEL_NAMES } from '../settings'
 import type { CardKind, CardState, CardView, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
 import { dwmFlag, el, html, icon } from './dom'
 import { glyph } from './glyphs'
@@ -375,8 +376,18 @@ function status(text: string): HTMLElement {
   return el('p', { class: 'empty-text status-line' }, icon('loading', 'codicon-modifier-spin'), text)
 }
 
-/** A first use: the translator for a pair comes once, with how much of it is in and what happens meanwhile. */
+/** Translating, with the level's name unless it is Fast. */
+function translating(): string {
+  const level = state.card?.level ?? 'fast'
+  return level === 'fast' ? 'Translating…' : `Translating · ${LEVEL_NAMES[level]}…`
+}
+
+/** 1.4 of 84 MB; 1.2 of 2.5 GB. */
+const amount = (mb: number, of: number) => (of >= 1000 ? `${(mb / 1000).toFixed(1)} of ${(of / 1000).toFixed(1)} GB` : `${mb.toFixed(1)} of ${of} MB`)
+
+/** A first use: the translator for a pair (Fast) or the level's model comes once, with how much of it is in and what happens meanwhile. */
 function downloading(pair: string, progress: number, size: number, meanwhile = ''): HTMLElement {
+  const level = state.card?.level ?? 'fast'
   const done = Math.min(1, Math.max(0, progress))
   const bar = el('i')
   bar.style.width = `${(done * 100).toFixed(1)}%`
@@ -384,9 +395,9 @@ function downloading(pair: string, progress: number, size: number, meanwhile = '
     'div',
     { class: 'download', role: 'status' },
     el('div', { class: 'kl' }, 'first use · once'),
-    el('div', { class: 'download-head' }, el('b', {}, `Translator, ${pair}`), el('span', { class: 'kl' }, `${(done * size).toFixed(1)} of ${size} MB`)),
+    el('div', { class: 'download-head' }, el('b', {}, level === 'fast' ? `Translator, ${pair}` : `${LEVEL_NAMES[level]} translator`), el('span', { class: 'kl' }, amount(done * size, size))),
     el('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(done * 100) }, bar),
-    el('p', {}, `Downloads once from Mozilla, then translates on this computer.${meanwhile ? ' ' + meanwhile : ''}`),
+    el('p', {}, `Downloads once from ${level === 'fast' ? 'Mozilla' : 'Hugging Face'}, then translates on this computer.${meanwhile ? ' ' + meanwhile : ''}`),
   )
 }
 
@@ -410,7 +421,7 @@ function renderTranslation(c: CardView, t: TranslationState): void {
   delete translation.dataset.html
   switch (t.status) {
     case 'translating':
-      translation.replaceChildren(status('Translating…'))
+      translation.replaceChildren(status(translating()))
       return
     case 'downloading':
       translation.replaceChildren(downloading(`${c.native} ⇄ English`, t.progress, t.size, 'The English is read meanwhile.'))
@@ -458,7 +469,7 @@ function renderState(): void {
       stateView.replaceChildren(status('Reading the text on the screen…'))
       return
     case 'translating':
-      stateView.replaceChildren(status('Translating…'))
+      stateView.replaceChildren(status(translating()))
       return
     case 'downloading':
       stateView.replaceChildren(downloading(`${c.native} ⇄ English`, s.progress, s.size))
@@ -515,7 +526,8 @@ function renderText(c: CardView, s: Extract<CardState, { status: 'text' }>): voi
   state.shownId = c.id
   renderTextResult(s.result, !!s.canPaste)
   hover.refresh()
-  textFoot.textContent = s.canPaste ? 'Translated on this computer · Shift+Enter, a new line' : 'Translated on this computer'
+  const by = `Translated · ${LEVEL_NAMES[c.level]}`
+  textFoot.textContent = s.canPaste ? `${by} · Shift+Enter, a new line` : by
   // Said under a translation, or one on its way; not under nothing, or a failure.
   textFoot.hidden = s.result.status === 'none' || s.result.status === 'failed'
   updateTextButtons()
@@ -640,7 +652,7 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
       textResult.replaceChildren()
       return
     case 'translating':
-      textResult.replaceChildren(status('Translating…'), ...(lastOut ? outBlock(lastOut, canPaste, false) : []))
+      textResult.replaceChildren(status(translating()), ...(lastOut ? outBlock(lastOut, canPaste, false) : []))
       return
     case 'downloading':
       textResult.replaceChildren(downloading(`${languageName(r.language)} ⇄ English`, r.progress, r.size))
