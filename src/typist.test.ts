@@ -862,3 +862,25 @@ describe('the layout and Caps Lock as Windows has them', () => {
     expect(desk.text).toBe('R3 нравится')
   })
 })
+
+test('a dictation started before a picture went full screen still stops with its key; nothing else of Krya’s wakes', () => {
+  const keys = { dictate: 'RightControl*2', translate: 'LeftControl*2' }
+  const hotkeys = (desk: Desk) => desk.sent.filter(m => m.type === 'hotkey')
+  const viewer = new Desk({ keys })
+  viewer.fullScreen = true
+  viewer.tap(0xa3)
+  viewer.tap(0xa3)
+  expect(hotkeys(viewer)).toEqual([])
+  viewer.typist.setDictating(true)
+  viewer.tap(0xa3)
+  viewer.tap(0xa3)
+  viewer.tap(VK_LCONTROL)
+  viewer.tap(VK_LCONTROL)
+  expect(hotkeys(viewer)).toEqual([{ type: 'hotkey', action: 'dictate' }])
+  // Typing there meanwhile is left as typed, as in any full screen.
+  const typing = new Desk({ autoFix: true, keys })
+  typing.fullScreen = true
+  typing.typist.setDictating(true)
+  typing.keys('ghbdtn ')
+  expect(typing.text).toBe('ghbdtn ')
+})
