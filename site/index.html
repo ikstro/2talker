@@ -190,7 +190,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .quiet .lu { font-size: 15px; }
 .stage-body { padding: clamp(28px, 5vw, 56px) clamp(20px, 4vw, 48px) clamp(24px, 4vw, 44px); min-height: clamp(170px, 22vw, 268px); display: flex; flex-direction: column; justify-content: center; }
 .line-main { font: 800 clamp(44px, 8.6vw, 120px)/1.02 var(--font); letter-spacing: -0.045em; color: var(--ink); white-space: nowrap; perspective: 600px; transition: opacity 0.22s, transform 0.22s; min-height: 1.02em; }
-.line-main.swap { opacity: 0; transform: translateY(-14px); }
+.line-main.leave { opacity: 0; transform: translateY(-14px); }
 .line-main .ch { display: inline-block; white-space: pre; transform-origin: 50% 60%; }
 .line-main .ch.flip { animation: flip 0.3s ease-in-out; }
 @keyframes flip { 0% { transform: rotateX(0); } 50% { transform: rotateX(90deg); color: var(--mark); } 100% { transform: rotateX(0); } }
@@ -904,12 +904,12 @@ async function playStage(sound) {
   }, i * 55));
   await sleep(55 * TYPED.length + 900); if (!alive()) return;
   stepState(2); pressKeys(2); setTimeout(() => pressKeys(2), 180);
-  main.classList.add('swap');
+  main.classList.add('leave');
   await sleep(240); if (!alive()) return;
   main.classList.remove('typing');
   englishLine();
   sub.textContent = FIXED;
-  main.classList.remove('swap');
+  main.classList.remove('leave');
   sub.classList.remove('off');
   await sleep(900); if (!alive()) return;
   stepState(3); pressKeys(3); setTimeout(() => pressKeys(3), 180);
