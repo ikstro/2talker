@@ -1,0 +1,1341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%2216%2016%20224%20224%22%3E%3Crect%20x%3D%2216%22%20y%3D%2216%22%20width%3D%22224%22%20height%3D%22224%22%20rx%3D%2252%22%20fill%3D%22%23141414%22/%3E%3Cg%20transform%3D%22translate%28-4%20-2%29%22%20fill%3D%22none%22%20stroke-width%3D%2218%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20stroke%3D%22%23fff%22%20d%3D%22M118%2058C92%2058%2084%2068%2084%2088V96C84%20108%2078%20114%2062%20114C78%20114%2084%20120%2084%20132V174C84%20194%2092%20202%20118%20202%22/%3E%3Cpath%20stroke%3D%22%23FFD60A%22%20d%3D%22M166%2086L202%20114L166%20142%22/%3E%3C/g%3E%3Ccircle%20cx%3D%22132%22%20cy%3D%2296%22%20r%3D%2213%22%20fill%3D%22%23fff%22/%3E%3C/svg%3E">
+<title>Krya. Talk to the duck.</title>
+<meta name="description" content="Krya fixes the keyboard layout, translates, reads English aloud, checks your English and types what you say. In every Windows program, offline.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* Layout: one 1160px column. The hero sets the tagline the way the logo is set (giant Inter 800 and the mono duck), then the app's own chain line plays on a stage. A full-bleed duck-yellow band holds a live Krya card; chapters alternate copy and a working mock on hairlines; a ledger, three keycap steps, a sign-off. */
+:root {
+  --bg: #f4f4f2;
+  --surface: #ffffff;
+  --raised: #f8f8f6;
+  --sunk: #eaeae7;
+  --line: #dcdcd8;
+  --line-soft: #e8e8e5;
+  --ink: #0f0f0f;
+  --text: #1c1c1b;
+  --muted: #5a5a56;
+  --translation: #474744;
+  --accent: #f7c700;
+  --accent-hover: #e8bb00;
+  --on-accent: #1a1500;
+  --accent-text: #0f0f0f;
+  --link-line: #f2a100;
+  --duck: #f2a100;
+  --mark: #f2a100;
+  --hl: rgba(247, 199, 0, 0.45);
+  --band: #ffd60a;
+  --band-ink: #141414;
+  --band-muted: #4a3f00;
+  --red: #c42b1c;
+  --green: #0f7b0f;
+  --rec: #e81123;
+  --sp1: #0067c0;
+  --sp2: #7a5bc7;
+  --sp3: #0b7a70;
+  --focus: #0f0f0f;
+  --shadow: 0 28px 60px -18px rgba(30, 25, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 10px 24px -10px rgba(30, 25, 0, 0.25);
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --r: 8px;
+  --t-display: clamp(48px, 8vw, 104px);
+  --t-h2: clamp(34px, 4.6vw, 56px);
+  --t-lead: clamp(17px, 1.5vw, 19px);
+  --t-body: 16px;
+  --t-small: 13.5px;
+  --t-label: 11.5px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414; --surface: #1e1e1e; --raised: #252525; --sunk: #1a1a1a;
+    --line: #2f2f2f; --line-soft: #262626;
+    --ink: #ffffff; --text: #e8e8e8; --muted: #9d9d9d; --translation: #b8b8b8;
+    --accent: #ffd60a; --accent-hover: #ffe14d; --on-accent: #1a1500; --accent-text: #ffd60a;
+    --link-line: transparent; --duck: #ffd60a; --mark: #ffd60a; --hl: rgba(255, 214, 10, 0.3);
+    --band: #f5cd0a; --band-ink: #141414; --band-muted: #463c00;
+    --red: #ff99a4; --green: #6ccb5f; --sp1: #4cc2ff; --sp2: #c4a7f5; --sp3: #5ccfc3;
+    --focus: #ffd60a;
+    --shadow: 0 28px 60px -18px rgba(0, 0, 0, 0.75), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 10px 24px -10px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414; --surface: #1e1e1e; --raised: #252525; --sunk: #1a1a1a;
+  --line: #2f2f2f; --line-soft: #262626;
+  --ink: #ffffff; --text: #e8e8e8; --muted: #9d9d9d; --translation: #b8b8b8;
+  --accent: #ffd60a; --accent-hover: #ffe14d; --on-accent: #1a1500; --accent-text: #ffd60a;
+  --link-line: transparent; --duck: #ffd60a; --mark: #ffd60a; --hl: rgba(255, 214, 10, 0.3);
+  --band: #f5cd0a; --band-ink: #141414; --band-muted: #463c00;
+  --red: #ff99a4; --green: #6ccb5f; --sp1: #4cc2ff; --sp2: #c4a7f5; --sp3: #5ccfc3;
+  --focus: #ffd60a;
+  --shadow: 0 28px 60px -18px rgba(0, 0, 0, 0.75), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 10px 24px -10px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 var(--t-body)/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg); }
+::selection { background: var(--hl); color: var(--ink); }
+a { color: inherit; }
+h1, h2, h3, p, ul, ol { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+.lu { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+.wrap {
+  width: 100%;
+  max-width: 1224px;
+  margin-inline: auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 720px) {
+  .wrap { padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: max(32px, env(safe-area-inset-right, 0px)); }
+}
+
+/* The logo: "Krya" in Inter 800, the duck (')> in JetBrains Mono 700, its eye in the text's colour. */
+.logo { display: inline-flex; align-items: baseline; gap: 0.32em; font: 800 22px/1 var(--font); letter-spacing: -0.03em; color: var(--ink); text-decoration: none; white-space: nowrap; }
+.duck { font-family: var(--mono); font-weight: 700; letter-spacing: 0; color: var(--duck); font-variant-ligatures: none; }
+.duck .eye { color: var(--ink); display: inline-block; animation: blink 7s infinite; transform-origin: 50% 40%; }
+@keyframes blink { 0%, 95.5%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+
+
+/* A key, drawn the same way everywhere: the keyboard is the interface. */
+.keys { display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.key {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2em; height: 2em; padding: 0 0.55em;
+  border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 7px;
+  background: var(--surface); color: var(--ink);
+  font: 500 12px/1 var(--mono); letter-spacing: 0.02em; white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+}
+.key.lit { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 24%, var(--surface)); color: var(--accent-text); }
+.key.mine { border-style: dashed; border-bottom-width: 1px; background: transparent; color: var(--muted); font-family: var(--font); font-weight: 500; }
+.key.press { transform: translateY(2px); border-bottom-width: 1px; }
+.x2 { font: 600 12px/1 var(--mono); color: var(--muted); margin-left: 2px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  height: 48px; padding: 0 22px; border-radius: var(--r);
+  font: 600 15px/1 var(--font); letter-spacing: -0.005em; text-decoration: none; white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.btn .lu { font-size: 18px; }
+.btn.primary { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.14); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary:active { transform: translateY(1px); }
+.btn.ghost { border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+.btn.ghost:hover { border-color: var(--muted); }
+.btn.sm { height: 36px; padding: 0 14px; font-size: 14px; gap: 7px; }
+.btn.sm .lu { font-size: 16px; }
+
+/* Header */
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+.nav.scrolled { border-bottom-color: var(--line-soft); }
+.nav-in { display: flex; align-items: center; gap: 28px; height: 64px; }
+.nav-links { display: flex; gap: 24px; margin-left: 12px; }
+.nav-links a { font-size: 14.5px; font-weight: 500; color: var(--muted); text-decoration: none; }
+.nav-links a:hover { color: var(--ink); }
+.nav-cta { margin-left: auto; display: flex; gap: 8px; }
+@media (max-width: 860px) { .nav-links { display: none; } }
+@media (max-width: 460px) { .nav-cta .ghost { display: none; } }
+
+/* Hero */
+.hero { padding-block: clamp(40px, 7vw, 88px) clamp(56px, 8vw, 104px); }
+.hero-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px clamp(28px, 5vw, 72px); align-items: end; margin-top: clamp(26px, 3.4vw, 40px); }
+.hero-row .ctas { margin-top: 0; }
+.eyebrow { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 26px; padding: 6px 12px 6px 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 13.5px; font-weight: 500; color: var(--muted); }
+.eyebrow svg { width: 22px; height: 22px; border-radius: 6px; }
+.eyebrow b { color: var(--ink); font-weight: 600; }
+.display { font: 800 var(--t-display)/0.92 var(--font); letter-spacing: -0.052em; color: var(--ink); text-wrap: balance; }
+.display .duck { font-size: 0.86em; letter-spacing: -0.02em; white-space: nowrap; }
+.lead { font-size: var(--t-lead); line-height: 1.55; color: var(--text); max-width: 34em; }
+.lead b { font-weight: 650; color: var(--ink); }
+.ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.meta { margin-top: 16px; font-size: 13.5px; color: var(--muted); }
+@media (max-width: 860px) { .hero-row { grid-template-columns: 1fr; } }
+
+/* The stage: Krya's own chain line, played in giant type. */
+.stage { margin-top: clamp(40px, 6vw, 72px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-sm); overflow: hidden; }
+.stage-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line-soft); }
+.stage-note { font-size: 13.5px; font-weight: 500; color: var(--muted); }
+.quiet { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.quiet:hover { background: var(--raised); color: var(--ink); }
+.quiet .lu { font-size: 15px; }
+.stage-body { padding: clamp(28px, 5vw, 56px) clamp(20px, 4vw, 48px) clamp(24px, 4vw, 44px); min-height: clamp(170px, 22vw, 268px); display: flex; flex-direction: column; justify-content: center; }
+.line-main { font: 800 clamp(44px, 8.6vw, 120px)/1.02 var(--font); letter-spacing: -0.045em; color: var(--ink); white-space: nowrap; perspective: 600px; transition: opacity 0.22s, transform 0.22s; min-height: 1.02em; }
+.line-main.swap { opacity: 0; transform: translateY(-14px); }
+.line-main .ch { display: inline-block; white-space: pre; transform-origin: 50% 60%; }
+.line-main .ch.flip { animation: flip 0.3s ease-in-out; }
+@keyframes flip { 0% { transform: rotateX(0); } 50% { transform: rotateX(90deg); color: var(--mark); } 100% { transform: rotateX(0); } }
+.line-main .w { border-radius: 0.08em; transition: background-size 0.25s; background: linear-gradient(var(--hl), var(--hl)) no-repeat 0 82% / 0 34%; }
+.line-main .w.now, .line-main .w.read { background-size: 100% 34%; }
+.caret { display: inline-block; width: 0.06em; height: 0.82em; margin-left: 0.04em; background: var(--mark); vertical-align: -0.06em; animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.line-main:not(.typing) .caret { display: none; }
+.wave { display: inline-flex; align-items: center; gap: 0.035em; height: 0.5em; margin-left: 0.22em; vertical-align: 0.06em; }
+.wave i { display: block; width: 0.045em; height: 30%; border-radius: 1em; background: var(--mark); opacity: 0.55; }
+.wave.on i { animation: bar 0.9s ease-in-out infinite; opacity: 1; }
+.wave i:nth-child(2n) { animation-delay: -0.3s; }
+.wave i:nth-child(3n) { animation-delay: -0.55s; }
+.wave i:nth-child(5n) { animation-delay: -0.15s; }
+@keyframes bar { 0%, 100% { height: 22%; } 50% { height: 100%; } }
+.line-main.typing .wave { display: none; }
+.line-sub { margin-top: 0.5em; font: 600 clamp(18px, 2.6vw, 34px)/1.2 var(--font); letter-spacing: -0.02em; color: var(--translation); transition: opacity 0.35s, transform 0.35s; }
+.line-sub.off { opacity: 0; transform: translateY(-10px); }
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line-soft); }
+.step { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 20px; position: relative; transition: opacity 0.25s; }
+.step + .step { border-left: 1px solid var(--line-soft); }
+.step + .step::before { content: ""; position: absolute; left: -7px; top: 26px; width: 12px; height: 12px; background: var(--surface); border-top: 1px solid var(--line); border-right: 1px solid var(--line); transform: rotate(45deg); }
+.step .keys .key { font-size: 12px; }
+.step-name { font-weight: 650; color: var(--ink); font-size: 15px; letter-spacing: -0.01em; }
+.step-ex { display: block; margin-top: 2px; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.step.wait { opacity: 0.4; }
+@media (max-width: 720px) {
+  .steps { grid-template-columns: 1fr; }
+  .step + .step { border-left: 0; border-top: 1px solid var(--line-soft); }
+  .step + .step::before { display: none; }
+  .step { flex-direction: row; align-items: center; gap: 14px; padding: 14px 18px; }
+  .step .keys { min-width: 108px; }
+}
+
+/* The yellow band: try the card here. */
+.band { background: var(--band); color: var(--band-ink); }
+.band ::selection { background: var(--band-ink); color: var(--band); }
+.band-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 72px); align-items: start; padding-block: clamp(64px, 9vw, 120px); }
+.band .kicker { color: var(--band-muted); margin-bottom: 0; }
+.band h2 { margin-top: 16px; font: 800 var(--t-h2)/1 var(--font); letter-spacing: -0.04em; color: var(--band-ink); text-wrap: balance; }
+.band-hint { margin-top: 18px; font-size: 17px; line-height: 1.7; color: var(--band-ink); }
+.band .key { background: rgba(255, 255, 255, 0.6); border-color: rgba(20, 20, 20, 0.32); color: var(--band-ink); font-size: 12.5px; vertical-align: 0.05em; }
+.band .key.lit { background: var(--band-ink); border-color: var(--band-ink); color: var(--band); }
+.more { display: inline-block; margin-left: 8px; font-size: 14px; font-weight: 600; color: var(--band-muted); opacity: 0; transition: opacity 0.15s; }
+.more.on { opacity: 1; }
+.story { margin-top: 30px; font: 600 clamp(22px, 2.5vw, 31px)/1.42 var(--font); letter-spacing: -0.018em; color: var(--band-ink); max-width: 25em; }
+.story .s { border-radius: 4px; transition: background 0.2s; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.story .s.picked { background: rgba(20, 20, 20, 0.1); box-shadow: 0 0 0 3px rgba(20, 20, 20, 0.1); }
+.story .rare { text-decoration: underline dotted rgba(20, 20, 20, 0.55); text-decoration-thickness: 2px; text-underline-offset: 6px; }
+.band-foot { margin-top: 32px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; }
+.band-btn { height: 44px; padding: 0 18px; border-radius: var(--r); background: var(--band-ink); color: var(--band); font-weight: 600; font-size: 14.5px; }
+.band-btn:hover { background: #000; }
+.band-btn .lu { font-size: 16px; }
+.band-note { font-size: 13.5px; line-height: 1.5; color: var(--band-muted); max-width: 30em; }
+.band :focus-visible { outline-color: var(--band-ink); }
+.card-slot { position: relative; min-height: 200px; }
+@media (max-width: 960px) { .band-grid { grid-template-columns: 1fr; } }
+
+/* Krya's card: two halves, the text and its other side, each with its bar. */
+.kcard { position: relative; width: 100%; max-width: 460px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); font-size: 15px; line-height: 1.6; text-align: left; }
+.kcard.pop { animation: pop 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.kc-head { display: flex; align-items: center; gap: 10px; padding: 9px 8px 9px 12px; border-bottom: 1px solid var(--line-soft); }
+.kc-head .key { height: 22px; min-width: 22px; font-size: 11px; border-bottom-width: 2px; border-radius: 5px; padding: 0 6px; }
+.kc-head .x2 { font-size: 11px; }
+.kc-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+.kc-tools { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.kc-lang { height: 24px; padding: 0 8px; border-radius: 5px; background: var(--accent); color: var(--on-accent); font: 700 11px/1 var(--mono); letter-spacing: 0.04em; }
+.kc-lang[aria-pressed="false"] { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.kc-icon { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 5px; color: var(--muted); }
+.kc-icon:hover { background: var(--raised); color: var(--ink); }
+.kc-icon .lu { font-size: 15px; }
+.kc-en { padding: 14px 16px 6px; color: var(--ink); font-size: 16px; }
+.kc-en .s { cursor: pointer; border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.kc-en .w.now { background: var(--hl); border-radius: 3px; box-shadow: 0 0 0 2px var(--hl); }
+.kc-en .rare { text-decoration: underline dotted color-mix(in srgb, var(--muted) 80%, transparent); text-decoration-thickness: 1.5px; text-underline-offset: 4px; cursor: help; }
+.pair { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.kc-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 8px 8px; }
+.kc-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.kc-btn:hover { background: var(--raised); color: var(--ink); }
+.kc-btn .lu { font-size: 14px; }
+.kc-btn.on { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.remote { display: flex; align-items: center; gap: 2px; }
+.chip { height: 24px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); margin-left: 4px; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.kc-lower { background: var(--raised); border-top: 1px solid var(--line-soft); }
+.kc-lower[hidden] { display: none !important; }
+.kc-tr { padding: 12px 16px 4px; color: var(--translation); font-size: 15px; }
+.kc-tr .t { border-radius: 3px; }
+.kc-tr .free { font-style: italic; color: var(--muted); font-size: 14px; }
+.kc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line-soft); font-size: 12px; line-height: 1.3; color: var(--muted); border-radius: 0 0 var(--r) var(--r); }
+.kc-foot label { display: inline-flex; align-items: center; gap: 6px; }
+.kc-foot select { font: 500 12px var(--font); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; height: 26px; padding: 0 6px; }
+.closed-note { border: 2px dashed rgba(20, 20, 20, 0.35); border-radius: var(--r); padding: 24px; font-size: 15px; line-height: 1.55; color: var(--band-ink); max-width: 460px; }
+.closed-note b { font-weight: 700; }
+
+/* The word card: a click on a dotted word. */
+.wordcard { position: absolute; z-index: 5; width: 270px; max-width: calc(100% - 16px); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 12px 12px 12px 14px; font-size: 14px; }
+.wc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.wc-top b { font-size: 16px; color: var(--ink); }
+.wc-ipa { font-size: 13px; color: var(--muted); }
+.wc-tools { margin-left: auto; display: flex; gap: 2px; }
+.wc-m { line-height: 1.45; color: var(--ink); font-weight: 600; }
+.wc-m i { font-style: italic; font-weight: 400; color: var(--muted); margin-right: 6px; }
+.star[aria-pressed="true"] { color: var(--duck); }
+.star[aria-pressed="true"] .lu { fill: var(--duck); }
+
+/* Sections */
+.section { padding-block: clamp(80px, 10vw, 136px); }
+.sec-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 64px; align-items: end; margin-bottom: clamp(36px, 5vw, 60px); }
+.sec-head h2, .chapter h2, .end h2 { font: 800 var(--t-h2)/1.02 var(--font); letter-spacing: -0.04em; color: var(--ink); text-wrap: balance; }
+.section.after { padding-top: 0; }
+.sec-lead { font-size: var(--t-lead); line-height: 1.55; color: var(--muted); max-width: 32em; }
+@media (max-width: 860px) { .sec-head { grid-template-columns: 1fr; } }
+
+/* The key map: every action in three groups. */
+.keymap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 clamp(24px, 3vw, 44px); }
+.kgroup h3 { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 2px solid var(--ink); font: 700 15px/1 var(--font); letter-spacing: -0.005em; color: var(--ink); }
+.kgroup h3 .lu { font-size: 18px; color: var(--muted); }
+.krow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 58px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.krow span:first-child { font-size: 15px; line-height: 1.35; color: var(--text); }
+.krow .keys { flex: none; }
+.auto { font: 600 12px/1 var(--font); color: var(--muted); padding: 6px 8px; border-radius: 999px; background: var(--sunk); white-space: nowrap; }
+.keynote { margin-top: 22px; font-size: var(--t-small); color: var(--muted); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 960px) { .keymap { grid-template-columns: 1fr; gap: 40px; } }
+
+/* Chapters: copy on one side, a working mock on the other. */
+.chapters { border-top: 1px solid var(--line); }
+.chapter { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(32px, 5vw, 80px); align-items: center; padding-block: clamp(64px, 8vw, 112px); border-bottom: 1px solid var(--line); }
+.chapter.flip .ch-copy { order: 2; }
+.kicker { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 14.5px; font-weight: 600; color: var(--muted); }
+.chapter.wide { grid-template-columns: minmax(0, 1fr); align-items: start; gap: clamp(28px, 4vw, 44px); }
+.wide-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px clamp(28px, 5vw, 72px); align-items: end; }
+.wide-head p { font-size: var(--t-lead); line-height: 1.55; color: var(--text); max-width: 31em; }
+.wide .desk > * { max-width: 760px; }
+.desk.duo { grid-template-columns: minmax(0, 380px) minmax(0, 1fr); align-items: center; justify-items: stretch; column-gap: clamp(16px, 3vw, 36px); }
+.desk.duo > * { max-width: none; }
+.desk.duo figcaption { grid-column: 1 / -1; }
+figure.desk { margin: 0; }
+.desk figcaption { font-size: 13px; line-height: 1.5; color: var(--muted); text-align: center; width: auto !important; max-width: 34em !important; }
+.facts.cols { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 clamp(20px, 3vw, 36px); margin-top: 0; }
+.facts.cols.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.facts.cols li { border-top: 2px solid var(--ink); padding-top: 14px; }
+@media (max-width: 960px) {
+  .wide-head { grid-template-columns: 1fr; }
+  .facts.cols, .facts.cols.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .desk.duo { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) { .facts.cols, .facts.cols.three { grid-template-columns: 1fr; } }
+.ch-copy > p { margin-top: 18px; font-size: var(--t-lead); line-height: 1.55; color: var(--text); max-width: 31em; }
+.facts { margin-top: 26px; display: grid; gap: 0; }
+.facts li { padding: 12px 0; border-top: 1px solid var(--line-soft); font-size: 15px; line-height: 1.5; color: var(--muted); }
+.facts b { color: var(--ink); font-weight: 650; }
+.desk { background: var(--sunk); border-radius: 16px; padding: clamp(18px, 4vw, 44px); display: grid; gap: 16px; justify-items: center; min-width: 0; }
+.desk > * { width: 100%; max-width: 520px; }
+@media (max-width: 960px) {
+  .chapter { grid-template-columns: 1fr; }
+  .chapter.flip .ch-copy { order: 0; }
+}
+
+/* Segmented choice above a mock. */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); width: auto !important; justify-self: center; }
+.seg button { height: 32px; padding: 0 13px; border-radius: 6px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
+.seg-note { font-size: 13.5px; line-height: 1.5; color: var(--muted); text-align: center; min-height: 3em; max-width: 30em !important; }
+.seg-note b { color: var(--ink); font-weight: 600; }
+
+/* Keyboard mock */
+.km { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-sm); overflow: hidden; }
+.km-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.km-head b { font-weight: 600; color: var(--ink); }
+.km-field { position: relative; padding: 22px 18px 30px; font: 500 clamp(19px, 2.2vw, 24px)/1.45 var(--font); letter-spacing: -0.012em; color: var(--ink); min-height: 4.4em; }
+.km-field .ch { display: inline-block; white-space: pre; }
+.km-field .ch.flip { animation: flip 0.3s ease-in-out; }
+.km-field .fx { background: linear-gradient(var(--hl), var(--hl)) no-repeat 0 92% / 100% 3px; }
+.km-field .caret { height: 1.05em; width: 2px; vertical-align: -0.16em; }
+.lbadge { position: absolute; left: 18px; top: 8px; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--ink); color: var(--bg); font: 700 10.5px/1 var(--mono); letter-spacing: 0.06em; transition: left 0.12s, top 0.12s; pointer-events: none; }
+.lbadge.bump { animation: bump 0.35s; }
+@keyframes bump { 40% { transform: scale(1.25); background: var(--accent); color: var(--on-accent); } }
+.km-log { border-top: 1px solid var(--line-soft); padding: 10px 14px; font: 400 12px/1.7 var(--mono); color: var(--muted); min-height: 66px; background: var(--raised); }
+.km-log li { display: flex; gap: 10px; animation: pop 0.25s; }
+.km-log .tag { color: var(--green); font-weight: 500; }
+.km-log .to { color: var(--ink); }
+.km-tip { display: flex; align-items: center; gap: 8px; justify-self: center; font-size: 13.5px; color: var(--muted); width: auto !important; }
+
+/* Translate and Check mocks reuse the card. */
+.tc-langs { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0; flex-wrap: wrap; }
+.sel { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--ink); }
+.sel .lu { font-size: 13px; color: var(--muted); }
+.sel.arrow { padding: 0 2px; color: var(--muted); }
+.swap { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--line); font-size: 12.5px; font-weight: 500; color: var(--muted); margin-left: auto; }
+.swap .lu { font-size: 13px; }
+.tc-text { margin: 10px 12px 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--ink); font-size: 15.5px; line-height: 1.55; }
+.paste { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600; }
+.paste kbd { font: 600 11px var(--mono); opacity: 0.7; }
+.cc-out { padding: 6px 16px 2px; font-size: 16px; line-height: 1.65; color: var(--ink); }
+.cc-out del { color: var(--red); text-decoration-thickness: 2px; }
+.cc-out ins { color: var(--green); text-decoration: none; font-weight: 700; }
+.cc-note { margin: 8px 16px 6px; padding: 10px 12px; border-radius: 6px; background: var(--raised); border: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; color: var(--text); }
+.cc-note.ok { color: var(--green); font-weight: 600; }
+
+/* Speak mocks */
+.dbadge { width: 100%; max-width: 380px !important; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 14px 16px 12px; }
+.db-text { font-size: 15.5px; line-height: 1.5; color: var(--ink); min-height: 4.5em; }
+.db-text .new { animation: fadein 0.3s; }
+@keyframes fadein { from { opacity: 0; } }
+.db-status { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--rec); box-shadow: 0 0 0 0 rgba(232, 17, 35, 0.5); animation: rec 1.4s infinite; }
+@keyframes rec { 70% { box-shadow: 0 0 0 7px rgba(232, 17, 35, 0); } 100% { box-shadow: 0 0 0 0 rgba(232, 17, 35, 0); } }
+.db-name { font-weight: 600; color: var(--ink); }
+.db-time { font: 500 12px var(--mono); }
+.db-wave { margin-left: auto; width: 150px; height: 26px; display: block; }
+.ts { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-sm); overflow: hidden; }
+.ts-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); font-size: 13px; flex-wrap: wrap; }
+.ts-head b { color: var(--ink); font-weight: 600; }
+.ts-head .lu { font-size: 16px; color: var(--muted); }
+.ts-head .muted { font-size: 12.5px; margin-left: auto; }
+.ts-lines li { display: grid; grid-template-columns: 46px 86px minmax(0, 1fr); gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); font-size: 14px; line-height: 1.45; align-items: baseline; }
+.ts-lines li:last-child { border-bottom: 0; }
+.ts-lines .t { font: 400 11.5px var(--mono); color: var(--muted); }
+.spk { font-weight: 650; color: var(--c); font-size: 13px; }
+.ts-lines p { color: var(--text); }
+@media (max-width: 480px) { .ts-lines li { grid-template-columns: 40px minmax(0, 1fr); } .ts-lines li p { grid-column: 2; } }
+
+/* Privacy ledger */
+.ledger { border-top: 2px solid var(--ink); }
+.lrow { display: grid; grid-template-columns: minmax(0, 1fr) 132px minmax(0, 1.4fr); gap: 12px 28px; align-items: baseline; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.lrow h3 { font: 650 17px/1.35 var(--font); letter-spacing: -0.01em; color: var(--ink); }
+.lrow p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+.st { display: inline-flex; align-items: center; gap: 7px; justify-self: start; height: 28px; padding: 0 11px; border-radius: 999px; font-size: 13px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.st .lu { font-size: 14px; stroke-width: 2.2; }
+.st.here { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.st.once { color: var(--ink); background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.st.you { color: var(--ink); background: var(--sunk); }
+@media (max-width: 760px) { .lrow { grid-template-columns: 1fr; gap: 8px; } }
+
+/* Install */
+.install { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(20px, 3vw, 40px); }
+.istep { display: flex; flex-direction: column; gap: 12px; padding-top: 22px; border-top: 1px solid var(--line); }
+.istep .key { width: 46px; height: 46px; font-size: 18px; font-weight: 700; border-radius: 10px; border-bottom-width: 4px; }
+.istep h3 { font: 700 19px/1.25 var(--font); letter-spacing: -0.015em; color: var(--ink); margin-top: 6px; }
+.istep p { font-size: 15px; line-height: 1.55; color: var(--muted); }
+.istep p b { color: var(--ink); font-weight: 600; }
+.reqs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px; }
+.reqs span { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; color: var(--muted); background: var(--surface); }
+.reqs .lu { font-size: 14px; }
+@media (max-width: 860px) { .install { grid-template-columns: 1fr; } }
+
+/* Sign-off */
+.end { padding-block: clamp(64px, 9vw, 120px); }
+.end-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: clamp(28px, 5vw, 64px); align-items: center; padding: clamp(28px, 5vw, 56px); border-radius: 20px; background: var(--surface); border: 1px solid var(--line); }
+.quack { position: relative; width: clamp(120px, 16vw, 196px); aspect-ratio: 1; max-width: 100%; border-radius: 22%; }
+.quack svg { width: 100%; height: 100%; display: block; }
+.quack .beak { transform-box: fill-box; transform-origin: 0% 50%; transition: transform 0.12s; }
+.quack.talk .beak { transform: scaleY(1.45); }
+.bubble { position: absolute; right: -14px; top: -14px; padding: 6px 11px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font: 700 13px/1 var(--mono); opacity: 0; transform: translateY(6px) scale(0.9); transition: opacity 0.15s, transform 0.15s; pointer-events: none; }
+.quack.talk .bubble { opacity: 1; transform: none; }
+.end h2 { font-size: clamp(40px, 6.4vw, 84px); line-height: 0.96; letter-spacing: -0.05em; }
+.end p { margin-top: 16px; font-size: var(--t-lead); color: var(--muted); max-width: 32em; }
+@media (max-width: 720px) { .end-grid { grid-template-columns: 1fr; } }
+
+footer { border-top: 1px solid var(--line); padding-block: 36px 48px; }
+.foot-in { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px 40px; align-items: center; }
+.foot-in p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+.foot-in p a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--link-line); text-underline-offset: 3px; }
+.foot-links { display: flex; gap: 20px; font-size: 13.5px; }
+.foot-links a { color: var(--muted); text-decoration: none; }
+.foot-links a:hover { color: var(--ink); }
+@media (max-width: 860px) { .foot-in { grid-template-columns: 1fr; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  html { scroll-behavior: auto; }
+}
+</style>
+</head>
+<body>
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#top" aria-label="Krya, to the top">Krya <span class="duck" aria-hidden="true">(<span class="eye">'</span>)&gt;</span></a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#try">Try it</a>
+      <a href="#keys">Keys</a>
+      <a href="#features">What it does</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn ghost sm" href="https://github.com/ikstro/krya"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/> <path d="M10 14 21 3"/> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>GitHub</a>
+      <a class="btn primary sm" href="https://github.com/ikstro/krya/releases"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/> <path d="m7 10 5 5 5-5"/></svg>Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero wrap" aria-labelledby="hero-h">
+  <div class="hero-top">
+    <p class="eyebrow"><svg viewBox="16 16 224 224" aria-hidden="true"><rect x="16" y="16" width="224" height="224" rx="52" fill="#141414"/><g transform="translate(-4 -2)" fill="none" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><path stroke="#FFFFFF" d="M118 58C92 58 84 68 84 88V96C84 108 78 114 62 114C78 114 84 120 84 132V174C84 194 92 202 118 202"/><path class="beak" stroke="#FFD60A" d="M166 86L202 114L166 142"/></g><circle cx="132" cy="96" r="13" fill="#FFFFFF"/></svg><span><b>Krya</b> for Windows 10 and 11</span></p>
+    <h1 class="display" id="hero-h">Talk to the duck <span class="duck" aria-hidden="true">(<span class="eye">'</span>)&gt;</span></h1>
+    <div class="hero-row">
+      <p class="lead">A small app in your tray that helps with language in <b>every program</b>. It fixes text typed in the wrong layout, translates, reads English aloud, checks your English and types what you say. All of it runs on your computer.</p>
+      <div>
+      <div class="ctas">
+        <a class="btn primary" href="https://github.com/ikstro/krya/releases"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/> <path d="m7 10 5 5 5-5"/></svg>Download for Windows</a>
+        <a class="btn ghost" href="https://github.com/ikstro/krya"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/> <path d="M10 14 21 3"/> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>Source on GitHub</a>
+      </div>
+      <p class="meta">Free and open source, with no account to make.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage" id="stage" aria-label="One line through Krya: typed in the wrong layout, fixed, translated and read aloud">
+    <div class="stage-head">
+      <span class="stage-note">One line typed in a chat, three keys later</span>
+      <button class="quiet" id="replay" type="button"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/> <path d="M3 3v5h5"/></svg><span>Replay with sound</span></button>
+    </div>
+    <div class="stage-body" aria-hidden="true">
+      <p class="line-main" id="lineMain"><span class="w">hello</span> <span class="w">world</span><span class="wave" id="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="caret"></span></p>
+      <p class="line-sub" id="lineSub">привет мир</p>
+    </div>
+    <ol class="steps" id="steps">
+      <li class="step">
+        <span class="keys"><kbd class="key">Pause</kbd></span>
+        <span><span class="step-name">Fix the layout</span><span class="step-ex">ghbdtn vbh → привет мир</span></span>
+      </li>
+      <li class="step">
+        <span class="keys"><kbd class="key">Shift</kbd><span class="x2">×2</span></span>
+        <span><span class="step-name">Translate</span><span class="step-ex">привет мир → hello world</span></span>
+      </li>
+      <li class="step">
+        <span class="keys"><kbd class="key">Ctrl</kbd><kbd class="key">C</kbd><span class="x2">×2</span></span>
+        <span><span class="step-name">Listen</span><span class="step-ex">hello world, read aloud</span></span>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="band" id="try" aria-labelledby="try-h">
+  <div class="wrap band-grid">
+    <div class="band-copy">
+      <div class="kicker"><span class="keys"><kbd class="key">Ctrl</kbd><kbd class="key">C</kbd><span class="x2">×2</span></span>Listen</div>
+      <h2 id="try-h">Try it on this page.</h2>
+      <p class="band-hint">Select a sentence below, then press <span class="keys" id="hintKeys"><kbd class="key" id="modKey">Ctrl</kbd><kbd class="key">C</kbd></span> twice.<span class="more" id="more">once more</span></p>
+      <div class="story" id="story"></div>
+      <div class="band-foot">
+        <button class="band-btn btn" id="tapTry" type="button"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>Show me on a sentence</button>
+        <p class="band-note">This page carries translations of the duck story only. Krya translates any text, on your computer.</p>
+      </div>
+    </div>
+    <div class="card-slot" id="cardSlot"></div>
+  </div>
+</section>
+
+<section class="section wrap" id="keys" aria-labelledby="keys-h">
+  <div class="sec-head">
+    <h2 id="keys-h">Every action has a key.</h2>
+    <p class="sec-lead">Each one works in every program. A key can be a combination, a modifier tapped twice, Pause, or a mouse side button. You change any of them on the action's page.</p>
+  </div>
+  <div class="keymap">
+    <div class="kgroup">
+      <h3><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/> <path d="M16 9a5 5 0 0 1 0 6"/> <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>Read</h3>
+      <ul>
+        <li class="krow"><span>Listen to the selected text</span><span class="keys"><kbd class="key">Ctrl</kbd><kbd class="key">C</kbd><span class="x2">×2</span></span></li>
+        <li class="krow"><span>Listen to a piece of the screen</span><span class="keys"><kbd class="key">Ctrl</kbd><kbd class="key">Alt</kbd><kbd class="key">S</kbd></span></li>
+        <li class="krow"><span>Translate the selected text</span><span class="keys"><kbd class="key mine">your key</kbd></span></li>
+        <li class="krow"><span>Translate text from the screen</span><span class="keys"><kbd class="key">Ctrl</kbd><kbd class="key">Alt</kbd><kbd class="key">T</kbd></span></li>
+      </ul>
+    </div>
+    <div class="kgroup">
+      <h3><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 8h.01"/> <path d="M12 12h.01"/> <path d="M14 8h.01"/> <path d="M16 12h.01"/> <path d="M18 8h.01"/> <path d="M6 8h.01"/> <path d="M7 16h10"/> <path d="M8 12h.01"/> <rect width="20" height="16" x="2" y="4" rx="2"/></svg>Write</h3>
+      <ul>
+        <li class="krow"><span>Fix the layout as I type</span><span class="auto">automatic</span></li>
+        <li class="krow"><span>Fix the last words or the selection</span><span class="keys"><kbd class="key">Pause</kbd></span></li>
+        <li class="krow"><span>Translate in place, no window</span><span class="keys"><kbd class="key mine">your key</kbd></span></li>
+        <li class="krow"><span>Check my English</span><span class="keys"><kbd class="key mine">your key</kbd></span></li>
+      </ul>
+    </div>
+    <div class="kgroup">
+      <h3><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19v3"/> <path d="M19 10v2a7 7 0 0 1-14 0v-2"/> <rect x="9" y="2" width="6" height="13" rx="3"/></svg>Speak</h3>
+      <ul>
+        <li class="krow"><span>Dictate where the cursor is</span><span class="keys"><kbd class="key mine">your key</kbd></span></li>
+        <li class="krow"><span>Dictate in my language, type English</span><span class="keys"><kbd class="key mine">your key</kbd></span></li>
+        <li class="krow"><span>Dictate a note into my notes folder</span><span class="keys"><kbd class="key mine">your key</kbd></span></li>
+        <li class="krow"><span>Record a Google Meet call</span><span class="keys"><kbd class="key">Alt</kbd><kbd class="key">Shift</kbd><kbd class="key">M</kbd></span></li>
+      </ul>
+    </div>
+  </div>
+  <p class="keynote"><kbd class="key mine">your key</kbd>Off until you set it. Shift tapped twice works well for Translate.</p>
+</section>
+
+<div class="chapters wrap" id="features">
+
+  <section class="chapter wide" aria-labelledby="kb-h">
+    <div class="ch-copy">
+      <div class="kicker"><span class="keys"><kbd class="key">Pause</kbd></span>Keyboard</div>
+      <div class="wide-head">
+        <h2 id="kb-h">Typed in the wrong layout? Keep typing.</h2>
+        <p>Krya fixes a word typed in the wrong layout as soon as you finish it, and switches the layout for the next one. It reads the keys of the word you are typing, never the text around it.</p>
+      </div>
+    </div>
+    <figure class="desk">
+      <div class="km" aria-label="A message being typed: two words in the wrong layout are fixed">
+        <div class="km-head"><b>New message</b><span class="muted">Left Ctrl switches the layout</span></div>
+        <div class="km-field" id="kmField"><span class="lbadge" id="lbadge">EN</span><span class="fx">привет</span> как дела, глянь <span class="fx">pull</span> request<span class="caret"></span></div>
+        <ul class="km-log" id="kmLog">
+          <li><span class="tag">fixed</span><span>ghbdtn → <span class="to">привет</span></span><span>EN → RU</span></li>
+          <li><span class="tag">fixed</span><span>згдд → <span class="to">pull</span></span><span>RU → EN</span></li>
+        </ul>
+      </div>
+      <figcaption>A chat message typed without looking at the layout. The badge by the caret is Krya's own.</figcaption>
+    </figure>
+    <ul class="facts cols">
+      <li><b>Backspace right after a fix</b> takes it back and keeps the word as typed.</li>
+      <li><b>Pause</b> retypes the last words, or the selected text, in the layout that reads best. Again for the next one.</li>
+      <li><b>Learns as you go.</b> A word you fix by hand twice is fixed always; a word of yours typed three times becomes yours.</li>
+      <li><b>Stays out of the way</b> in password fields and full-screen games. NB and other abbreviations are left alone.</li>
+    </ul>
+  </section>
+
+  <section class="chapter" aria-labelledby="tr-h">
+    <div class="ch-copy">
+      <div class="kicker"><span class="keys"><kbd class="key">Shift</kbd><span class="x2">×2</span></span>Translate</div>
+      <h2 id="tr-h">Translate like DeepL. Paste it back.</h2>
+      <p>Select a text in any program and press your key. The text and its translation open together; edit the text and it is translated again. Enter pastes the translation over your selection, and your clipboard stays as it was.</p>
+      <ul class="facts">
+        <li><b>The direction is a rule.</b> Your language goes into English, any other language into yours. 32 languages.</li>
+        <li><b>Three levels.</b> Fast is Firefox's offline translator. Accurate and Most accurate run a Gemma 4 model on your own graphics card or processor.</li>
+        <li><b>Text on the screen.</b> Ctrl+Alt+T, draw a box over a picture, a video or a game, and its text opens ready to translate.</li>
+      </ul>
+    </div>
+    <figure class="desk">
+      <div class="seg" role="radiogroup" aria-label="Translation level" id="levels">
+        <button type="button" role="radio" aria-checked="false" data-l="fast">Fast</button>
+        <button type="button" role="radio" aria-checked="true" data-l="accurate">Accurate</button>
+        <button type="button" role="radio" aria-checked="false" data-l="most">Most accurate</button>
+      </div>
+      <p class="seg-note" id="levelNote"></p>
+      <div class="kcard" aria-label="Krya's Translate card">
+        <div class="kc-head">
+          <span class="keys"><kbd class="key lit">Shift</kbd><span class="x2">×2</span></span>
+          <span class="kc-title">Translate</span>
+          <span class="kc-tools"><span class="kc-icon"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/> <path d="m6 6 12 12"/></svg></span></span>
+        </div>
+        <div class="tc-langs">
+          <span class="sel">Russian<svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span><span class="sel arrow">→</span><span class="sel">English<svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+          <span class="swap"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3 4 7l4 4"/> <path d="M4 7h16"/> <path d="m16 21 4-4-4-4"/> <path d="M20 17H4"/></svg>Swap</span>
+        </div>
+        <div class="tc-text">Сборка опять упала. Посмотришь логи после обеда?</div>
+        <div class="kc-bar"><span class="kc-btn"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Copy</span></div>
+        <div class="kc-lower">
+          <div class="kc-tr">The build failed again. Will you look at the logs after lunch?</div>
+          <div class="kc-bar"><span class="kc-btn"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Copy</span><span class="paste">Paste<kbd>Enter</kbd></span></div>
+        </div>
+        <div class="kc-foot"><span id="tcFoot">Translated · Accurate</span></div>
+      </div>
+      <figcaption>Krya's Translate card, redrawn. Pick a level to see what it costs.</figcaption>
+    </figure>
+  </section>
+
+  <section class="chapter flip" aria-labelledby="ck-h">
+    <div class="ch-copy">
+      <div class="kicker"><span class="keys"><kbd class="key mine">your key</kbd></span>Check my English</div>
+      <h2 id="ck-h">Write in English. The duck checks it.</h2>
+      <p>Select what you wrote and press your Check key. Wrong words are struck out in red, the fix is in green, and one short note in your language explains the main mistake. A right text says so and stays as it is.</p>
+      <ul class="facts">
+        <li><b>Real mistakes only.</b> No rephrasing; code and names are left alone.</li>
+        <li><b>Measured on 44 texts,</b> it caught 31 of 32 mistakes and changed none of the 11 right ones.</li>
+        <li><b>Your mistakes, kept.</b> Library › Mistakes shows the ones you repeat first.</li>
+      </ul>
+    </div>
+    <figure class="desk">
+      <div class="seg" role="radiogroup" aria-label="Example text" id="checks">
+        <button type="button" role="radio" aria-checked="true" data-c="wrong">Mistakes on purpose</button>
+        <button type="button" role="radio" aria-checked="false" data-c="right">A right text</button>
+      </div>
+      <div class="kcard" aria-label="Krya's Check card">
+        <div class="kc-head">
+          <span class="kc-title">Check</span>
+          <span class="kc-tools"><span class="kc-icon"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/> <path d="m6 6 12 12"/></svg></span></span>
+        </div>
+        <div class="tc-text" id="ccField">Yesterday I have sent the report, but nobody answer me.</div>
+        <div class="cc-out" id="ccOut">Yesterday I <del>have</del> sent the report, but nobody <del>answer</del> <ins>answered</ins> me.</div>
+        <p class="cc-note" id="ccNote">have sent → sent: со словом yesterday нужно Past Simple, а не Present Perfect.</p>
+        <div class="kc-bar"><span class="remote"><span class="kc-btn"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Copy</span><span class="kc-btn"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>Listen</span></span><span class="paste">Paste<kbd>Enter</kbd></span></div>
+        <div class="kc-foot"><span>Checked · Accurate</span><span id="ccLang">Note in Russian</span></div>
+      </div>
+      <figcaption>The note follows the language picked in the card above.</figcaption>
+    </figure>
+  </section>
+
+  <section class="chapter wide" aria-labelledby="sp-h">
+    <div class="ch-copy">
+      <div class="kicker"><span class="keys"><kbd class="key mine">your key</kbd></span>Dictate and transcribe</div>
+      <div class="wide-head">
+        <h2 id="sp-h">Say it, and it's typed.</h2>
+        <p>Press a key and speak. Krya types the phrase where the cursor is, in the language you spoke or straight in English. It recognizes while you talk, so the text is there a moment after the key.</p>
+      </div>
+    </div>
+    <figure class="desk duo">
+      <div class="dbadge" aria-label="Krya's dictation badge">
+        <p class="db-text" id="dbText">Let's move the release to Friday and keep the old installer for now.</p>
+        <div class="db-status"><span class="rec-dot"></span><span class="db-name">Dictate</span><span class="db-time" id="dbTime">0:05</span><canvas class="db-wave" id="dbWave" aria-hidden="true"></canvas></div>
+      </div>
+      <div class="ts" aria-label="A transcript of a call">
+        <div class="ts-head"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/> <rect x="2" y="6" width="14" height="12" rx="2"/></svg><b>Design review</b><span class="muted">Google Meet, 32 min</span></div>
+        <ol class="ts-lines">
+          <li><span class="t">00:12</span><span class="spk" style="--c: var(--sp1)">Me</span><p>Can everyone see the new tray menu?</p></li>
+          <li><span class="t">00:17</span><span class="spk" style="--c: var(--sp2)">Olena</span><p>Yes. The rows feel calmer now.</p></li>
+          <li><span class="t">00:24</span><span class="spk" style="--c: var(--sp3)">Speaker 3</span><p>Then let's ship it on Friday.</p></li>
+        </ol>
+      </div>
+      <figcaption>The dictation badge while you speak, and a call transcribed with who spoke when.</figcaption>
+    </figure>
+    <ul class="facts cols three">
+      <li><b>Quick on an ordinary processor.</b> 22 seconds of Russian were typed 0.2 s after the key (Parakeet, on an Intel i9).</li>
+      <li><b>Transcripts</b> of files, the microphone and Google Meet calls. Telling an hour's speakers apart takes about 2 minutes on an RTX card.</li>
+      <li><b>Words to spell.</b> Names and terms come out written your way, in dictation and in transcripts.</li>
+    </ul>
+  </section>
+
+</div>
+
+<section class="section wrap" id="privacy" aria-labelledby="pv-h">
+  <div class="sec-head">
+    <h2 id="pv-h">Nothing you read leaves your computer.</h2>
+    <p class="sec-lead">Krya has no account, no cloud and no telemetry. The models download once and then work offline.</p>
+  </div>
+  <div class="ledger">
+    <div class="lrow"><h3>The texts you select and translate</h3><span class="st here"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Stay here</span><p>Translated on this computer; the recent ones are kept only here.</p></div>
+    <div class="lrow"><h3>What you type</h3><span class="st here"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Stays here</span><p>Krya reads the keys of the word being typed and keeps nothing else. Learned words stay on this computer, and nothing is learned in a password field.</p></div>
+    <div class="lrow"><h3>Your voice and transcripts</h3><span class="st here"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Stay here</span><p>Recognized on this computer. A compressed copy of the sound stays beside the transcript; the source file is never copied.</p></div>
+    <div class="lrow"><h3>Your clipboard</h3><span class="st here"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>As it was</span><p>Every copy Krya borrows is put back, and Windows' clipboard history never sees Krya's own copies.</p></div>
+    <div class="lrow"><h3>Models and voices</h3><span class="st once"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/> <path d="m7 10 5 5 5-5"/></svg>Once</span><p>Downloaded when you first need them, from Mozilla and Hugging Face, each checked by size and SHA-256.</p></div>
+    <div class="lrow"><h3>New versions</h3><span class="st you"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/> <path d="M10 14 21 3"/> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>You decide</span><p>Krya never updates itself. You download a new installer from GitHub when you want it.</p></div>
+  </div>
+</section>
+
+<section class="section wrap after" id="install" aria-labelledby="in-h">
+  <div class="sec-head">
+    <h2 id="in-h">Three steps to the tray.</h2>
+    <p class="sec-lead">Free, open source, about a minute to set up. It installs over Altype and 2Talker and takes their words and settings along.</p>
+  </div>
+  <ol class="install">
+    <li class="istep"><kbd class="key">1</kbd><h3>Download the installer</h3><p>Get <b>Krya-Setup.exe</b> from the latest release on GitHub.</p></li>
+    <li class="istep"><kbd class="key">2</kbd><h3>Run it anyway</h3><p>The installer isn't signed, because Krya is free. Windows warns once: <b>More info → Run anyway</b>.</p></li>
+    <li class="istep"><kbd class="key">3</kbd><h3>Find the duck in the tray</h3><p>Krya starts with Windows. The first translation downloads your language pair once: about <b>85 MB</b> for Russian ↔ English.</p></li>
+  </ol>
+  <div class="reqs">
+    <span><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/> <line x1="8" x2="16" y1="21" y2="21"/> <line x1="12" x2="12" y1="17" y2="21"/></svg>Windows 10 and 11, 64-bit</span>
+    <span><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20v2"/> <path d="M12 2v2"/> <path d="M17 20v2"/> <path d="M17 2v2"/> <path d="M2 12h2"/> <path d="M2 17h2"/> <path d="M2 7h2"/> <path d="M20 12h2"/> <path d="M20 17h2"/> <path d="M20 7h2"/> <path d="M7 20v2"/> <path d="M7 2v2"/> <rect x="4" y="4" width="16" height="16" rx="2"/> <rect x="8" y="8" width="8" height="8" rx="1"/></svg>Any processor; a graphics card helps</span>
+    <span><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/> <path d="m9 12 2 2 4-4"/></svg>MIT license</span>
+  </div>
+</section>
+
+<section class="end wrap" aria-labelledby="end-h">
+  <div class="end-grid">
+    <button class="quack" id="quack" type="button" aria-label="The duck says krya"><svg viewBox="16 16 224 224" aria-hidden="true"><rect x="16" y="16" width="224" height="224" rx="52" fill="#141414"/><g transform="translate(-4 -2)" fill="none" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><path stroke="#FFFFFF" d="M118 58C92 58 84 68 84 88V96C84 108 78 114 62 114C78 114 84 120 84 132V174C84 194 92 202 118 202"/><path class="beak" stroke="#FFD60A" d="M166 86L202 114L166 142"/></g><circle cx="132" cy="96" r="13" fill="#FFFFFF"/></svg><span class="bubble" aria-hidden="true">кря!</span></button>
+    <div>
+      <h2 id="end-h">Talk to the duck.</h2>
+      <p>Select any text, press Ctrl+C twice, and hear it in English. The rest is a key away.</p>
+      <div class="ctas">
+        <a class="btn primary" href="https://github.com/ikstro/krya/releases"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/> <path d="m7 10 5 5 5-5"/></svg>Download for Windows</a>
+        <a class="btn ghost" href="https://github.com/ikstro/krya"><svg class="lu" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/> <path d="M10 14 21 3"/> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>Source on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <a class="logo" href="#top" aria-label="Krya, to the top">Krya <span class="duck" aria-hidden="true">(<span class="eye">'</span>)&gt;</span></a>
+    <p>Made by Yevhen Peshynskyi · Design automation engineer · <a href="https://ikstro.com">ikstro.com</a><br>Open source under the MIT license. Formerly Altype and 2Talker.</p>
+    <nav class="foot-links" aria-label="Links">
+      <a href="https://github.com/ikstro/krya">GitHub</a>
+      <a href="https://github.com/ikstro/krya/releases">Releases</a>
+      <a href="https://github.com/ikstro/krya#readme">README</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(() => {
+'use strict';
+const IC = {"volume-2":"<path d=\"M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z\"/> <path d=\"M16 9a5 5 0 0 1 0 6\"/> <path d=\"M19.364 18.364a9 9 0 0 0 0-12.728\"/>","languages":"<path d=\"m5 8 6 6\"/> <path d=\"m4 14 6-6 2-3\"/> <path d=\"M2 5h12\"/> <path d=\"M7 2h1\"/> <path d=\"m22 22-5-10-5 10\"/> <path d=\"M14 18h6\"/>","scan-text":"<path d=\"M3 7V5a2 2 0 0 1 2-2h2\"/> <path d=\"M17 3h2a2 2 0 0 1 2 2v2\"/> <path d=\"M21 17v2a2 2 0 0 1-2 2h-2\"/> <path d=\"M7 21H5a2 2 0 0 1-2-2v-2\"/> <path d=\"M7 8h8\"/> <path d=\"M7 12h10\"/> <path d=\"M7 16h6\"/>","keyboard":"<path d=\"M10 8h.01\"/> <path d=\"M12 12h.01\"/> <path d=\"M14 8h.01\"/> <path d=\"M16 12h.01\"/> <path d=\"M18 8h.01\"/> <path d=\"M6 8h.01\"/> <path d=\"M7 16h10\"/> <path d=\"M8 12h.01\"/> <rect width=\"20\" height=\"16\" x=\"2\" y=\"4\" rx=\"2\"/>","mic":"<path d=\"M12 19v3\"/> <path d=\"M19 10v2a7 7 0 0 1-14 0v-2\"/> <rect x=\"9\" y=\"2\" width=\"6\" height=\"13\" rx=\"3\"/>","audio-lines":"<path d=\"M2 10v3\"/> <path d=\"M6 6v11\"/> <path d=\"M10 3v18\"/> <path d=\"M14 8v7\"/> <path d=\"M18 5v13\"/> <path d=\"M22 10v3\"/>","spell-check":"<path d=\"m20 15-5.5 5.5L12 18\"/> <path d=\"m4 16 6-12 5.115 10.23\"/> <path d=\"M6 12h8\"/>","download":"<path d=\"M12 15V3\"/> <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/> <path d=\"m7 10 5 5 5-5\"/>","copy":"<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/> <path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>","play":"<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/>","pause":"<rect x=\"14\" y=\"3\" width=\"5\" height=\"18\" rx=\"1\"/> <rect x=\"5\" y=\"3\" width=\"5\" height=\"18\" rx=\"1\"/>","check":"<path d=\"M20 6 9 17l-5-5\"/>","star":"<path d=\"M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z\"/>","file-audio":"<path d=\"M4 6.835V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-.343\"/> <path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/> <path d=\"M2 19a2 2 0 0 1 4 0v1a2 2 0 0 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 0 1-4 0v-1a2 2 0 0 1 4 0\"/>","users":"<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/> <path d=\"M16 3.128a4 4 0 0 1 0 7.744\"/> <path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"/> <circle cx=\"9\" cy=\"7\" r=\"4\"/>","lock":"<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/> <path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>","monitor":"<rect width=\"20\" height=\"14\" x=\"2\" y=\"3\" rx=\"2\"/> <line x1=\"8\" x2=\"16\" y1=\"21\" y2=\"21\"/> <line x1=\"12\" x2=\"12\" y1=\"17\" y2=\"21\"/>","video":"<path d=\"m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5\"/> <rect x=\"2\" y=\"6\" width=\"14\" height=\"12\" rx=\"2\"/>","hard-drive":"<path d=\"M10 16h.01\"/> <path d=\"M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/> <path d=\"M21.946 12.013H2.054\"/> <path d=\"M6 16h.01\"/>","globe":"<circle cx=\"12\" cy=\"12\" r=\"10\"/> <path d=\"M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20\"/> <path d=\"M2 12h20\"/>","monitor-speaker":"<path d=\"M5.5 20H8\"/> <path d=\"M17 9h.01\"/> <rect width=\"10\" height=\"16\" x=\"12\" y=\"4\" rx=\"2\"/> <path d=\"M8 6H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4\"/> <circle cx=\"17\" cy=\"15\" r=\"1\"/>","text-cursor":"<path d=\"M17 22h-1a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4h1\"/> <path d=\"M7 22h1a4 4 0 0 0 4-4\"/> <path d=\"M7 2h1a4 4 0 0 1 4 4\"/>","x":"<path d=\"M18 6 6 18\"/> <path d=\"m6 6 12 12\"/>","chevron-right":"<path d=\"m9 18 6-6-6-6\"/>","rotate-ccw":"<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\"/> <path d=\"M3 3v5h5\"/>","cpu":"<path d=\"M12 20v2\"/> <path d=\"M12 2v2\"/> <path d=\"M17 20v2\"/> <path d=\"M17 2v2\"/> <path d=\"M2 12h2\"/> <path d=\"M2 17h2\"/> <path d=\"M2 7h2\"/> <path d=\"M20 12h2\"/> <path d=\"M20 17h2\"/> <path d=\"M20 7h2\"/> <path d=\"M7 20v2\"/> <path d=\"M7 2v2\"/> <rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\"/> <rect x=\"8\" y=\"8\" width=\"8\" height=\"8\" rx=\"1\"/>","external-link":"<path d=\"M15 3h6v6\"/> <path d=\"M10 14 21 3\"/> <path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>","pencil-line":"<path d=\"M13 21h8\"/> <path d=\"m15 5 4 4\"/> <path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\"/>","circle-check":"<circle cx=\"12\" cy=\"12\" r=\"10\"/> <path d=\"m16 9-5.5 5.5L8 12\"/>","skip-back":"<path d=\"M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z\"/> <path d=\"M3 20V4\"/>","skip-forward":"<path d=\"M21 4v16\"/> <path d=\"M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z\"/>","square":"<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/>","pin":"<path d=\"M12 17v5\"/> <path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\"/>","arrow-left-right":"<path d=\"M8 3 4 7l4 4\"/> <path d=\"M4 7h16\"/> <path d=\"m16 21 4-4-4-4\"/> <path d=\"M20 17H4\"/>","chevron-down":"<path d=\"m6 9 6 6 6-6\"/>","shield-check":"<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/> <path d=\"m9 12 2 2 4-4\"/>","wifi-off":"<path d=\"M12 20h.01\"/> <path d=\"M8.5 16.429a5 5 0 0 1 7 0\"/> <path d=\"M5 12.859a10 10 0 0 1 5.17-2.69\"/> <path d=\"M19 12.859a10 10 0 0 0-2.007-1.523\"/> <path d=\"M2 8.82a15 15 0 0 1 4.177-2.643\"/> <path d=\"M22 8.82a15 15 0 0 0-11.288-3.764\"/> <path d=\"m2 2 20 20\"/>"};
+const ico = (n) => `<svg class="lu" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---------- Voice: the browser's own, an English one that runs locally when there is one ---------- */
+const synth = 'speechSynthesis' in window ? window.speechSynthesis : null;
+function pickVoice(lang) {
+  if (!synth) return null;
+  let vs = [];
+  try { vs = synth.getVoices() || []; } catch (e) { vs = []; }
+  const mine = vs.filter((v) => (v.lang || '').toLowerCase().startsWith(lang));
+  return mine.find((v) => v.localService && /natural|neural|aria|jenny|guy/i.test(v.name))
+    || mine.find((v) => v.localService) || mine[0] || null;
+}
+if (synth && synth.addEventListener) synth.addEventListener('voiceschanged', () => {});
+let speakId = 0;
+function wordStarts(text) { const out = []; text.replace(/[\p{L}\p{N}'’]+/gu, (m, o) => { out.push(o); return m; }); return out; }
+function simulate(text, onword, id, withEnd, onend) {
+  const starts = wordStarts(text);
+  let i = 0;
+  const tick = () => {
+    if (id !== speakId) return;
+    if (i < starts.length) { onword && onword(starts[i]); i++; setTimeout(tick, 290); }
+    else if (withEnd) onend && onend();
+  };
+  tick();
+}
+function speak(text, opts = {}) {
+  const { onword, onend, lang = 'en' } = opts;
+  const id = ++speakId;
+  const done = () => { if (id === speakId) onend && onend(); };
+  if (!synth) { simulate(text, onword, id, true, done); return; }
+  try { synth.cancel(); } catch (e) {}
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickVoice(lang);
+  if (v) { u.voice = v; u.lang = v.lang; } else u.lang = lang === 'ru' ? 'ru-RU' : 'en-US';
+  u.rate = 0.95;
+  let heard = false;
+  u.onboundary = (e) => { if (id !== speakId) return; if (!e.name || e.name === 'word') { heard = true; onword && onword(e.charIndex); } };
+  u.onend = done;
+  u.onerror = done;
+  setTimeout(() => {
+    if (id !== speakId) return;
+    try { synth.speak(u); } catch (e) { simulate(text, onword, id, true, done); return; }
+    setTimeout(() => { if (!heard && id === speakId) simulate(text, onword, id, false); }, 500);
+  }, 40);
+}
+function quietCard() { if (typeof card !== 'undefined' && card.playing) { card.playing = false; markReading(); } }
+function hush() { speakId++; if (synth) { try { synth.cancel(); } catch (e) {} } }
+
+/* ---------- Header ---------- */
+const nav = $('#nav');
+const onScroll = () => nav.classList.toggle('scrolled', scrollY > 8);
+addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+
+/* ---------- The stage: the chain line, Krya's opening moment ---------- */
+const TYPED = 'ghbdtn vbh';
+const FIXED = 'привет мир';
+const main = $('#lineMain');
+const sub = $('#lineSub');
+const steps = $$('#steps .step');
+let stageRun = 0;
+function stepState(n) {
+  steps.forEach((s, i) => {
+    s.classList.toggle('wait', n > 0 && i + 1 > n);
+    $$('.key', s).forEach((k) => k.classList.toggle('lit', i + 1 === n));
+  });
+}
+function pressKeys(n) {
+  const ks = $$('.key', steps[n - 1]);
+  ks.forEach((k) => k.classList.add('press'));
+  setTimeout(() => ks.forEach((k) => k.classList.remove('press')), 140);
+}
+function englishLine() {
+  main.innerHTML = '<span class="w">hello</span> <span class="w">world</span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="caret"></span>';
+}
+async function playStage(sound) {
+  const run = ++stageRun;
+  const alive = () => run === stageRun;
+  stepState(1); $$('.key', steps[0]).forEach((k) => k.classList.remove('lit'));
+  steps[0].classList.remove('wait');
+  sub.classList.add('off');
+  main.classList.add('typing');
+  main.innerHTML = '<span class="caret"></span>';
+  const caret = $('.caret', main);
+  const chars = [];
+  await sleep(300);
+  for (const c of TYPED) {
+    if (!alive()) return;
+    const s = document.createElement('span');
+    s.className = 'ch'; s.textContent = c;
+    main.insertBefore(s, caret); chars.push(s);
+    await sleep(70 + Math.random() * 70);
+  }
+  await sleep(450); if (!alive()) return;
+  stepState(1); pressKeys(1);
+  chars.forEach((s, i) => setTimeout(() => {
+    if (!alive()) return;
+    s.classList.add('flip');
+    setTimeout(() => { s.textContent = FIXED[i]; }, 150);
+    setTimeout(() => s.classList.remove('flip'), 320);
+  }, i * 55));
+  await sleep(55 * TYPED.length + 900); if (!alive()) return;
+  stepState(2); pressKeys(2); setTimeout(() => pressKeys(2), 180);
+  main.classList.add('swap');
+  await sleep(240); if (!alive()) return;
+  main.classList.remove('typing');
+  englishLine();
+  sub.textContent = FIXED;
+  main.classList.remove('swap');
+  sub.classList.remove('off');
+  await sleep(900); if (!alive()) return;
+  stepState(3); pressKeys(3); setTimeout(() => pressKeys(3), 180);
+  const words = $$('.w', main);
+  const wave = $('.wave', main);
+  wave.classList.add('on');
+  const mark = (charIndex) => { const i = charIndex >= 6 ? 1 : 0; words.forEach((w, j) => { w.classList.toggle('now', j === i); if (j < i) w.classList.add('read'); }); };
+  await new Promise((resolve) => {
+    let ended = false;
+    const finish = () => { if (!ended) { ended = true; resolve(); } };
+    if (sound) {
+      speak('hello world', { onword: mark, onend: finish });
+      setTimeout(finish, 4000);
+    } else {
+      mark(0); setTimeout(() => mark(6), 520); setTimeout(finish, 1200);
+    }
+  });
+  if (!alive()) return;
+  words.forEach((w) => { w.classList.remove('now'); w.classList.add('read'); });
+  await sleep(500); if (!alive()) return;
+  wave.classList.remove('on');
+  stepState(0);
+  setTimeout(() => { if (alive()) words.forEach((w) => w.classList.remove('read')); }, 1600);
+}
+$('#replay').addEventListener('click', () => { quietCard(); playStage(true); });
+if (!reduce) playStage(false);
+
+/* ---------- The duck story and Krya's card ---------- */
+const STORY = [
+  'Every morning, an old duck crossed the street to the bakery.',
+  'Nobody knew where it lived, but the baker always kept a warm crust for it.',
+  'One day the duck brought a friend, and the queue grew a little longer.'
+];
+const LANGS = { ru: 'Russian', uk: 'Ukrainian', de: 'German', es: 'Spanish', pl: 'Polish', fr: 'French' };
+const TR = {
+  ru: ['Каждое утро старая утка переходила улицу к пекарне.', 'Никто не знал, где она живёт, но пекарь всегда оставлял для неё тёплую корочку.', 'Однажды утка привела подругу, и очередь стала чуть длиннее.'],
+  uk: ['Щоранку стара качка переходила вулицю до пекарні.', 'Ніхто не знав, де вона живе, але пекар завжди залишав для неї теплу скоринку.', 'Одного дня качка привела подругу, і черга стала трохи довшою.'],
+  de: ['Jeden Morgen überquerte eine alte Ente die Straße zur Bäckerei.', 'Niemand wusste, wo sie wohnte, aber der Bäcker hob immer eine warme Kruste für sie auf.', 'Eines Tages brachte die Ente eine Freundin mit, und die Schlange wurde ein wenig länger.'],
+  es: ['Cada mañana, un viejo pato cruzaba la calle hasta la panadería.', 'Nadie sabía dónde vivía, pero el panadero siempre le guardaba una corteza caliente.', 'Un día el pato trajo a un amigo, y la cola se hizo un poco más larga.'],
+  pl: ['Każdego ranka stara kaczka przechodziła przez ulicę do piekarni.', 'Nikt nie wiedział, gdzie mieszka, ale piekarz zawsze zostawiał dla niej ciepłą skórkę.', 'Pewnego dnia kaczka przyprowadziła koleżankę i kolejka zrobiła się trochę dłuższa.'],
+  fr: ['Chaque matin, un vieux canard traversait la rue jusqu’à la boulangerie.', 'Personne ne savait où il vivait, mais le boulanger lui gardait toujours une croûte chaude.', 'Un jour, le canard amena un ami, et la file d’attente s’allongea un peu.']
+};
+const DICT = {
+  bakery: { ipa: '/ˈbeɪkəri/', senses: [['noun', { ru: 'пекарня, булочная', uk: 'пекарня, булочна', de: 'Bäckerei', es: 'panadería', pl: 'piekarnia', fr: 'boulangerie' }]] },
+  crust: { ipa: '/krʌst/', senses: [['noun', { ru: 'корка, корочка', uk: 'скоринка, кірка', de: 'Kruste, Rinde', es: 'corteza', pl: 'skórka', fr: 'croûte' }]] },
+  queue: { ipa: '/kjuː/', senses: [['noun', { ru: 'очередь', uk: 'черга', de: 'Schlange, Warteschlange', es: 'cola, fila', pl: 'kolejka', fr: 'file d’attente' }], ['verb', { ru: 'стоять в очереди', uk: 'стояти в черзі', de: 'anstehen', es: 'hacer cola', pl: 'stać w kolejce', fr: 'faire la queue' }]] }
+};
+const NOTES = {
+  ru: 'have sent → sent: со словом yesterday нужно Past Simple, а не Present Perfect.',
+  uk: 'have sent → sent: зі словом yesterday потрібен Past Simple, а не Present Perfect.',
+  de: 'have sent → sent: Mit „yesterday“ steht das Past Simple, nicht das Present Perfect.',
+  es: 'have sent → sent: con «yesterday» se usa el Past Simple, no el Present Perfect.',
+  pl: 'have sent → sent: przy „yesterday” używa się Past Simple, a nie Present Perfect.',
+  fr: 'have sent → sent : avec « yesterday », on emploie le Past Simple, pas le Present Perfect.'
+};
+let lang = 'ru';
+try {
+  const pref = (navigator.languages || [navigator.language || '']).map((l) => (l || '').slice(0, 2).toLowerCase()).find((l) => TR[l]);
+  if (pref) lang = pref;
+  const saved = localStorage.getItem('krya-lang');
+  if (saved && TR[saved]) lang = saved;
+} catch (e) {}
+
+// Words as spans with their offsets, so the voice's word boundaries can mark them.
+function tokens(text, dict, live) {
+  let html = '';
+  let last = 0;
+  text.replace(/[A-Za-z’']+/g, (m, o) => {
+    html += esc(text.slice(last, o));
+    const k = m.toLowerCase().replace(/[’']s$/, '');
+    const rare = dict && DICT[k];
+    html += `<span class="w${rare ? ' rare' : ''}" data-o="${o}"${rare ? ` data-w="${k}"` + (live ? ' tabindex="0" role="button"' : '') : ''}>${esc(m)}</span>`;
+    last = o + m.length;
+    return m;
+  });
+  return html + esc(text.slice(last));
+}
+
+const story = $('#story');
+story.innerHTML = STORY.map((s, i) => `<span class="s" data-i="${i}">${tokens(s, true)}</span>`).join(' ');
+const slot = $('#cardSlot');
+const card = { mode: 'story', idx: [0, 1], en: [], cursor: 0, playing: false, one: false, lower: true, via: true, el: null };
+$('#modKey').textContent = isMac ? '⌘' : 'Ctrl';
+
+function renderCard(pop) {
+  const tr = card.mode === 'story' ? card.idx.map((i) => TR[lang][i]) : null;
+  const el = document.createElement('div');
+  el.className = 'kcard' + (pop ? ' pop' : '');
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', 'Krya card: Listen');
+  el.innerHTML = `
+    <div class="kc-head">
+      <span class="keys">${card.via ? `<kbd class="key lit">${isMac ? '⌘' : 'Ctrl'}</kbd><kbd class="key lit">C</kbd><span class="x2">×2</span>` : ''}</span>
+      <span class="kc-title">Listen</span>
+      <span class="kc-tools">
+        <button class="kc-lang" type="button" aria-pressed="${card.lower}" title="Show or hide the translation">${lang.toUpperCase()}</button>
+        <button class="kc-icon" type="button" data-act="close" aria-label="Close the card">${ico('x')}</button>
+      </span>
+    </div>
+    <div class="kc-en" data-words>${card.en.map((s, i) => `<span class="s" data-i="${i}">${tokens(s, card.mode === 'story', true)}</span>`).join(' ')}</div>
+    <div class="kc-bar">
+      <button class="kc-btn" type="button" data-act="copy-en">${ico('copy')}<span>Copy</span></button>
+      <span class="remote">
+        <button class="kc-icon" type="button" data-act="prev" aria-label="Previous sentence">${ico('skip-back')}</button>
+        <button class="kc-btn" type="button" data-act="play">${card.playing ? ico('square') + '<span>Stop</span>' : ico('play') + '<span>Listen</span>'}</button>
+        <button class="kc-icon" type="button" data-act="next" aria-label="Next sentence">${ico('skip-forward')}</button>
+        <button class="chip" type="button" data-act="one" aria-pressed="${card.one}">One by one</button>
+      </span>
+    </div>
+    <div class="kc-lower"${card.lower ? '' : ' hidden'}>
+      <div class="kc-tr">${tr ? tr.map((s, i) => `<span class="t" data-i="${i}">${esc(s)}</span>`).join(' ') : '<span class="free">Krya would translate this on your computer. This page carries translations of the duck story only.</span>'}</div>
+      <div class="kc-bar"><button class="kc-btn" type="button" data-act="copy-tr">${ico('copy')}<span>Copy</span></button></div>
+    </div>
+    <div class="kc-foot">
+      <span>${tr ? 'Translated · Fast' : 'English · read aloud'}</span>
+      <label>Your language <select id="langSel" aria-label="Your language">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}"${k === lang ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+    </div>`;
+  slot.innerHTML = '';
+  slot.appendChild(el);
+  card.el = el;
+  $$('#story .s').forEach((s) => s.classList.toggle('picked', card.mode === 'story' && card.idx.includes(+s.dataset.i)));
+  markReading();
+}
+function markReading(wordOffset) {
+  if (!card.el) return;
+  $$('.kc-en .s', card.el).forEach((s) => {
+    const on = card.playing && +s.dataset.i === card.cursor;
+    s.classList.toggle('reading', on);
+    $$('.w', s).forEach((w) => w.classList.remove('now'));
+    if (on && wordOffset != null) {
+      let pick = null;
+      $$('.w', s).forEach((w) => { if (+w.dataset.o <= wordOffset) pick = w; });
+      if (pick) pick.classList.add('now');
+    }
+  });
+  const play = $('[data-act="play"]', card.el);
+  if (play) play.innerHTML = card.playing ? ico('square') + '<span>Stop</span>' : ico('play') + '<span>Listen</span>';
+}
+function readFrom(i) {
+  if (!card.en.length) return;
+  card.cursor = Math.max(0, Math.min(card.en.length - 1, i));
+  card.playing = true;
+  markReading(0);
+  const at = card.cursor;
+  speak(card.en[at], {
+    onword: (o) => { if (card.playing && card.cursor === at) markReading(o); },
+    onend: () => {
+      if (!card.playing || card.cursor !== at) return;
+      if (card.one) { card.playing = false; card.cursor = at + 1 < card.en.length ? at + 1 : 0; markReading(); return; }
+      if (at + 1 < card.en.length) readFrom(at + 1);
+      else { card.playing = false; card.cursor = 0; markReading(); }
+    }
+  });
+}
+function stopReading() { card.playing = false; hush(); markReading(); }
+function closeWordCard() { const wc = card.el && $('.wordcard', card.el); if (wc) wc.remove(); }
+function openWord(w) {
+  closeWordCard();
+  const k = w.dataset.w; const d = DICT[k];
+  if (!d) return;
+  const wc = document.createElement('div');
+  wc.className = 'wordcard';
+  wc.innerHTML = `<div class="wc-top"><b>${k}</b><span class="wc-ipa">${d.ipa}</span><span class="wc-tools"><button class="kc-icon" type="button" data-act="say" aria-label="Say the word">${ico('volume-2')}</button><button class="kc-icon star" type="button" data-act="star" aria-pressed="false" aria-label="Keep the word">${ico('star')}</button></span></div>${d.senses.map(([pos, m]) => `<div class="wc-m"><i>${pos}</i>${esc(m[lang])}</div>`).join('')}`;
+  card.el.appendChild(wc);
+  const cr = card.el.getBoundingClientRect(); const r = w.getBoundingClientRect();
+  const left = Math.max(8, Math.min(r.left - cr.left - 12, cr.width - wc.offsetWidth - 8));
+  wc.style.left = left + 'px';
+  wc.style.top = (r.bottom - cr.top + 8) + 'px';
+  wc.dataset.word = k;
+}
+async function copyText(text, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { ok = false; }
+  const label = $('span', btn);
+  if (label) { const was = label.textContent; label.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(() => { label.textContent = was; }, 1200); }
+}
+slot.addEventListener('click', (e) => {
+  const t = e.target;
+  const act = t.closest('[data-act]');
+  const a = act && act.dataset.act;
+  if (a === 'close') { stopReading(); closeCard(); return; }
+  if (a === 'copy-en') { copyText(card.en.join(' '), act); return; }
+  if (a === 'copy-tr') { copyText(card.mode === 'story' ? card.idx.map((i) => TR[lang][i]).join(' ') : '', act); return; }
+  if (a === 'play') { if (card.playing) stopReading(); else readFrom(card.cursor); return; }
+  if (a === 'prev' || a === 'next') { const n = card.cursor + (a === 'next' ? 1 : -1); if (card.playing) readFrom(n); else { card.cursor = Math.max(0, Math.min(card.en.length - 1, n)); } return; }
+  if (a === 'one') { card.one = !card.one; act.setAttribute('aria-pressed', card.one); return; }
+  if (a === 'say') { const wc = act.closest('.wordcard'); if (wc) { quietCard(); speak(wc.dataset.word); } return; }
+  if (a === 'star') { const on = act.getAttribute('aria-pressed') !== 'true'; act.setAttribute('aria-pressed', on); act.setAttribute('aria-label', on ? 'Remove from your words' : 'Keep the word'); return; }
+  if (t.closest('.kc-lang')) { card.lower = !card.lower; t.closest('.kc-lang').setAttribute('aria-pressed', card.lower); $('.kc-lower', card.el).hidden = !card.lower; return; }
+  const rare = t.closest('.kc-en .rare');
+  if (rare) { openWord(rare); return; }
+  if (!t.closest('.wordcard')) closeWordCard();
+  const s = t.closest('.kc-en .s');
+  if (s && card.mode === 'story') {
+    const i = +s.dataset.i;
+    const was = s.classList.contains('pair');
+    $$('.pair', card.el).forEach((p) => p.classList.remove('pair'));
+    if (!was) { s.classList.add('pair'); const tt = $(`.kc-tr .t[data-i="${i}"]`, card.el); if (tt) tt.classList.add('pair'); }
+  }
+});
+slot.addEventListener('keydown', (e) => {
+  const rare = e.target.closest && e.target.closest('.kc-en .rare');
+  if (rare && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openWord(rare); }
+});
+slot.addEventListener('change', (e) => {
+  if (e.target.id !== 'langSel') return;
+  lang = e.target.value;
+  try { localStorage.setItem('krya-lang', lang); } catch (err) {}
+  const playing = card.playing; card.playing = false; hush();
+  renderCard(false);
+  if (playing) readFrom(card.cursor);
+  setCheck(checkMode);
+  const sel = $('#langSel'); if (sel) sel.focus();
+});
+function closeCard() {
+  card.el = null;
+  $$('#story .s').forEach((s) => s.classList.remove('picked'));
+  slot.innerHTML = `<div class="closed-note"><b>Card closed, voice stopped.</b> Select a sentence and press ${isMac ? '⌘' : 'Ctrl'}+C twice to open it again.</div>`;
+}
+function openCard(mode, data) {
+  hush();
+  card.mode = mode;
+  card.via = true;
+  if (mode === 'story') { card.idx = data; card.en = data.map((i) => STORY[i]); }
+  else { card.idx = []; card.en = (data.match(/[^.!?]+[.!?]*["”’)]*\s*/g) || [data]).map((s) => s.trim()).filter(Boolean).slice(0, 6); }
+  card.cursor = 0; card.playing = false; card.lower = true;
+  renderCard(true);
+  readFrom(0);
+  const r = slot.getBoundingClientRect();
+  if (r.top < 64 || r.bottom > innerHeight) slot.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: r.height > innerHeight - 80 ? 'start' : 'center' });
+}
+
+// Ctrl+C twice: two copies 40–650 ms apart, as Krya counts them.
+const more = $('#more');
+const hintKeys = $$('#hintKeys .key');
+let lastCopy = 0;
+function flashKeys() { hintKeys.forEach((k) => { k.classList.add('lit', 'press'); }); setTimeout(() => hintKeys.forEach((k) => k.classList.remove('press')), 120); setTimeout(() => hintKeys.forEach((k) => k.classList.remove('lit')), 700); }
+function fromSelection() {
+  const sel = getSelection();
+  const text = sel ? sel.toString().trim() : '';
+  if (!text || !sel.rangeCount) { more.textContent = 'select a sentence first'; more.classList.add('on'); setTimeout(() => more.classList.remove('on'), 1400); return; }
+  const range = sel.getRangeAt(0);
+  if (card.el && card.el.contains(range.commonAncestorContainer)) return;
+  const idx = $$('#story .s').filter((s) => range.intersectsNode(s)).map((s) => +s.dataset.i);
+  if (idx.length) openCard('story', idx);
+  else openCard('free', text.slice(0, 600));
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && card.el) { if ($('.wordcard', card.el)) { closeWordCard(); return; } stopReading(); closeCard(); return; }
+  const isC = e.code === 'KeyC' || (e.key || '').toLowerCase() === 'c';
+  if (!isC || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.repeat) return;
+  const now = performance.now();
+  flashKeys();
+  if (lastCopy && now - lastCopy >= 40 && now - lastCopy <= 650) { lastCopy = 0; more.classList.remove('on'); fromSelection(); }
+  else { lastCopy = now; more.textContent = 'once more'; more.classList.add('on'); setTimeout(() => more.classList.remove('on'), 650); }
+});
+$('#tapTry').addEventListener('click', async () => {
+  const s = $('#story .s[data-i="2"]');
+  try { const r = document.createRange(); r.selectNodeContents(s); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch (e) {}
+  flashKeys(); await sleep(220); flashKeys(); await sleep(160);
+  openCard('story', [2]);
+});
+card.en = card.idx.map((i) => STORY[i]);
+card.via = true;
+renderCard(false);
+
+/* ---------- Keyboard mock: two words fixed as they are typed ---------- */
+const kmField = $('#kmField');
+const kmLog = $('#kmLog');
+const badge = $('#lbadge');
+const KB = [
+  { wrong: 'ghbdtn', fix: 'привет', from: 'EN', to: 'RU' },
+  { text: ' как дела, глянь ' },
+  { wrong: 'згдд', fix: 'pull', from: 'RU', to: 'EN' },
+  { text: ' request' }
+];
+let kbRun = 0;
+async function playKb() {
+  const run = ++kbRun; const alive = () => run === kbRun;
+  kmField.innerHTML = '<span class="lbadge" id="lbadge">EN</span><span class="caret"></span>';
+  const b = $('.lbadge', kmField); const caret = $('.caret', kmField);
+  kmLog.innerHTML = '';
+  placeAt(b, caret);
+  for (const t of KB) {
+    if (!alive()) return;
+    if (t.text) {
+      for (const c of t.text) { if (!alive()) return; caret.before(document.createTextNode(c)); placeAt(b, caret); await sleep(55 + Math.random() * 45); }
+    } else {
+      const w = document.createElement('span'); caret.before(w);
+      const chars = [];
+      for (const c of t.wrong) { if (!alive()) return; const s = document.createElement('span'); s.className = 'ch'; s.textContent = c; w.appendChild(s); chars.push(s); placeAt(b, caret); await sleep(80 + Math.random() * 50); }
+      await sleep(320); if (!alive()) return;
+      chars.forEach((s, i) => setTimeout(() => { s.classList.add('flip'); setTimeout(() => { s.textContent = t.fix[i]; }, 150); setTimeout(() => s.classList.remove('flip'), 320); }, i * 45));
+      await sleep(45 * chars.length + 340); if (!alive()) return;
+      w.className = 'fx';
+      b.textContent = t.to; b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump');
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="tag">fixed</span><span>${t.wrong} → <span class="to">${t.fix}</span></span><span>${t.from} → ${t.to}</span>`;
+      kmLog.appendChild(li);
+      await sleep(380);
+    }
+  }
+}
+// The badge sits just after the caret, as Krya's does; at the right edge it drops under the caret.
+function placeAt(b, c) {
+  const lh = c.offsetHeight || 24;
+  const right = c.offsetLeft + 10;
+  const room = right + b.offsetWidth + 8 <= kmField.clientWidth;
+  b.style.left = (room ? right : Math.max(8, c.offsetLeft - b.offsetWidth / 2)) + 'px';
+  b.style.top = (room ? c.offsetTop + (lh - b.offsetHeight) / 2 : c.offsetTop + lh + 4) + 'px';
+}
+placeAt(badge, $('.caret', kmField));
+addEventListener('resize', () => { const b = $('.lbadge', kmField); const c = $('.caret', kmField); if (b && c) placeAt(b, c); });
+
+/* ---------- Translate mock: the three levels ---------- */
+const LEVELS = {
+  fast: ['Fast', 'About 85 MB for a language pair, quick on any processor.', '(Firefox Translations)'],
+  accurate: ['Accurate', '5.2 GB, 0.7 s a sentence on an RTX 2080 SUPER. Recommended for most computers.', '(Gemma 4 E4B)'],
+  most: ['Most accurate', '7 GB, the best wording. For graphics cards from about 12 GB.', '(Gemma 4 12B)']
+};
+function setLevel(l) {
+  $$('#levels button').forEach((b) => b.setAttribute('aria-checked', b.dataset.l === l));
+  $('#levelNote').innerHTML = `<b>${LEVELS[l][0]}.</b> ${LEVELS[l][1]} ${LEVELS[l][2]}`;
+  $('#tcFoot').textContent = 'Translated · ' + LEVELS[l][0];
+}
+$('#levels').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setLevel(b.dataset.l); });
+setLevel('accurate');
+
+/* ---------- Check mock ---------- */
+let checkMode = 'wrong';
+function setCheck(m) {
+  checkMode = m;
+  $$('#checks button').forEach((b) => b.setAttribute('aria-checked', b.dataset.c === m));
+  const note = $('#ccNote');
+  if (m === 'wrong') {
+    $('#ccField').textContent = 'Yesterday I have sent the report, but nobody answer me.';
+    $('#ccOut').innerHTML = 'Yesterday I <del>have</del> sent the report, but nobody <del>answer</del> <ins>answered</ins> me.';
+    note.textContent = NOTES[lang]; note.classList.remove('ok');
+  } else {
+    $('#ccField').textContent = 'I sent the report yesterday, but nobody has answered yet.';
+    $('#ccOut').textContent = 'I sent the report yesterday, but nobody has answered yet.';
+    note.textContent = '✓ Looks right'; note.classList.add('ok');
+  }
+  $('#ccLang').textContent = 'Note in ' + LANGS[lang];
+}
+$('#checks').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setCheck(b.dataset.c); });
+setCheck('wrong');
+
+/* ---------- Dictation badge: the phrase as it is heard, the time, a wave of the last seconds ---------- */
+const PHRASE = "Let's move the release to Friday and keep the old installer for now.";
+const dbText = $('#dbText');
+const dbTime = $('#dbTime');
+const canvas = $('#dbWave');
+const ctx = canvas.getContext('2d');
+const levels = new Array(60).fill(0.08);
+let talking = false;
+let waveOn = false;
+function sizeCanvas() {
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const r = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(r.width * dpr));
+  canvas.height = Math.max(1, Math.round(r.height * dpr));
+}
+function markColor() { return getComputedStyle(document.documentElement).getPropertyValue('--mark').trim() || '#f2a100'; }
+let color = markColor();
+const repaint = () => { color = markColor(); drawWave(); };
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', repaint); } catch (e) {}
+new MutationObserver(repaint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+function drawWave() {
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const n = levels.length; const step = w / n; const bw = Math.max(1.5, step * 0.5);
+  ctx.fillStyle = color; ctx.globalAlpha = 0.75;
+  for (let i = 0; i < n; i++) {
+    const v = levels[i]; const bh = Math.max(bw, v * h);
+    const x = i * step + (step - bw) / 2; const y = (h - bh) / 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, bw / 2); else ctx.rect(x, y, bw, bh);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+let lastPush = 0;
+function frame(t) {
+  if (!waveOn) return;
+  if (t - lastPush > 50) {
+    lastPush = t;
+    const base = talking ? 0.25 + Math.random() * 0.65 * (0.6 + 0.4 * Math.sin(t / 180)) : 0.06 + Math.random() * 0.04;
+    levels.shift(); levels.push(Math.min(1, base));
+    drawWave();
+  }
+  requestAnimationFrame(frame);
+}
+function seedWave() { for (let i = 0; i < levels.length; i++) levels[i] = i > 12 ? 0.2 + Math.abs(Math.sin(i * 1.7)) * 0.6 : 0.08; }
+sizeCanvas(); seedWave(); drawWave();
+addEventListener('resize', () => { sizeCanvas(); drawWave(); });
+let dbRun = 0;
+async function playDictation() {
+  const run = ++dbRun; const alive = () => run === dbRun;
+  const words = PHRASE.split(' ');
+  dbText.innerHTML = '';
+  const t0 = performance.now();
+  const clock = setInterval(() => { if (!alive()) { clearInterval(clock); return; } const s = Math.floor((performance.now() - t0) / 1000); dbTime.textContent = `0:${String(s).padStart(2, '0')}`; }, 250);
+  talking = true;
+  await sleep(500);
+  for (let i = 0; i < words.length; i++) {
+    if (!alive()) { clearInterval(clock); return; }
+    const sp = document.createElement('span'); sp.className = 'new'; sp.textContent = (i ? ' ' : '') + words[i];
+    dbText.appendChild(sp);
+    await sleep(220 + Math.random() * 160);
+  }
+  talking = false;
+  await sleep(1600);
+  clearInterval(clock);
+}
+
+/* ---------- Mocks play while they are on screen ---------- */
+function loop(el, fn, gap) {
+  let on = false; let gen = 0;
+  const run = async () => { const g = ++gen; while (on && g === gen) { await fn(); if (!on || g !== gen) break; await sleep(gap); } };
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    if (e.isIntersecting && !on) { on = true; run(); }
+    else if (!e.isIntersecting) on = false;
+  }), { threshold: 0.35 });
+  io.observe(el);
+}
+if (!reduce && 'IntersectionObserver' in window) {
+  loop(kmField.closest('.km'), playKb, 3200);
+  loop($('.dbadge'), playDictation, 2200);
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    if (e.isIntersecting && !waveOn) { waveOn = true; requestAnimationFrame(frame); }
+    else if (!e.isIntersecting) waveOn = false;
+  }), { threshold: 0.1 });
+  io.observe(canvas);
+}
+
+/* ---------- The duck says krya ---------- */
+const quack = $('#quack');
+quack.addEventListener('click', () => {
+  quietCard();
+  quack.classList.add('talk');
+  const ru = pickVoice('ru');
+  if (ru) speak('Кря!', { lang: 'ru' }); else speak('Krya!');
+  setTimeout(() => quack.classList.remove('talk'), 260);
+  setTimeout(() => quack.classList.add('talk'), 380);
+  setTimeout(() => quack.classList.remove('talk'), 640);
+});
+})();
+</script>
+</body>
+</html>
