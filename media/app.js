@@ -4106,7 +4106,7 @@
       grp("Options"),
       preferRow(v),
       gpuRow(v),
-      feature === "transcripts" ? speakersCard(v, () => go("transcribe", "speakers")) : null
+      feature === "transcripts" ? speakersCard(v, () => go("transcribe", "speakers"), true) : null
     ].filter((n) => n !== null);
   }
   function voiceChoicePage(v) {
@@ -4181,7 +4181,7 @@
       navCard("graduation-cap", "Check my English", "the model that finds your mistakes", checkValue(v), () => go("models", "forCheck"), "forCheck"),
       navCard("mic", "Dictate", "writes what you say", speechValue(v, "dictation"), () => go("models", "forDictate"), "forDictate"),
       navCard("audio-lines", "Transcribe", "writes recordings and meetings down", speechValue(v, "transcripts"), () => go("models", "forTranscribe"), "forTranscribe"),
-      speakersCard(v, () => go("transcribe", "speakers")),
+      speakersCard(v, () => go("transcribe", "speakers"), true),
       navCard("volume-2", "Listen voice", "the voice that reads English aloud", voiceValue(v), () => go("models", "forVoice"), "forVoice"),
       aside("info", "A model two actions use is downloaded and loaded once: Translate and Check share the language model, Dictate and Transcribe a speech model where that costs nothing.")
     ].filter((n) => n !== null);
@@ -4555,7 +4555,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       card("rotate-cw", "After Krya updates, press Reload on the extension", ["Chrome keeps the old copy until then"], btn("Open in Chrome", () => openChrome(extensionsPage(v))))
     ].filter((n) => n !== null);
   }
-  function speakersCard(v, open2 = () => openSub("speakers")) {
+  function speakersCard(v, open2 = () => openSub("speakers"), quiet = false) {
     if (!installed(v)) return null;
     const s = v.speech;
     const note = "the words are recognized already; this tells the voices apart";
@@ -4579,6 +4579,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       failed: ["could not check", false]
     };
     const [value, ok] = STATES[state];
+    if (quiet) return navCard("users", "Who spoke when", note, ok ? `on the ${on}` : value, open2, "speakers");
     return navCard("users", "Who spoke when", note, ok ? `${value} \xB7 ${on}` : value, open2, "speakers", ok);
   }
   function transcribePage(v) {
