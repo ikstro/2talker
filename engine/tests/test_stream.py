@@ -59,11 +59,12 @@ class Recognizer:
         return f"[{len(self.calls)}]", self.language, 0.9
 
 
-def send(session, sound, chunk=4000, pace=0.0):
-    """The sound in chunks; `pace`: seconds between them (the badge sends one every quarter of a second)."""
+def send(session, sound, chunk=4000, pace=0.0, first=0):
+    """The sound in chunks numbered from `first`; `pace`: seconds between them (the badge sends one every quarter
+    of a second). The number of the next chunk."""
     pcm = (np.clip(sound, -1, 1) * 32767).astype("<i2").tobytes()
     step = chunk * 2
-    for seq, at in enumerate(range(0, len(pcm), step)):
+    for seq, at in enumerate(range(0, len(pcm), step), start=first):
         session.add(seq, pcm[at : at + step])
         if pace:
             time.sleep(pace)
@@ -105,7 +106,10 @@ def test_the_badge_is_told_everything_heard_so_far():
 
     r = Wordy()
     s = make(r)
-    send(s, np.concatenate([tone(5), silence(1.0), tone(5), silence(1.0)]))
+    # The second phrase comes once the first is heard: two phrases seen at once are one piece (one window, not two).
+    n = send(s, np.concatenate([tone(5), silence(1.0)]))
+    assert wait(lambda: len(s.status()["heard"].split()) == 6)
+    send(s, np.concatenate([tone(5), silence(1.0)]), first=n)
     assert wait(lambda: len(s.status()["heard"].split()) == 12)
     assert s.status()["heard"].startswith("w1-0 ")
     s.cancel()
