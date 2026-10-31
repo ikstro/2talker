@@ -1,6 +1,6 @@
 # Krya
 
-*Talk to the duck.* (Formerly Altype and 2Talker.)
+*Talk to the duck.* (Formerly Altype and 2Talker.) Website: [ikstro.com/krya](https://ikstro.com/krya/), where you can try it in the browser.
 
 Select any text, press **Ctrl+C twice**, and hear it in English. A small Windows app for people learning English: it translates what you picked, reads the English aloud, and shows the translation under it; or, with another key, just translates it, like DeepL. Everything runs on your computer: nothing you read leaves it.
 
