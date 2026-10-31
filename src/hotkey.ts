@@ -124,6 +124,19 @@ export function modOf(vk: number): Mod | undefined {
   return TAPS.find(t => t.vk === vk)?.mod
 }
 
+/**
+ * Keys Windows calls extended (their scan code comes after 0xE0): Right Alt,
+ * Right Ctrl, the Win and Menu keys, the arrows and the six keys above them,
+ * Print Screen, Num Lock and the number pad's /. A key pressed by a program
+ * must say so: Right Alt let go without it is read as Left Alt let go, and
+ * Right Alt stays down for Windows (every Ctrl+C after it a Ctrl+Alt+C).
+ */
+const EXTENDED: ReadonlySet<number> = new Set([0xa5, 0xa3, 0x5b, 0x5c, 0x5d, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2c, 0x2d, 0x2e, 0x6f, 0x90])
+
+export function isExtendedKey(vk: number): boolean {
+  return EXTENDED.has(vk)
+}
+
 /** A hotkey as Windows writes keys: "Left Ctrl", "Ctrl+Shift", "Left Ctrl twice", "Mouse Back". */
 export function hotkeyLabel(hotkey: string): string {
   const name = (mod: string) => (mod === 'Control' ? 'Ctrl' : mod === 'Super' ? 'Win' : mod)

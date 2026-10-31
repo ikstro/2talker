@@ -72,15 +72,16 @@ export function ctrlHeld(): boolean {
 /**
  * Presses Ctrl+C in the program in front, as the person would: once the
  * shortcut's own keys are let go (an Alt still down would make it Ctrl+Alt+C),
- * or after `maxWaitMs` regardless.
+ * or after `maxWaitMs` regardless. Resolves to the modifiers still down when
+ * it was pressed, by name ("Right Alt"): none, unless one outlasted the wait.
  */
-export async function pressCopy(maxWaitMs = 1500): Promise<void> {
-  await pressWithCtrl(VK_C, maxWaitMs)
+export async function pressCopy(maxWaitMs = 1500): Promise<string[]> {
+  return pressWithCtrl(VK_C, maxWaitMs)
 }
 
 /** Presses Ctrl+V in the program in front, the same way. */
-export async function pressPaste(maxWaitMs = 1500): Promise<void> {
-  await pressWithCtrl(VK_V, maxWaitMs)
+export async function pressPaste(maxWaitMs = 1500): Promise<string[]> {
+  return pressWithCtrl(VK_V, maxWaitMs)
 }
 
 /** Resolves once none of `keys` is held, or after `maxWaitMs` regardless. */
@@ -141,10 +142,24 @@ export function allowForeground(): void {
   AllowSetForegroundWindow(ASFW_ANY)
 }
 
-async function pressWithCtrl(vk: number, maxWaitMs: number): Promise<void> {
+/** Each side's modifier keys, by the names krya.log gives them. */
+const SIDES: readonly [number, string][] = [
+  [0xa2, 'Left Ctrl'],
+  [0xa3, 'Right Ctrl'],
+  [0xa0, 'Left Shift'],
+  [0xa1, 'Right Shift'],
+  [0xa4, 'Left Alt'],
+  [0xa5, 'Right Alt'],
+  [VK_LWIN, 'Left Win'],
+  [VK_RWIN, 'Right Win'],
+]
+
+async function pressWithCtrl(vk: number, maxWaitMs: number): Promise<string[]> {
   await letGo(MODIFIERS, maxWaitMs)
+  const down = SIDES.filter(([key]) => held(key)).map(([, name]) => name)
   keybd_event(VK_CONTROL, 0, 0, MAIN_KEYS)
   keybd_event(vk, 0, 0, MAIN_KEYS)
   keybd_event(vk, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
   keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
+  return down
 }

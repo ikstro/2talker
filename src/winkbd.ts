@@ -7,6 +7,7 @@ import * as path from 'node:path'
 
 import koffi from 'koffi'
 
+import { isExtendedKey } from './hotkey'
 import { keyId, tableOf, type KeyTable } from './layoutfix'
 
 const user32 = koffi.load('user32.dll')
@@ -80,6 +81,7 @@ const TOKEN_ELEVATION = 20
 /** SHQueryUserNotificationState: a program on the full screen, a Direct3D one, presentation mode. */
 const FULL_SCREEN_STATES = new Set([2, 3, 4])
 const INPUT_KEYBOARD = 1
+const KEYEVENTF_EXTENDEDKEY = 0x0001
 const KEYEVENTF_KEYUP = 0x0002
 const KEYEVENTF_UNICODE = 0x0004
 /** Keys Krya presses itself carry this, so the keyboard thread lets them by. */
@@ -337,8 +339,9 @@ export type Press = { vk: number } | { char: string } | { again: { vk: number; s
 /** Presses keys in the program in front: marked as Krya's own, unless pressed again for the person. */
 export function press(keys: readonly Press[]): void {
   const inputs: unknown[] = []
+  // An extended key says so, or Windows takes it for its twin: Right Alt let go for Left Alt, an arrow for the number pad's.
   const event = (vk: number, scan: number, flags: number, own = true) =>
-    inputs.push({ type: INPUT_KEYBOARD, ki: { wVk: vk, wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: own ? OWN_KEYS : REPLAY_KEYS }, pad: [0, 0, 0, 0, 0, 0, 0, 0] })
+    inputs.push({ type: INPUT_KEYBOARD, ki: { wVk: vk, wScan: scan, dwFlags: isExtendedKey(vk) ? flags | KEYEVENTF_EXTENDEDKEY : flags, time: 0, dwExtraInfo: own ? OWN_KEYS : REPLAY_KEYS }, pad: [0, 0, 0, 0, 0, 0, 0, 0] })
   for (const key of keys) {
     if ('again' in key) {
       event(key.again.vk, key.again.scan, key.again.up ? KEYEVENTF_KEYUP : 0, false)

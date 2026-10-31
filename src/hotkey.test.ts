@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { HotkeyRecorder, hotkeyLabel, isAccelerator, parseHotkey } from './hotkey'
+import { HotkeyRecorder, hotkeyLabel, isAccelerator, isExtendedKey, parseHotkey } from './hotkey'
 
 /** Events in order: "+Code" down, "-Code" up, "@ms" time passes, "mouse4" a side button; what they record. */
 function record(...events: string[]): string[] {
@@ -74,5 +74,15 @@ describe('reading keys back', () => {
     expect(hotkeyLabel('Control+Shift')).toBe('Ctrl+Shift')
     expect(hotkeyLabel('CapsLock')).toBe('Caps Lock')
     expect(hotkeyLabel('Control+MouseBack')).toBe('Ctrl+Mouse Back')
+  })
+})
+
+describe('keys Krya presses', () => {
+  test('Right Alt, Right Ctrl, the Win keys and the arrows are extended: let go without saying so, Right Alt would stay down', () => {
+    for (const vk of [0xa5, 0xa3, 0x5b, 0x5c, 0x25, 0x26, 0x27, 0x28, 0x2e, 0x24]) expect(isExtendedKey(vk), vk.toString(16)).toBe(true)
+  })
+
+  test('Left Alt, Left Ctrl, the letters and the signs are not', () => {
+    for (const vk of [0xa4, 0xa2, 0xa0, 0xa1, 0x43, 0x56, 0x08, 0x0d, 0xe8, 0xbf]) expect(isExtendedKey(vk), vk.toString(16)).toBe(false)
   })
 })

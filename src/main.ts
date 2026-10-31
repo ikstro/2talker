@@ -1706,7 +1706,8 @@ async function pasteInto(window: bigint, field: unknown, text: string): Promise<
 /** `text` pasted in the program in front: written to paste, Ctrl+V, the guard told. */
 async function pasteText(text: string): Promise<void> {
   await clipGuard.write(text, true)
-  await pressPaste()
+  const down = await pressPaste()
+  if (down.length > 0) log(`paste: pressed with ${down.join(' and ')} still down`)
   clipGuard.pasted()
 }
 
@@ -1983,7 +1984,9 @@ async function useSelection(purpose: Purpose, via?: string): Promise<void> {
   const field = focusedField()
   snipSince = 0
   clipGuard.hold()
-  await pressCopy()
+  const down = await pressCopy()
+  // A key Windows still thinks held makes Ctrl+C another shortcut, which copies nothing.
+  if (down.length > 0) log(`copy: pressed with ${down.join(' and ')} still down in ${exe}`)
   const since = Date.now()
   releaseField(copyWanted?.field)
   copyWanted = { since, at, purpose, window, field, exe, ...(via ? { via } : {}) }
