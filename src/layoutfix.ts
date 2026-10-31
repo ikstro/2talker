@@ -311,13 +311,20 @@ export function caseSlip(strokes: readonly Stroke[], letter: (s: Stroke) => bool
 
 // ---------------------------------------------------------------- selected text
 
-/** The layout a text was typed in: the one whose keys type most of its letters; the first on a tie. */
-export function sourceLayout(text: string, layouts: readonly { id: string; table: KeyTable }[]): string | undefined {
+/**
+ * The layout a text was typed in: the one whose keys type most of its
+ * letters; the first on a tie. A text of signs alone goes by its signs
+ * ("&&&&" is English's), the layout in front (`now`) winning a tie ("????"
+ * is English's and Russian's).
+ */
+export function sourceLayout(text: string, layouts: readonly { id: string; table: KeyTable }[], now?: string): string | undefined {
+  const letters = [...text].filter(c => /\p{L}/u.test(c))
+  const signs = letters.length === 0
+  const chars = signs ? [...text].filter(c => !/\s/u.test(c)) : letters
   let best: { id: string; count: number } | undefined
   for (const { id, table } of layouts) {
-    let count = 0
-    for (const char of text) if (/\p{L}/u.test(char) && table.keys.has(char)) count++
-    if (!best || count > best.count) best = { id, count }
+    const count = chars.filter(c => table.keys.has(c)).length
+    if (!best || count > best.count || (signs && count === best.count && id === now)) best = { id, count }
   }
   return best && best.count > 0 ? best.id : undefined
 }
@@ -337,4 +344,10 @@ export function nextLayout(cycle: readonly string[], id: string | undefined): st
   if (cycle.length === 0) return undefined
   const i = id === undefined ? -1 : cycle.indexOf(id)
   return cycle[(i + 1) % cycle.length]
+}
+
+/** The layouts after `id` round the cycle, `id` itself left out; the whole cycle when `id` is not in it. */
+export function layoutsAfter(cycle: readonly string[], id: string | undefined): string[] {
+  const i = id === undefined ? -1 : cycle.indexOf(id)
+  return [...cycle.slice(i + 1), ...cycle.slice(0, Math.max(i, 0))]
 }

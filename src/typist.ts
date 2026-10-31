@@ -28,6 +28,7 @@ import {
   charOf,
   chooseFix,
   coreOf,
+  layoutsAfter,
   nextLayout,
   plausibility,
   rankOf,
@@ -149,8 +150,8 @@ export type KbdOut =
   | { type: 'fixedByHand'; word: string; lang: string }
   /** A word of the person's, in no list, was typed right once more (`count` times by its fingerprint); at `LEARN_AFTER`, the word itself. */
   | { type: 'tally'; hash: string; count: number; word?: Learned }
-  /** The fix key with a selection: the main process copies it, converts it into the next layout and pastes it. */
-  | { type: 'selection'; cycle: string[] }
+  /** The fix key with a selection: the main process copies it, converts it into the next layout and pastes it; `layout` is the window's now. */
+  | { type: 'selection'; cycle: string[]; layout: string }
   /** The program in front, by its .exe name, when it changes; `elevated`: it runs as administrator, so its keys never reach the hooks. */
   | { type: 'app'; exe: string; elevated: boolean }
   /** A key of the main process's was pressed. */
@@ -939,13 +940,14 @@ export class Typist {
    * in another layout, again in the layout that makes the best word of the
    * last (pressed again, in the next layout round the cycle), never reaching
    * back over a word right as typed, a word with digits or the place the
-   * person switched the layout; or the selection.
+   * person switched the layout; signs alone at the end ("&&&&" → "????");
+   * or the selection.
    */
   private fixKey(): void {
     if (this.autoFixed && this.autoFixed.end === this.run.length) return this.takeBack(this.autoFixed)
     if (this.last === 'selected') {
       this.last = 'none'
-      this.env.send({ type: 'selection', cycle: this.cycle() })
+      this.env.send({ type: 'selection', cycle: this.cycle(), layout: this.layoutNow(this.env.foreground()) })
       return
     }
     if (this.last !== 'typed' || this.run.length === 0 || this.env.foreground().hwnd !== this.runWindow) return
@@ -954,11 +956,17 @@ export class Typist {
     let to: string | undefined
     let from: string
     let words: Span[]
+    let signs: ReturnType<Typist['signs']>
     if (this.cycling && this.cycling.end === this.run.length) {
       start = this.cycling.start
       from = this.cycling.from
       words = this.cycling.words
       to = nextLayout(this.cycle(), this.cycling.to)
+    } else if ((signs = this.signs())) {
+      start = signs.start
+      from = signs.from
+      to = signs.to
+      words = []
     } else {
       const spans = this.spans(this.boundary)
       const last = spans.at(-1)
@@ -992,6 +1000,30 @@ export class Typist {
     this.autoFixed = undefined
     this.ownSwitch = to
     this.schedule({ erase: tail.length, text, to, hwnd: this.runWindow })
+  }
+
+  /**
+   * Signs at the end of what was typed with no word touching them ("&&&&",
+   * "hello &&&&", spaces after them too): where they start, their layout and
+   * the first round the cycle that reads them otherwise ("????"). Undefined
+   * when a word's keys touch them ("ghbdtn&" goes as a word) or every layout
+   * reads them alike ("!!!!").
+   */
+  private signs(): { start: number; from: string; to: string } | undefined {
+    const space = (i: number) => {
+      const s = this.run[i] as Typed
+      return /\s/.test(this.reading([s], s.layout).text)
+    }
+    let end = this.run.length
+    while (end > this.boundary && space(end - 1)) end--
+    let start = end
+    while (start > this.boundary && (this.run[start - 1] as Typed).end && !space(start - 1)) start--
+    if (start === end || (start > this.boundary && !(this.run[start - 1] as Typed).end)) return undefined
+    const from = (this.run[end - 1] as Typed).layout
+    const piece = this.run.slice(start)
+    const typed = this.reading(piece, from).text
+    const to = layoutsAfter(this.cycle(), from).find(id => this.reading(piece, id).text !== typed)
+    return to ? { start, from, to } : undefined
   }
 
   private switchNext(): void {

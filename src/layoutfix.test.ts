@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import { EN, LEXICONS, RU, strokes, TABLES, UK } from './layouts.fixture'
-import { bestLayout, caseSlip, chooseFix, convertText, coreOf, meantThere, nextLayout, sourceLayout, typeIn, wordsMeant, type KeyTable, type Reading } from './layoutfix'
+import { bestLayout, caseSlip, chooseFix, convertText, coreOf, layoutsAfter, meantThere, nextLayout, sourceLayout, typeIn, wordsMeant, type KeyTable, type Reading } from './layoutfix'
 
 /** How the keys typed as `text` in `lang` read in each layout of `cycle`. */
 function readings(text: string, lang: string, cycle = ['en', 'ru', 'uk']): { typed: Reading; others: Reading[] } {
@@ -34,6 +34,22 @@ describe('keys in another layout', () => {
     expect(convertText('руддщ цщкдв', RU, EN)).toBe('hello world')
     expect(sourceLayout('ghbdtn', [{ id: 'en', table: EN }, { id: 'ru', table: RU }])).toBe('en')
     expect(sourceLayout('руддщ', [{ id: 'en', table: EN }, { id: 'ru', table: RU }])).toBe('ru')
+  })
+
+  test('a selected text of signs alone goes by its signs, the layout in front winning a tie', () => {
+    const layouts = [{ id: 'en', table: EN }, { id: 'ru', table: RU }]
+    expect(sourceLayout('&&&&', layouts, 'ru')).toBe('en')
+    expect(sourceLayout('????', layouts, 'ru')).toBe('ru')
+    expect(sourceLayout('????', layouts)).toBe('en')
+    expect(sourceLayout('привет?', layouts, 'en')).toBe('ru')
+    expect(convertText('&&&&', EN, RU)).toBe('????')
+    expect(convertText('????', RU, EN)).toBe('&&&&')
+  })
+
+  test('the layouts after one go round the cycle, itself left out', () => {
+    expect(layoutsAfter(['en', 'ru', 'uk'], 'ru')).toEqual(['uk', 'en'])
+    expect(layoutsAfter(['en', 'ru', 'uk'], 'en')).toEqual(['ru', 'uk'])
+    expect(layoutsAfter(['en', 'ru'], undefined)).toEqual(['en', 'ru'])
   })
 
   test('the next layout goes round', () => {

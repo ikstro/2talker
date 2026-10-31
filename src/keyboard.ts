@@ -40,8 +40,8 @@ export type KeyboardEvents = {
   /** The person fixed a word by hand; a word of theirs was typed right again (learning.ts). */
   fixedByHand(learned: Learned): void
   tally(hash: string, count: number, word?: Learned): void
-  /** The fix key with a selection: convert it into the next of `cycle`. */
-  selection(cycle: string[]): void
+  /** The fix key with a selection: convert it into the next of `cycle`; `layout` is the window's now. */
+  selection(cycle: string[], layout: string): void
   /** A key Electron's shortcuts cannot hold, for selecting, snipping or a snip's text, was pressed. */
   hotkey(action: MainAction): void
   /** The program in front lately; whether it runs as administrator. */
@@ -229,7 +229,7 @@ export class KeyboardHelper {
         this.events.tally(message.hash, message.count, message.word)
         return
       case 'selection':
-        this.events.selection(message.cycle)
+        this.events.selection(message.cycle, message.layout)
         return
       case 'hotkey':
         this.events.hotkey(message.action)

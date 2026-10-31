@@ -557,7 +557,7 @@ describe('the fix key', () => {
     desk.mouse('left-down', 0)
     desk.mouse('left-up', 80)
     desk.tap(VK_PAUSE)
-    expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'] })
+    expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'], layout: 'en' })
   })
 
   test('words typed, then selected with Shift and an arrow: the selection goes to the main process, nothing is retyped', () => {
@@ -568,7 +568,7 @@ describe('the fix key', () => {
     desk.event(VK_LSHIFT, false)
     desk.tap(VK_PAUSE)
     expect(desk.text).toBe('ghbdtn vbh')
-    expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'] })
+    expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'], layout: 'en' })
   })
 
   test('right after a fix by itself, it takes the fix back', () => {
@@ -576,6 +576,48 @@ describe('the fix key', () => {
     desk.keys('ghbdtn ')
     desk.tap(VK_PAUSE)
     expect(desk.text).toBe('ghbdtn ')
+  })
+
+  test('signs alone go into the next layout that reads them otherwise: &&&& → ????, again → &&&&', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('&&&&')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('????')
+    expect(desk.layout).toBe('ru')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('&&&&')
+    expect(desk.layout).toBe('en')
+  })
+
+  test('signs after a word go alone, spaces after them too: hello &&&& → hello ????', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('hello &&&& ')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('hello ???? ')
+  })
+
+  test('signs a word touches go with the word: ghbdtn& → привет?', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('ghbdtn&')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('привет?')
+  })
+
+  test('a layout that reads the signs alike is passed: ???? typed in Russian goes into English, not Ukrainian', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' }, cycle: ['en', 'ru', 'uk'] })
+    desk.layout = 'ru'
+    desk.keys('????', 'ru')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('&&&&')
+    expect(desk.layout).toBe('en')
+  })
+
+  test('signs every layout reads alike stay: !!!!', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('!!!!')
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('!!!!')
+    expect(desk.layout).toBe('en')
   })
 })
 

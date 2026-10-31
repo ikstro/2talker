@@ -55,7 +55,7 @@ import { hotkeyLabel, isAccelerator } from './hotkey'
 import { FIX_LANGUAGES, KeyboardHelper, keyboardLayouts } from './keyboard'
 import { cardMemoryUsed, driveOf, freeMb, loadModelSpeeds, loadVoiceSpeed, median, nextModelSpeed, nextVoiceSpeed, saveModelSpeeds, saveVoiceSpeed, type ModelSpeeds, type VoiceSpeed } from './device'
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
-import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
+import { convertText, layoutsAfter, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { LearnStore } from './learning'
 import { lookup, type Dictionary } from './lemma'
 import { LlamaServer } from './llama'
@@ -2210,18 +2210,20 @@ async function ownClipboard<T>(work: () => Promise<T>): Promise<T> {
  * The fix key with a selection: Krya copies it, types it again in the
  * next layout of `cycle` (the one after the layout it was typed in), pastes
  * it over the selection, selects it again (a second press goes on to the
- * next layout), switches the layout and puts the clipboard back.
+ * next layout), switches the layout and puts the clipboard back. Signs
+ * alone ("&&&&") go into the first layout that reads them otherwise; `now`,
+ * the window's layout, says where signs both layouts have were typed.
  */
-async function convertSelection(cycle: string[]): Promise<void> {
+async function convertSelection(cycle: string[], now: string): Promise<void> {
   // Nothing pasted (or a failure): the clipboard goes back at once.
   await borrowClipboard(
-    () => convertOver(cycle),
+    () => convertOver(cycle, now),
     restore => (restore === 'later' ? undefined : 0),
   )
 }
 
 /** Copies the selection, pastes it converted; 'now' when nothing was pasted and the clipboard can go back at once. */
-async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
+async function convertOver(cycle: string[], now: string): Promise<'now' | 'later'> {
   const marker = `Krya ${Date.now()}`
   const field = focusedField()
   await clipGuard.write(marker)
@@ -2245,9 +2247,14 @@ async function convertOver(cycle: string[]): Promise<'now' | 'later'> {
   // The copy Krya pressed is its own to take back.
   if (copied) clipGuard.claim()
   const layouts = cycle.map(id => ({ id, table: tableFor(id) })).filter((l): l is { id: string; table: KeyTable } => !!l.table)
-  const from = text ? sourceLayout(text, layouts) : undefined
-  const to = nextLayout(cycle, from)
+  const from = text ? sourceLayout(text, layouts, now) : undefined
   const fromTable = from ? tableFor(from) : undefined
+  const to = /\p{L}/u.test(text)
+    ? nextLayout(cycle, from)
+    : layoutsAfter(cycle, from).find(id => {
+        const table = tableFor(id)
+        return !!fromTable && !!table && convertText(text, fromTable, table) !== text
+      })
   const toTable = to ? tableFor(to) : undefined
   if (!fromTable || !toTable || !to || from === to) return 'now'
   const converted = convertText(text, fromTable, toTable)
@@ -2800,7 +2807,7 @@ function start(): void {
       applyKeyboard()
       postApp()
     },
-    selection: cycle => void convertSelection(cycle).catch(error => console.warn('Krya: could not convert the selection', error)),
+    selection: (cycle, layout) => void convertSelection(cycle, layout).catch(error => console.warn('Krya: could not convert the selection', error)),
     hotkey: action => {
       if (action === 'pause') return togglePause()
       // Paused, the thread keeps the pause key alone; a key on its way meanwhile does nothing.
