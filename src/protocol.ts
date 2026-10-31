@@ -120,7 +120,7 @@ export type WordHintMode = 'shift' | 'hover' | 'off'
 export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
 
 /** The app window's places: Home (always first), its action pages, and Words, Mistakes, Settings, About; 'howto' is the old name of Home. */
-export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'settings' | 'storage' | 'about' | 'howto'
+export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'settings' | 'storage' | 'about' | 'report' | 'howto'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -262,7 +262,7 @@ export type TrayView = {
 }
 
 /** What the tray's panel can do; each puts the panel away first. */
-export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'checkEnglish' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'open' | 'quit'
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'checkEnglish' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'report' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -298,6 +298,8 @@ export type ToView =
   | { type: 'tray'; view: TrayView }
   /** Show this transcript in the app window (a finished note's balloon, the extension). */
   | { type: 'openTranscript'; id: string }
+  /** A report was made at `file` for the person to attach, or could not be. */
+  | { type: 'reported'; file?: string; error?: string }
   /**
    * The dictation badge: record, then stop (and type it, or keep it as a note), or throw away.
    * `session`: the engine's dictation heard while spoken (engine/stream.py), when the engine has them;
@@ -409,6 +411,9 @@ export type ToHost =
   | { type: 'resetSettings' }
   /** Every key back to how it came (after a question). */
   | { type: 'resetKeys' }
+  /** Report a problem (report.ts): the zip made and shown in its folder, then the email or the GitHub issue opened with `text` in it; or Krya's folder with the logs opened. */
+  | { type: 'reportProblem'; via: 'email' | 'github'; text: string }
+  | { type: 'openLogs' }
   /** Measure what Krya keeps (the Storage page opened); remove a download of its own, which downloads again when needed. */
   | { type: 'storage' }
   | { type: 'removeDownload'; part: 'fast' | 'voice' | 'dict' | 'unused' }

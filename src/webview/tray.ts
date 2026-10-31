@@ -4,7 +4,7 @@
 // Actions (the copied text, a text to type or check, a piece of the screen,
 // with their keys as quiet text; the note and Transcripts once the engine is
 // in), Quick settings (with "Keep a word as typed…" under fixing as one types,
-// which opens into a field in place), and a footer of Pause, Settings and
+// which opens into a field in place), and a footer of Pause, Settings, Report and
 // Quit. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
 // puts it away (the main process hides it, and after any command). Everything
 // shown comes in one `tray` message, sent again whenever any of it changes.
@@ -236,6 +236,7 @@ function render(v: TrayView): void {
       { class: 'foot' },
       pauseButton(v.paused),
       el('button', { class: 'fb', 'data-nav': true, 'data-id': 'settings', onclick: () => post({ type: 'tray', command: 'settings' }) }, lucide('settings', 's'), 'Settings'),
+      el('button', { class: 'fb', 'data-nav': true, 'data-id': 'report', title: 'Report a problem, with Krya’s logs', onclick: () => post({ type: 'tray', command: 'report' }) }, lucide('bug', 's'), 'Report'),
       el('button', { class: 'fb', 'data-nav': true, 'data-id': 'quit', onclick: () => post({ type: 'tray', command: 'quit' }) }, lucide('power', 's'), 'Quit'),
     ),
   )

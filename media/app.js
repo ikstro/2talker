@@ -559,6 +559,7 @@
     "list-ordered": '<path d="M11 5h10" /> <path d="M11 12h10" /> <path d="M11 19h10" /> <path d="M4 4h1v5" /> <path d="M4 9h2" /> <path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" />',
     "message-square-text": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" /> <path d="M7 11h10" /> <path d="M7 15h6" /> <path d="M7 7h8" />',
     "arrow-left": '<path d="m12 19-7-7 7-7" /> <path d="M19 12H5" />',
+    "bug": '<path d="M12 20v-9" /> <path d="M14 7a4 4 0 0 1 4 4v3a6 6 0 0 1-12 0v-3a4 4 0 0 1 4-4z" /> <path d="M14.12 3.88 16 2" /> <path d="M21 21a4 4 0 0 0-3.81-4" /> <path d="M21 5a4 4 0 0 1-3.55 3.97" /> <path d="M22 13h-4" /> <path d="M3 21a4 4 0 0 1 3.81-4" /> <path d="M3 5a4 4 0 0 0 3.55 3.97" /> <path d="M6 13H2" /> <path d="m8 2 1.88 1.88" /> <path d="M9 7.13V6a3 3 0 1 1 6 0v1.13" />',
     "file-audio": '<path d="M4 6.835V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-.343" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M2 19a2 2 0 0 1 4 0v1a2 2 0 0 1-4 0v-4a6 6 0 0 1 12 0v4a2 2 0 0 1-4 0v-1a2 2 0 0 1 4 0" />',
     "users": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" />',
     "spell-check": '<path d="m20 15-5.5 5.5L12 18" /> <path d="m4 16 6-12 5.115 10.23" /> <path d="M6 12h8" />',
@@ -596,6 +597,8 @@
     "wand-sparkles": '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" /> <path d="m14 7 3 3" /> <path d="M5 6v4" /> <path d="M19 14v4" /> <path d="M10 2v2" /> <path d="M7 8H3" /> <path d="M21 16h-4" /> <path d="M11 3H9" />',
     "thumbs-up": '<path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /> <path d="M7 10v12" />',
     "loader": '<path d="M12 2v4" /> <path d="m16.2 7.8 2.9-2.9" /> <path d="M18 12h4" /> <path d="m16.2 16.2 2.9 2.9" /> <path d="M12 18v4" /> <path d="m4.9 19.1 2.9-2.9" /> <path d="M2 12h4" /> <path d="m4.9 4.9 2.9 2.9" />',
+    "mail": '<path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7" /> <rect x="2" y="4" width="20" height="16" rx="2" />',
+    "shield-check": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" />',
     "pencil-line": '<path d="M13 21h8" /> <path d="m15 5 4 4" /> <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />',
     "monitor-speaker": '<path d="M5.5 20H8" /> <path d="M17 9h.01" /> <rect width="10" height="16" x="12" y="4" rx="2" /> <path d="M8 6H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4" /> <circle cx="17" cy="15" r="1" />',
     "scan-text": '<path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" /> <path d="M7 8h8" /> <path d="M7 12h10" /> <path d="M7 16h6" />',
@@ -2751,6 +2754,7 @@
   // src/webview/app.ts
   var save = (patch2) => post({ type: "saveSettings", patch: patch2 });
   var RELEASES = "https://github.com/ikstro/krya/releases";
+  var REPORT_EMAIL = "ikstro.design@gmail.com";
   var ACTIONS = ["listen", "translate", "check", "screen", "dictate", "transcribe", "keyboard"];
   var isAction = (name) => ACTIONS.includes(name);
   var ICONS = { listen: "volume-2", translate: "languages", check: "graduation-cap", screen: "scan", dictate: "mic", transcribe: "audio-lines", keyboard: "keyboard" };
@@ -2778,6 +2782,7 @@
     storage: "Storage",
     computer: "This computer",
     about: "About",
+    report: "Report a problem",
     search: "Search"
   };
   var view;
@@ -2925,7 +2930,8 @@
         { page: "engine", icon: "hard-drive", title: "Speech engine" },
         { page: "storage", icon: "database", title: "Storage", value: (v) => v.storage?.parts.length ? size(downloadsMb(v.storage)) : "" },
         { page: "computer", icon: "cpu", title: "This computer" },
-        { page: "about", icon: "info", title: "About" }
+        { page: "about", icon: "info", title: "About" },
+        { page: "report", icon: "bug", title: "Report a problem" }
       ]
     }
   ];
@@ -3423,7 +3429,8 @@
     layouts: () => "in the order the keys go through them",
     models: () => "what each action runs on \xB7 one model for two actions is downloaded once",
     storage: (v) => v.storage?.measuring ? "measuring\u2026" : v.storage ? `${size(v.storage.freeMb)} free on ${v.storage.drive}` : "what Krya keeps on this computer",
-    about: (v) => `Krya ${v.version}`
+    about: (v) => `Krya ${v.version}`,
+    report: () => "with Krya\u2019s logs, sent by you"
   };
   var sliding = [];
   function slideBody(dir) {
@@ -3476,13 +3483,13 @@
   var pointerDown = false;
   function busy2() {
     const a = document.activeElement;
-    return !!a && pBody.contains(a) && (a.matches("input[type=text]:not([data-live]), input[type=search], input[type=password], input[type=range]") || a.isContentEditable || a.classList.contains("recording"));
+    return !!a && pBody.contains(a) && (a.matches("input[type=text]:not([data-live]), input[type=search], input[type=password], input[type=range], textarea") || a.isContentEditable || a.classList.contains("recording"));
   }
   function carryFields(next) {
     const carried = [];
-    for (const old of pBody.querySelectorAll("input[data-live]")) {
+    for (const old of pBody.querySelectorAll("input[data-live], textarea[data-live]")) {
       if (!old.value && document.activeElement !== old) continue;
-      const fresh = next.querySelector(`input[data-live="${old.dataset.live}"]`);
+      const fresh = next.querySelector(`${old.localName}[data-live="${old.dataset.live}"]`);
       if (!fresh) continue;
       fresh.replaceWith(old);
       carried.push(old);
@@ -3568,6 +3575,8 @@
         return computerPage(v);
       case "about":
         return aboutPage(v);
+      case "report":
+        return reportPage(v);
       case "search":
         return searchPage(v);
     }
@@ -3587,7 +3596,8 @@
     { name: "models" },
     { name: "engine" },
     { name: "storage" },
-    { name: "computer" }
+    { name: "computer" },
+    { name: "report" }
   ];
   var lineTitle = (row2) => (row2.querySelector(":scope > .l")?.firstChild?.textContent ?? "").trim();
   function bodyFor(v, place) {
@@ -5005,11 +5015,45 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
             " \xB7 ",
             link("https://github.com/ikstro/krya", "Source on GitHub"),
             " \xB7 ",
-            link("https://github.com/ikstro/krya/blob/main/NOTICE", "Licenses")
+            link("https://github.com/ikstro/krya/blob/main/NOTICE", "Licenses"),
+            " \xB7 ",
+            linkBtn("Report a problem", () => go("report"))
           )
         )
       )
     ];
+  }
+  var reported;
+  var reportText = () => pBody.querySelector('textarea[data-live="report"]')?.value ?? "";
+  function reportPage(_v) {
+    const send = (via) => {
+      reported = void 0;
+      post({ type: "reportProblem", via, text: reportText() });
+    };
+    const field = el("textarea", {
+      class: "field report",
+      rows: 6,
+      placeholder: "What did you do, what happened, and what did you expect? The steps that make it happen again help most.",
+      "aria-label": "What happened",
+      "data-live": "report"
+    });
+    const file = reported?.file;
+    return [
+      grp("What happened"),
+      el("div", { class: "row add" }, field, el("small", {}, "In any language; it goes as you wrote it.")),
+      grp("Send it"),
+      row("Email it", [`Opens your mail to ${REPORT_EMAIL} with your text in it; attach the report file Krya saves`], btn([lucide("mail", "s"), "Email"], () => send("email"), "primary")),
+      row("Open a GitHub issue", ["A public page others with the same problem can find; needs a GitHub account"], btn([lucide("external-link", "s"), "GitHub issue"], () => send("github"))),
+      file ? aside("circle-check", `Saved ${file.split("\\").pop()} in Documents \u203A Krya \u203A Reports: drag it into the message. `, linkBtn("Show in folder", () => post({ type: "showInFolder", path: file }))) : null,
+      reported?.error ? warn(`The report could not be made: ${reported.error}`) : null,
+      grp("What the report file holds"),
+      row("Krya\u2019s log", ["What Krya did lately: keys, copies, windows, downloads, errors"]),
+      row("The speech engine\u2019s and the translation model\u2019s logs", ["Dictation, transcripts and the model starting, stopping and failing"]),
+      row("This computer and Krya", ["Processor, memory, graphics card, Windows and Krya\u2019s versions"]),
+      row("Your settings", ["Your own lists only counted: words kept as typed, words to spell, programs"]),
+      aside("shield-check", "Never in it: your texts, words, mistakes, translations, phrases, transcripts or Hugging Face key. Your Windows name and the computer\u2019s are replaced. Nothing is sent until you send it."),
+      row("Krya\u2019s folder", ["Where the logs are, to look at them yourself"], linkBtn("Open", () => post({ type: "openLogs" })))
+    ].filter((n) => n !== null);
   }
   function showTab(tab) {
     if (tab !== "home" && tab !== "howto") return go(tab);
@@ -5041,6 +5085,11 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       return;
     }
     if (m.type === "appWindow") return windowState(m.maximized);
+    if (m.type === "reported") {
+      reported = { file: m.file, error: m.error };
+      if (open?.name === "report") renderBody();
+      return;
+    }
     if (m.type !== "app") return;
     const first = view === void 0;
     view = m.view;

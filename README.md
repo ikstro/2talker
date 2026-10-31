@@ -48,6 +48,12 @@ From a launcher or a mouse button: `Krya.exe --clipboard` listens to the copied 
 
 The keyboard helper looks only at the keys of what you are typing, since your last click; it keeps nothing and sends nothing anywhere. Turn off another layout switcher (EveryLang, Punto Switcher) while it runs, or words get fixed twice.
 
+## Report a problem
+
+Press **Report** at the bottom of the tray menu (or open Krya › Report a problem), write what happened, then pick **Email** or **GitHub issue**. Krya saves `Krya report <date>.zip` in `Documents\Krya\Reports`, shows it in File Explorer and opens the message with your text in it: attach the zip and send it. Krya sends nothing by itself.
+
+The zip holds Krya's logs (Krya's own, the speech engine's, the translation model's), the processor, memory, graphics card and versions, and your settings with your own lists only counted. It never holds your texts, words, mistakes, translations, dictated phrases, transcripts or Hugging Face key; your Windows name and the computer's name are replaced. Open it before sending if you like: it is plain text.
+
 ## Who spoke when: the Hugging Face key
 
 Telling speakers apart in a transcript uses pyannote's model, which Hugging Face hands out for free once you accept its terms. Krya asks for a key once, on the Who spoke when page, and shows these steps there too:

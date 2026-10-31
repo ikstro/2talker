@@ -42,9 +42,11 @@ declare global {
 const save = (patch: Partial<Settings>) => post({ type: 'saveSettings', patch })
 /** Where new versions are: downloaded by hand, nothing installs itself (main.ts LINKS has it). */
 const RELEASES = 'https://github.com/ikstro/krya/releases'
+/** Where a problem report goes by email (report.ts writes to it). */
+const REPORT_EMAIL = 'ikstro.design@gmail.com'
 
 type Action = 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
-type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'models' | 'engine' | 'storage' | 'computer' | 'about' | 'search'
+type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'models' | 'engine' | 'storage' | 'computer' | 'about' | 'report' | 'search'
 
 const ACTIONS: readonly Action[] = ['listen', 'translate', 'check', 'screen', 'dictate', 'transcribe', 'keyboard']
 const isAction = (name: Page): name is Action => (ACTIONS as readonly string[]).includes(name)
@@ -74,6 +76,7 @@ const TITLES: Record<Page, string> = {
   storage: 'Storage',
   computer: 'This computer',
   about: 'About',
+  report: 'Report a problem',
   search: 'Search',
 }
 
@@ -285,6 +288,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
       { page: 'storage', icon: 'database', title: 'Storage', value: v => (v.storage?.parts.length ? speechSize(downloadsMb(v.storage)) : '') },
       { page: 'computer', icon: 'cpu', title: 'This computer' },
       { page: 'about', icon: 'info', title: 'About' },
+      { page: 'report', icon: 'bug', title: 'Report a problem' },
     ],
   },
 ]
@@ -934,6 +938,7 @@ const CAPS: Partial<Record<Page, (v: AppView) => string>> = {
   models: () => 'what each action runs on · one model for two actions is downloaded once',
   storage: v => (v.storage?.measuring ? 'measuring…' : v.storage ? `${speechSize(v.storage.freeMb)} free on ${v.storage.drive}` : 'what Krya keeps on this computer'),
   about: v => `Krya ${v.version}`,
+  report: () => 'with Krya’s logs, sent by you',
 }
 
 let sliding: Animation[] = []
@@ -995,7 +1000,7 @@ let pointerDown = false
 
 function busy(): boolean {
   const a = document.activeElement
-  return !!a && pBody.contains(a) && (a.matches('input[type=text]:not([data-live]), input[type=search], input[type=password], input[type=range]') || (a as HTMLElement).isContentEditable || a.classList.contains('recording'))
+  return !!a && pBody.contains(a) && (a.matches('input[type=text]:not([data-live]), input[type=search], input[type=password], input[type=range], textarea') || (a as HTMLElement).isContentEditable || a.classList.contains('recording'))
 }
 
 /**
@@ -1003,11 +1008,11 @@ function busy(): boolean {
  * fields of a list): the ones in use or holding text move into the new body in
  * place of their fresh twins, so an item added shows at once under the field.
  */
-function carryFields(next: HTMLElement): HTMLInputElement[] {
-  const carried: HTMLInputElement[] = []
-  for (const old of pBody.querySelectorAll<HTMLInputElement>('input[data-live]')) {
+function carryFields(next: HTMLElement): (HTMLInputElement | HTMLTextAreaElement)[] {
+  const carried: (HTMLInputElement | HTMLTextAreaElement)[] = []
+  for (const old of pBody.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[data-live], textarea[data-live]')) {
     if (!old.value && document.activeElement !== old) continue
-    const fresh = next.querySelector<HTMLInputElement>(`input[data-live="${old.dataset.live}"]`)
+    const fresh = next.querySelector(`${old.localName}[data-live="${old.dataset.live}"]`)
     if (!fresh) continue
     fresh.replaceWith(old)
     carried.push(old)
@@ -1097,6 +1102,8 @@ function bodyOf(v: AppView): HTMLElement[] {
       return computerPage(v)
     case 'about':
       return aboutPage(v)
+    case 'report':
+      return reportPage(v)
     case 'search':
       return searchPage(v)
   }
@@ -1124,6 +1131,7 @@ const SEARCHED: Place[] = [
   { name: 'engine' },
   { name: 'storage' },
   { name: 'computer' },
+  { name: 'report' },
 ]
 
 type Line = { place: Place; section: string; title: string; note: string }
@@ -2877,10 +2885,54 @@ function aboutPage(v: AppView): HTMLElement[] {
           link('https://github.com/ikstro/krya', 'Source on GitHub'),
           ' · ',
           link('https://github.com/ikstro/krya/blob/main/NOTICE', 'Licenses'),
+          ' · ',
+          linkBtn('Report a problem', () => go('report')),
         ),
       ),
     ),
   ]
+}
+
+// ---------------------------------------------------------------- report a problem
+// The person writes what happened; Krya saves a zip of its logs (report.ts)
+// and opens an email or a GitHub issue with the text in it. Nothing is sent
+// until they send it.
+
+/** The last report made (its file), or why it could not be, for the line under the buttons. */
+let reported: { file?: string; error?: string } | undefined
+
+/** What the person wrote, from the field on the page (a redraw may have carried it over). */
+const reportText = () => pBody.querySelector<HTMLTextAreaElement>('textarea[data-live="report"]')?.value ?? ''
+
+function reportPage(_v: AppView): HTMLElement[] {
+  const send = (via: 'email' | 'github') => {
+    reported = undefined
+    post({ type: 'reportProblem', via, text: reportText() })
+  }
+  const field = el('textarea', {
+    class: 'field report',
+    rows: 6,
+    placeholder: 'What did you do, what happened, and what did you expect? The steps that make it happen again help most.',
+    'aria-label': 'What happened',
+    'data-live': 'report',
+  })
+  const file = reported?.file
+  return [
+    grp('What happened'),
+    el('div', { class: 'row add' }, field, el('small', {}, 'In any language; it goes as you wrote it.')),
+    grp('Send it'),
+    row('Email it', [`Opens your mail to ${REPORT_EMAIL} with your text in it; attach the report file Krya saves`], btn([lucide('mail', 's'), 'Email'], () => send('email'), 'primary')),
+    row('Open a GitHub issue', ['A public page others with the same problem can find; needs a GitHub account'], btn([lucide('external-link', 's'), 'GitHub issue'], () => send('github'))),
+    file ? aside('circle-check', `Saved ${file.split('\\').pop()} in Documents › Krya › Reports: drag it into the message. `, linkBtn('Show in folder', () => post({ type: 'showInFolder', path: file }))) : null,
+    reported?.error ? warn(`The report could not be made: ${reported.error}`) : null,
+    grp('What the report file holds'),
+    row('Krya’s log', ['What Krya did lately: keys, copies, windows, downloads, errors']),
+    row('The speech engine’s and the translation model’s logs', ['Dictation, transcripts and the model starting, stopping and failing']),
+    row('This computer and Krya', ['Processor, memory, graphics card, Windows and Krya’s versions']),
+    row('Your settings', ['Your own lists only counted: words kept as typed, words to spell, programs']),
+    aside('shield-check', 'Never in it: your texts, words, mistakes, translations, phrases, transcripts or Hugging Face key. Your Windows name and the computer’s are replaced. Nothing is sent until you send it.'),
+    row('Krya’s folder', ['Where the logs are, to look at them yourself'], linkBtn('Open', () => post({ type: 'openLogs' }))),
+  ].filter((n): n is HTMLElement => n !== null)
 }
 
 // ---------------------------------------------------------------- messages
@@ -2921,6 +2973,11 @@ window.addEventListener('message', (event: MessageEvent<ToView>) => {
     return
   }
   if (m.type === 'appWindow') return windowState(m.maximized)
+  if (m.type === 'reported') {
+    reported = { file: m.file, error: m.error }
+    if (open?.name === 'report') renderBody()
+    return
+  }
   if (m.type !== 'app') return
   const first = view === undefined
   view = m.view

@@ -15,6 +15,8 @@ import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as path from 'node:path'
 
+import { rotate } from './log'
+
 const IDLE_MS = 3 * 60_000
 /** The 12B model from a slow disk takes a while to load. */
 const READY_MS = 3 * 60_000
@@ -187,6 +189,8 @@ export class LlamaServer {
       const port = await (this.o.freePort ?? freePort)()
       if (r.stopped) throw new Error('llama.cpp was stopped')
       fs.mkdirSync(path.dirname(this.o.log), { recursive: true })
+      // Past 2 MB a start begins it afresh, the last one kept as translate.old.log.
+      rotate(this.o.log, 2_000_000)
       const log = fs.createWriteStream(this.o.log, { flags: 'a' })
       // A log that cannot be written is no reason to stop.
       log.on('error', () => undefined)

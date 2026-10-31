@@ -71,6 +71,7 @@ import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
 import type { AppTab, AppView, CardKind, CardState, CheckResult, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, StorageId, StoragePart, StorageView, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
 import { draftsIn, englishHtml, textOutHtml, translationHtml } from './render'
+import { issueUrl, mailUrl, makeReport, namesHere, reportName, type ReportFacts } from './report'
 import { addKept, CARD_WIDTH, DEFAULTS, keptForm, LEVEL_NAMES, myLanguages, normalize, TARGET, type LlmModel, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
@@ -648,6 +649,44 @@ async function exportBackup(): Promise<void> {
   fs.writeFileSync(filePath, JSON.stringify(backup, null, 2) + '\n', 'utf8')
 }
 
+/** A page's own errors into krya.log, so a report says what broke there. */
+function logPageErrors(win: BrowserWindow, name: string): void {
+  win.webContents.on('console-message', m => {
+    if (m.level === 'error') log(`${name} page: ${m.message} (${m.sourceId}:${m.lineNumber})`)
+  })
+}
+
+/** Krya and Windows, for a report's first lines. */
+function reportFacts(): ReportFacts {
+  return { version: app.getVersion(), build: app.isPackaged ? '' : buildText(), electron: process.versions.electron, windows: process.getSystemVersion(), arch: process.arch }
+}
+
+/** The parts' state at the moment of a report: the speech engine, the translation level and the model loaded. */
+function reportStatus(): string[] {
+  const service = speech?.service
+  return [
+    `Speech engine: ${service ? `${service.state}${service.trouble ? ` (${service.trouble})` : ''}` : 'not set up'}`,
+    service?.health ? `Speech engine's health: ${JSON.stringify(service.health)}` : '',
+    `Translation: ${LEVEL_NAMES[settings.translationLevel]}; the model ${LEVEL_NAMES[settings.model]} is ${llmFiles.state(settings.model).status}, ${llmFiles.server.model ? `loaded (${path.basename(llmFiles.server.model)})` : 'not loaded'}`,
+  ].filter(Boolean)
+}
+
+/**
+ * Report a problem (report.ts): the zip in Documents\Krya\Reports, shown in its
+ * folder, then the email or the GitHub issue opened with the person's text in
+ * it; they attach the zip and send it themselves.
+ */
+async function reportProblem(via: 'email' | 'github', text: string): Promise<void> {
+  const at = new Date()
+  log(`report: made for ${via}`)
+  const out = path.join(app.getPath('documents'), 'Krya', 'Reports', reportName(at))
+  const facts = reportFacts()
+  await makeReport({ dir: userDir(), out, message: text, facts, status: reportStatus(), settings, names: namesHere(), at })
+  shell.showItemInFolder(out)
+  await shell.openExternal(via === 'email' ? mailUrl(text, facts, path.basename(out)) : issueUrl(text, facts, path.basename(out)))
+  appWin?.webContents.send('to-view', { type: 'reported', file: out } satisfies ToView)
+}
+
 /**
  * A backup the person picks, after a question that says what it holds: its
  * settings replace these (this computer's place for the dictation badge
@@ -779,6 +818,7 @@ function createCard(): BrowserWindow {
   win.hookWindowMessage(WM_NCLBUTTONDBLCLK, wParam => {
     if (wParam.readUInt32LE(0) === HTCAPTION) maximizeCard(!maximizedFrom)
   })
+  logPageErrors(win, 'card')
   void win.loadFile(path.join(app.getAppPath(), 'media', 'card.html'), frameQuery)
   return win
 }
@@ -1042,9 +1082,10 @@ function createAppWindow(): BrowserWindow {
   // The page's maximize button shows Maximize or Restore, whichever way the window got there (a double click on the bar too).
   win.on('maximize', () => postAppWindow())
   win.on('unmaximize', () => postAppWindow())
-  // A run from source shows the page's errors in the terminal.
+  // Its errors go into krya.log; a run from source shows the rest of what it says in the terminal.
+  logPageErrors(win, 'app window')
   if (!app.isPackaged) {
-    win.webContents.on('console-message', m => console.warn(`Krya app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
+    win.webContents.on('console-message', m => m.level !== 'error' && console.warn(`Krya app window: ${m.message} (${m.sourceId}:${m.lineNumber})`))
     win.webContents.on('did-fail-load', (_event, code, description) => console.warn(`Krya app window did not load: ${code} ${description}`))
   }
   // Closing hides: Krya lives in the tray.
@@ -1433,6 +1474,15 @@ function onMessage(message: ToHost): void {
       return
     case 'openLink':
       if (LINKS.has(message.url)) void shell.openExternal(message.url)
+      return
+    case 'reportProblem':
+      reportProblem(message.via === 'github' ? 'github' : 'email', String(message.text ?? '')).catch(error => {
+        log(`report: could not make it: ${String(error)}`)
+        appWin?.webContents.send('to-view', { type: 'reported', error: error instanceof Error ? error.message : String(error) } satisfies ToView)
+      })
+      return
+    case 'openLogs':
+      void shell.openPath(userDir())
       return
     case 'window':
       if (message.action === 'minimize') appWin?.minimize()
@@ -2474,7 +2524,8 @@ function createTrayPanel(): BrowserWindow {
   win.removeMenu()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', event => event.preventDefault())
-  if (!app.isPackaged) win.webContents.on('console-message', m => console.warn(`Krya tray panel: ${m.message} (${m.sourceId}:${m.lineNumber})`))
+  logPageErrors(win, 'tray panel')
+  if (!app.isPackaged) win.webContents.on('console-message', m => m.level !== 'error' && console.warn(`Krya tray panel: ${m.message} (${m.sourceId}:${m.lineNumber})`))
   // A click anywhere else puts it away, as a menu goes.
   win.on('blur', () => {
     if (Date.now() - trayShownAt > 200) hideTrayPanel()
@@ -2553,6 +2604,9 @@ function runTrayCommand(command: TrayCommand): void {
       return
     case 'settings':
       openApp('settings')
+      return
+    case 'report':
+      openApp('report')
       return
     case 'open':
       openApp()
@@ -2746,6 +2800,11 @@ function start(): void {
     warn(...parts)
     log(`warn: ${parts.map(p => (p instanceof Error ? (p.stack ?? p.message) : String(p))).join(' ')}`)
   }
+  // What broke where nobody saw it, for a report (report.ts); watched only, so Electron handles each as it did.
+  process.on('uncaughtExceptionMonitor', (error, origin) => log(`error (${origin}): ${error?.stack ?? String(error)}`))
+  process.on('warning', w => log(`warning: ${w.name}: ${w.message}`))
+  app.on('render-process-gone', (_event, contents, details) => log(`a page's process is gone (${pageOf(contents.getURL())}): ${details.reason}, exit ${details.exitCode}`))
+  app.on('child-process-gone', (_event, details) => log(`${details.type}${details.name ? ` (${details.name})` : ''} process is gone: ${details.reason}, exit ${details.exitCode}`))
   log(`start: Krya ${app.getVersion()}, Electron ${process.versions.electron}, Windows ${process.getSystemVersion()}${TEST_HOME ? ', test home' : ''}`)
   // Everything downloaded in one folder (moveLocalFolder): what 0.10.0 and before kept in %APPDATA% moves over too.
   logMoved(adopted)

@@ -2085,6 +2085,16 @@ button.chip.use.lit:hover {
   max-width: 45vw;
 }
 
+/* What happened, on Report a problem: a few lines, taller by a drag of its corner. */
+.field.report {
+  width: 100%;
+  height: auto;
+  min-height: 132px;
+  padding: 10px 12px;
+  font: 400 14px / 1.5 var(--font);
+  resize: vertical;
+}
+
 .aside > span,
 .warn > span {
   min-width: 0;

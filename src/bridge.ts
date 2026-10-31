@@ -55,6 +55,8 @@ const APP_ONLY: ReadonlySet<ToHost['type']> = new Set<ToHost['type']>([
   'copyWords',
   'openLink',
   'micRecording',
+  'reportProblem',
+  'openLogs',
 ])
 
 export function messageAllowed(page: Page, type: string): boolean {

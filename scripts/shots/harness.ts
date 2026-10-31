@@ -294,7 +294,7 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
       await sleep(200)
       await shot(w, tag(name))
     }
-    for (const name of ['engine', 'storage', 'computer', 'about']) await page(name)
+    for (const name of ['engine', 'storage', 'computer', 'about', 'report']) await page(name)
     await focused('kept')
     // The search, and a find opened with its line lit.
     log.push(`search: ${await js(w, `(() => { const f = document.querySelector('.find input'); f.value = 'caps'; f.dispatchEvent(new Event('input')); return 'ok' })()`)}`)

@@ -258,10 +258,10 @@ body.keys .cmd.cur .lu {
 
 /* ---------------------------------------------------------------- the footer */
 
-/* Pause, Settings and Quit side by side under a hairline. */
+/* Pause, Settings, Report and Quit side by side under a hairline. */
 .foot {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   margin: 12px -6px 0;
   padding: 6px 6px 0;

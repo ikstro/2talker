@@ -11,6 +11,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+import { rotate } from './log'
 import type { Bench } from './speechplan'
 
 export const SPEECH_PORT = 8765
@@ -155,6 +156,8 @@ export class SpeechService {
     }
     this.set('starting')
     fs.mkdirSync(path.dirname(this.o.log), { recursive: true })
+    // Past 2 MB a start begins it afresh, the last one kept as speech.old.log.
+    rotate(this.o.log, 2_000_000)
     const log = fs.createWriteStream(this.o.log, { flags: 'a' })
     log.write(`\n--- ${new Date().toISOString()} start\n`)
     const child = spawn(python, ['app.py', '--port', String(this.o.port)], {
