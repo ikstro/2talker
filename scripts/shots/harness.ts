@@ -287,14 +287,16 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     await js(w, `document.querySelector('.pbody')?.scrollTo(0, 1e6)`)
     await sleep(200)
     await shot(w, tag('settings-end'))
-    // Every model on one page: its middle (the speech models) and its end (the voice, who spoke when).
-    await page('models')
-    for (const [at, name] of [[560, 'models-speech'], [1e6, 'models-end']] as const) {
-      await js(w, `document.querySelector('.pbody')?.scrollTo(0, ${at})`)
-      await sleep(200)
-      await shot(w, tag(name))
-    }
-    for (const name of ['engine', 'storage', 'computer', 'about', 'report']) await page(name)
+    // Models: this computer and the actions, each action's choice; Use recommended's changes shown before Apply.
+    await page('models', ['forTranslate', 'forCheck', 'forDictate', 'forTranscribe', 'forVoice'])
+    log.push(`recommend: ${await click(w, '.pbody .row .btn.primary')}`)
+    await sleep(300)
+    await shot(w, tag('models-recommend'))
+    await page('storage')
+    await js(w, `document.querySelector('.pbody')?.scrollTo(0, 1e6)`)
+    await sleep(200)
+    await shot(w, tag('storage-end'))
+    for (const name of ['about', 'report']) await page(name)
     await focused('kept')
     // The search, and a find opened with its line lit.
     log.push(`search: ${await js(w, `(() => { const f = document.querySelector('.find input'); f.value = 'caps'; f.dispatchEvent(new Event('input')); return 'ok' })()`)}`)
@@ -332,7 +334,7 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     await page('keyboard', ['fixing'])
     await focused('kept')
     await page('settings')
-    await page('models')
+    await page('models', ['forTranslate', 'forDictate'])
     await page('listen')
     await page('check')
     await page('storage')

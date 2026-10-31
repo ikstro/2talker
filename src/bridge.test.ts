@@ -14,7 +14,7 @@ describe('which page sent a message', () => {
 })
 
 describe('a page that shows text from outside opens, removes and exports nothing', () => {
-  const dangerous = ['openPath', 'showInFolder', 'openLink', 'installSpeech', 'removeSpeech', 'removeModel', 'removeSpeechModel', 'removeDownload', 'moveToKrya', 'importBackup', 'exportBackup', 'resetSettings', 'restartSpeech', 'reportProblem', 'openLogs']
+  const dangerous = ['openPath', 'showInFolder', 'openLink', 'installSpeech', 'removeStored', 'cleanUp', 'useRecommended', 'moveToKrya', 'importBackup', 'exportBackup', 'resetSettings', 'restartSpeech', 'reportProblem', 'openLogs']
   test.each(['card', 'tray', 'dictation'] as const)('the %s', page => {
     for (const type of dangerous) expect(messageAllowed(page, type), type).toBe(false)
   })

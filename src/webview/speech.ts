@@ -8,7 +8,7 @@ import { cardText, mainCard, nvidiaCard, shortCpu } from '../hardware'
 import type { AppView, Choice, Feature, SpeechHealth, SpeechPart, SpeechResult } from '../protocol'
 import { BASIS_TEXT, estimateText, minutes, seconds, type FeaturePlan } from '../speechplan'
 import { el, icon } from './dom'
-import { aside, bad, bar, btn, card, chip, grp, ib, link, linkBtn, post, row, toggleKnob, useMark, uses } from './ui'
+import { aside, bad, bar, btn, card, chip, grp, ib, link, linkBtn, post, radioRow, recommended, row, seg, toggleKnob } from './ui'
 
 export type Source = 'file' | 'mic' | 'meet' | 'note'
 export type Stage = '' | 'decode' | 'words' | 'speakers' | 'save'
@@ -193,6 +193,8 @@ export function packWork(v: AppView): HTMLElement | undefined {
   const p = v.speech.pack
   if (p.status === 'removing') return row('Removing the speech engine…', [], null)
   if (p.status !== 'installing') return undefined
+  // A part taken out (Storage's ×): the same sync, with fewer parts.
+  if (p.installing && p.installing.length < p.parts.length) return row('Removing a part of the speech engine…', ['the speech engine is back in a moment', bar(p.progress ?? 0)], el('span', { class: 'pct' }, `${Math.round((p.progress ?? 0) * 100)}%`))
   const what = p.step === 'tool' ? 'the Python manager' : 'the packages'
   const pct = Math.round((p.progress ?? 0) * 100)
   const parts = (p.installing ?? []).filter(x => !p.parts.includes(x))
@@ -265,63 +267,88 @@ const FEATURES: [Feature, string][] = [
 const pin = (feature: Feature, model: string) => post({ type: 'saveSettings', patch: { [feature === 'dictation' ? 'dictationModel' : 'transcriptsModel']: model } })
 
 /**
- * The speech models, each once, with the actions it serves here and its time
- * for each: a model Dictate and Transcribe both use is downloaded and loaded
- * once. Automatic picks per action (speechplan.ts: on the card dictation
- * shares the transcripts' model; on the processor it needs one that answers in
- * a second); a tap on a model's mark picks it for that action, whatever it
- * costs, and downloads it when it is not here. A model on the disk that
- * nothing uses can go (it downloads again when picked).
+ * One action's speech model (Models › Dictate, Models › Transcribe): Automatic
+ * first, the most accurate model quick enough here (speechplan.ts: on the card
+ * dictation shares the transcripts' model; on the processor it needs one that
+ * answers in a second), then each model the action can run, with its time here,
+ * its size, and whether the other action uses it too, so one model serves both
+ * where that costs nothing. A pick downloads it when it is not here. A model on
+ * the disk that nothing uses can go; one kept for the processor says so.
  */
-export function speechModelRows(v: AppView): HTMLElement[] {
+export function speechChoiceRows(v: AppView, feature: Feature): HTMLElement[] {
   const plan = v.speech.plan
-  const plans: Record<Feature, FeaturePlan> = { dictation: plan.dictation, transcripts: plan.transcripts }
+  const p = plan[feature]
+  const other: Feature = feature === 'dictation' ? 'transcripts' : 'dictation'
+  const otherName = FEATURES.find(([f]) => f === other)?.[1] ?? ''
   // The other device's plan: what runs when the card refuses a model.
   const spare = plan.device === 'cuda' ? plan.engine.cpu : undefined
+  const budget = feature === 'dictation' ? `a phrase in ≈${seconds(p.budget)}` : `an hour in ≈${minutes(p.budget)}`
+  const live = (name: string) => [liveModel(v, 'dictation'), liveModel(v, 'transcripts')].find(m => m?.name === name && m.state === 'downloading')
   const out: HTMLElement[] = [
-    row(
-      'Automatic',
-      [`for each action, the most accurate model that is quick enough here: a phrase in ≈${seconds(plan.dictation.budget)}, an hour in ≈${minutes(plan.transcripts.budget)}`],
-      uses(...FEATURES.map(([f, name]) => useMark(name, !plans[f].pinned, () => pin(f, '')))),
+    radioRow(
+      el('span', {}, 'Automatic', recommended()),
+      [`the most accurate model that is quick enough here: ${budget}`, p.pinned ? null : `uses ${p.chosen.label} now`],
+      !p.pinned,
+      () => pin(feature, ''),
     ),
   ]
-  const names = [...new Set([...plan.dictation.choices, ...plan.transcripts.choices].map(c => c.model))]
-  for (const name of names) {
-    const of = (f: Feature) => plans[f].choices.find(c => c.model === name)
-    const any = (of('dictation') ?? of('transcripts')) as Choice
-    const usable = FEATURES.filter(([f]) => of(f) && !of(f)?.why)
-    const serving = FEATURES.filter(([f]) => plans[f].chosen.model === name)
-    const live = [liveModel(v, 'dictation'), liveModel(v, 'transcripts')].find(m => m?.name === name && m.state === 'downloading')
-    const backup = spare ? FEATURES.filter(([f]) => spare[f]?.model === name).map(([, n]) => n) : []
-    const why = usable.length === 0 ? (of('dictation')?.why ?? of('transcripts')?.why ?? '') : ''
-    const slow = serving.some(([f]) => plans[f].pinned && !of(f)?.fits)
-    const notes: (string | HTMLElement | null)[] = why
-      ? [`${any.about} · ${why}`]
+  for (const c of p.choices) {
+    const on = p.pinned && p.chosen.model === c.model
+    const here = p.chosen.model === c.model
+    const shared = plan[other].chosen.model === c.model
+    const backup = spare && !here && !shared ? FEATURES.filter(([f]) => spare[f]?.model === c.model).map(([, n]) => n) : []
+    const loading = live(c.model)
+    const notes: (string | HTMLElement | null)[] = c.why
+      ? [`${c.about} · ${c.why}`]
       : [
-          `${usable.map(([f, n]) => `${n} ${estimateText(f, of(f) as Choice)}`).join(' · ')} · on the ${where(any)} · ${BASIS_TEXT[any.basis]}${slow ? ' · slower than usual here' : ''}`,
-          `${any.about}${of('transcripts') ? '' : ' · Dictate only'} · ${size(any.mb)}${any.downloaded ? ' on this computer' : serving.length ? ', downloads with its first use' : ', downloads when picked'}`,
-          serving.length === 2 ? 'Dictate and Transcribe share it: downloaded once, loaded once' : null,
-          live ? bar(live.progress ?? 0) : null,
+          `${estimateText(feature, c)} · on the ${where(c)} · ${BASIS_TEXT[c.basis]}${on && !c.fits ? ' · slower than usual here' : ''}`,
+          `${c.about} · ${size(c.mb)}${c.downloaded ? ' on this computer' : ', downloads when picked'}`,
+          here && !p.pinned ? 'Automatic uses it now' : null,
+          shared ? `${otherName} uses it too: downloaded once, loaded once` : null,
+          loading ? bar(loading.progress ?? 0) : null,
         ]
-    // A model on the disk that serves nothing here: kept for the processor when the card fails, or not used.
-    if (!serving.length && any.downloaded) notes.push(backup.length ? `kept for ${backup.join(' and ')} on the processor, if the graphics card fails` : 'not used now')
-    const marks = uses(
-      ...FEATURES.map(([f, n]) => {
-        const c = of(f)
-        if (!c) return null
-        const pick = () => {
-          if (!c.downloaded) post({ type: 'downloadSpeechModel', model: name })
-          pin(f, name)
+    if (!here && !shared && c.downloaded) notes.push(backup.length ? `kept for ${backup.join(' and ')} on the processor, if the graphics card fails` : 'not used now')
+    const pick = c.why
+      ? undefined
+      : () => {
+          if (!c.downloaded) post({ type: 'downloadSpeechModel', model: c.model })
+          pin(feature, c.model)
         }
-        return useMark(n, plans[f].chosen.model === name, c.why ? undefined : pick, c.why)
-      }),
-    )
-    const remove = any.downloaded && !serving.length && !live ? ib('x', `Remove ${any.label} (${size(any.mb)}); it downloads again when picked`, () => post({ type: 'removeSpeechModel', model: name })) : null
-    const node = row(any.label, notes, marks, live ? el('span', { class: 'pct' }, `${Math.round((live.progress ?? 0) * 100)}%`) : null, remove)
-    if (why) node.classList.add('dim')
+    // The engine keeps a model it plans or holds: one nothing plans can go.
+    const remove = c.downloaded && !here && !shared && !backup.length && !loading ? ib('x', `Remove ${c.label} (${size(c.mb)}); it downloads again when picked`, () => post({ type: 'removeStored', id: 'speechModel', item: c.model })) : null
+    const node = radioRow(c.label, notes, on, pick, loading ? el('span', { class: 'pct' }, `${Math.round((loading.progress ?? 0) * 100)}%`) : null, remove)
+    if (c.why) node.classList.add('dim')
     out.push(node)
   }
   return out
+}
+
+/** What Automatic leans to: accuracy or speed. */
+export function preferRow(v: AppView): HTMLElement {
+  return row(
+    'Automatic prefers',
+    [v.settings.speechPrefer === 'speed' ? 'quicker models, a little less accurate' : 'the most accurate models this computer runs in time'],
+    seg(
+      v.settings.speechPrefer,
+      [
+        ['accuracy', 'Accuracy'],
+        ['speed', 'Speed'],
+      ],
+      speechPrefer => post({ type: 'saveSettings', patch: { speechPrefer } }),
+    ),
+  )
+}
+
+/** The graphics card's part, on the speech models' pages, when there is an NVIDIA card that can take it. */
+export function gpuRow(v: AppView): HTMLElement | null {
+  const p = v.speech.pack
+  if (!p.nvidia || !installed(v)) return null
+  if (hasPart(v, 'gpu')) return row('Speech on the graphics card', [el('small', { class: 'ok' }, 'Installed'), cardNote(v)])
+  return row(
+    'Speech on the graphics card',
+    [`${size(v.speech.download.gpu)} to download; Dictate and Transcribe get several times quicker`, cardNote(v)],
+    Object.assign(btn('Add', () => post({ type: 'installSpeech', parts: ['gpu'] })), { disabled: p.status !== 'ready' }),
+  )
 }
 
 /** The speed test going on: which model, how far. */
@@ -368,8 +395,8 @@ export function computerRows(v: AppView): HTMLElement[] {
   const t = testWork(v)
   return [
     row(
-      'This computer',
-      [cpu, cards, tested],
+      cpu,
+      [cards, tested],
       running(v) && !t ? linkBtn(v.speech.test.agreed && plan.measured ? 'Test again' : 'Test', () => post({ type: 'testSpeech' }), v.speech.test.runs === 0 && !plan.dictation.choices.some(c => c.downloaded)) : null,
     ),
     ...(t ? [t] : []),

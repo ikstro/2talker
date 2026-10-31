@@ -23,6 +23,8 @@ export type CatalogModel = {
   label: string
   about: string
   backend: string
+  /** Where it comes from on Hugging Face: the engine keeps a Whisper model under this name. */
+  repo: string
   bytes: number
   rank: number
   languages: 'all' | string[]

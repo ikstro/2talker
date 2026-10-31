@@ -3,9 +3,10 @@
 // brand with the version, or Open, a yellow button) with Krya's state, then
 // Actions (the copied text, a text to type or check, a piece of the screen,
 // with their keys as quiet text; the note and Transcripts once the engine is
-// in), Quick settings (with "Keep a word as typed…" under fixing as one types,
-// which opens into a field in place), and a footer of Pause, Settings, Report and
-// Quit. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
+// in), Quick settings, Your words ("Keep a word as typed…", which opens into a
+// field in place while the layout is fixed; the words to spell and the words
+// kept, each opening its page in the window), and a footer of Pause, Settings,
+// Report and Quit. A menu in behaviour: ↑ ↓ move, Enter runs, Esc or a click elsewhere
 // puts it away (the main process hides it, and after any command). Everything
 // shown comes in one `tray` message, sent again whenever any of it changes.
 
@@ -225,11 +226,16 @@ function render(v: TrayView): void {
     group(
       'Quick settings',
       toggle('autoFix', 'spell-check', 'Fix the layout as I type', v.autoFix),
-      v.keep.on ? keepRow(v) : null,
       v.keys.switch ? toggle('switchOn', 'keyboard', `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
       toggle('layoutBadge', 'text-cursor', 'Show the layout by the cursor', v.layoutBadge),
       toggle('trayLayout', 'panel-bottom', 'Show the layout in the tray', v.trayLayout),
       toggle('doubleCopy', 'copy', 'Ctrl+C twice listens', v.doubleCopy),
+    ),
+    group(
+      'Your words',
+      v.keep.on ? keepRow(v) : null,
+      v.speech.installed ? command('vocabulary', 'mic', 'Add a word to spell…', 'vocabulary') : null,
+      command('kept', 'list', 'Words kept as typed', 'kept'),
     ),
     el(
       'footer',

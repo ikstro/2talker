@@ -77,6 +77,8 @@ export type LlmFiles = {
   /** Model files here that no model of the manifest is (an older Krya's), and deleting them. */
   unused(): string[]
   removeUnused(): void
+  /** A build deleted (the one no model runs on here now); its server stopped first. */
+  removeEngine(kind: LlmEngine): Promise<void>
   dispose(): void
 }
 
@@ -229,6 +231,19 @@ export function createLlmFiles(o: LlmFilesOptions): LlmFiles {
     unused,
     removeUnused() {
       for (const file of unused()) removePath(file)
+    },
+    async removeEngine(kind) {
+      if (engineRunning.has(kind)) return
+      if (server.exe === paths.exe(kind)) await server.stop()
+      const base = path.join(o.root, 'engine')
+      // An older build of its kind, or one half unpacked, goes with it.
+      let names: string[] = []
+      try {
+        names = fs.readdirSync(base)
+      } catch {
+        return
+      }
+      for (const name of names) if (name.startsWith(`${kind}-`)) removePath(path.join(base, name))
     },
     dispose: () => server.dispose(),
   }

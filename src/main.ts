@@ -63,7 +63,7 @@ import { createLlmFiles, llmPaths, type LlmFiles } from './llmfiles'
 import { createLlmTranslators, type LlmTranslators } from './llmtranslator'
 import { MistakeStore } from './mistakes'
 import { log, logTo } from './log'
-import { systemVoiceName, type NaturalState } from './natural'
+import { NATURAL_PREFIX, systemVoiceName, type NaturalState } from './natural'
 import { recognize } from './ocr'
 import { pickLines } from './ocrpick'
 import { adoptLocalFolder, adoptOldFolders, freeFolder, hasToMove, leftIn, moveDownloads, partDir, removeOldUpdaterCaches, type LeftPart, type Warn } from './oldfolder'
@@ -75,8 +75,10 @@ import { issueUrl, mailUrl, makeReport, namesHere, reportName, type ReportFacts 
 import { addKept, CARD_WIDTH, DEFAULTS, keptForm, LEVEL_NAMES, myLanguages, normalize, TARGET, type LlmModel, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
+import { MODELS as SPEECH_MODELS } from './speechplan'
 import { SPEECH_PORT } from './speechservice'
-import { markAway, measureParts, type Place } from './storage'
+import { recommendedModels } from './setup'
+import { cleanable, markAway, measureParts, partPackages, speechModelDir, splitSpeech, withUse, type Place, type UseContext } from './storage'
 import { NaturalSpeaker } from './synth'
 import { system32 } from './system32'
 import {
@@ -901,19 +903,44 @@ let storage: StorageView | undefined
 let measuring = false
 let measureAgain = false
 
+/** The names in a folder; none when it is not there. */
+function namesIn(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir)
+  } catch {
+    return []
+  }
+}
+
 function storagePlaces(): Place[] {
   const translate = localPart('translate')
   const models = llmPaths(translate)
+  const builds = path.join(translate, 'engine')
+  const fast = downloads('models')
+  const dict = downloads('dict')
+  const speechDir = localPart('speech')
+  const site = path.join(speechDir, 'env', 'Lib', 'site-packages')
+  const packages = partPackages(namesIn(site))
+  const inSite = (names: string[]) => names.map(name => path.join(site, name))
+  const voices = path.join(speechDir, 'models', 'diarization')
   const transcripts = speech?.service.health?.dataDir
   return [
-    { id: 'fast', path: downloads('models') },
+    ...namesIn(fast).map((code): Place => ({ id: 'fast', item: code, path: path.join(fast, code) })),
+    ...namesIn(dict).flatMap((name): Place[] => {
+      const code = /^en-([a-z]+)\.json$/.exec(name)?.[1]
+      return code ? [{ id: 'dict', item: code, path: path.join(dict, name) }] : []
+    }),
     { id: 'voice', path: downloads('voice') },
-    { id: 'dict', path: downloads('dict') },
     { id: 'accurate', path: models.model('accurate') },
     { id: 'most', path: models.model('most') },
     { id: 'unused', path: path.join(translate, 'models'), only: llmFiles.unused() },
-    { id: 'llama', path: path.join(translate, 'engine') },
-    { id: 'speech', path: localPart('speech') },
+    // Each build with what is left of an older one of its kind, or of one half unpacked.
+    ...(['vulkan', 'cuda'] as const).map((kind): Place => ({ id: 'llama', item: kind, path: builds, only: namesIn(builds).filter(name => name.startsWith(`${kind}-`)).map(name => path.join(builds, name)) })),
+    ...SPEECH_MODELS.map((m): Place => ({ id: 'speechModel', item: m.name, path: speechModelDir(path.join(speechDir, 'models'), m) })),
+    // The engine but its speech models; its two parts are measured on their own and taken out of it (splitSpeech).
+    { id: 'speech', path: speechDir, only: [...['installed.json', 'env', 'python', 'uv', 'cache', 'pycache'].map(name => path.join(speechDir, name)), voices] },
+    { id: 'gpu', path: speechDir, only: inSite(packages.gpu) },
+    { id: 'speakers', path: speechDir, only: [...inSite(packages.speakers), voices] },
     { id: 'yours', path: userDir() },
     ...(transcripts ? [{ id: 'transcripts' as const, path: transcripts }] : []),
   ]
@@ -931,7 +958,7 @@ function measureStorage(): void {
   postApp()
   measureParts(storagePlaces())
     .then(measured => {
-      const parts = markAway(measured, root, DOWNLOADED)
+      const parts = markAway(splitSpeech(measured), root, DOWNLOADED)
       storage = { measuring: false, root, drive: driveOf(root), freeMb: freeMb(root), parts, ...oldFolderView(parts) }
     })
     .catch(error => console.warn('Krya: could not measure the storage', error))
@@ -950,7 +977,102 @@ function measureStorage(): void {
 const remeasure = () => (storage ? measureStorage() : postApp())
 
 /** Krya's downloads, which belong in its one folder; the person's own things live elsewhere. */
-const DOWNLOADED: readonly StorageId[] = ['fast', 'voice', 'dict', 'accurate', 'most', 'unused', 'llama', 'speech']
+const DOWNLOADED: readonly StorageId[] = ['fast', 'dict', 'voice', 'accurate', 'most', 'unused', 'llama', 'speechModel', 'speech', 'gpu', 'speakers']
+
+/** What the parts serve now (storage.ts withUse): the settings, the build the model runs on here, the speech plan with its reserve on the other device. */
+function useContext(): UseContext {
+  const plan = speech.plan
+  const other = plan.device === 'cuda' ? plan.engine.cpu : plan.engine.cuda
+  return {
+    level: settings.translationLevel,
+    model: settings.model,
+    languages: myLanguages(settings),
+    native: langCode(settings.native),
+    naturalVoice: settings.voice === '' || settings.voice.startsWith(NATURAL_PREFIX),
+    build: translationAdvice(speech.profile)[settings.model].cuda ? 'cuda' : 'vulkan',
+    speech: { dictation: plan.dictation.chosen.model, transcripts: plan.transcripts.chosen.model, reserve: { dictation: other?.dictation.model, transcripts: other?.transcripts.model } },
+  }
+}
+
+/** The storage as measured, each part told what it serves now: a changed setting shows at once, with no walk of the disk. */
+const storageView = (s: StorageView): StorageView => ({ ...s, parts: withUse(s.parts, useContext()) })
+
+/** One part off the disk (the Models and Storage pages' ×, Clean up); each downloads again when wanted. */
+async function removeStored(id: StorageId, item?: string): Promise<void> {
+  switch (id) {
+    case 'fast': {
+      const codes = item ? [item] : namesIn(downloads('models'))
+      if (codes.some(code => translator.state(code).status === 'downloading')) return
+      // The engine lets go of its files first.
+      translator.dispose()
+      for (const code of codes) fs.rmSync(path.join(downloads('models'), code), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      return
+    }
+    case 'dict':
+      if (item) dictionaries.remove(item)
+      else dictionaries.clear()
+      return
+    case 'voice':
+      natural.dispose()
+      voiceStore.remove()
+      return
+    case 'accurate':
+    case 'most':
+      // Fast translates in its place.
+      if (settings.translationLevel === id) saveSettings({ translationLevel: 'fast' })
+      return llmFiles.remove(id)
+    case 'unused':
+      llmFiles.removeUnused()
+      return
+    case 'llama':
+      if (item === 'vulkan' || item === 'cuda') await llmFiles.removeEngine(item)
+      return
+    case 'speechModel': {
+      if (!item) return
+      const r = await speech.removeModel(item)
+      if (!r.ok) throw new Error(r.error)
+      return
+    }
+    case 'speech':
+      await speech.remove()
+      registerShortcuts()
+      applyKeyboard()
+      return
+    case 'gpu':
+    case 'speakers':
+      await speech.removePart(id)
+      return
+    case 'yours':
+    case 'transcripts':
+      return
+  }
+}
+
+/** Clean up: every part nothing uses off the disk, one after another; one that will not go is logged and the next goes on. */
+async function cleanUp(): Promise<void> {
+  if (!storage) return
+  for (const p of cleanable(withUse(storage.parts, useContext()))) {
+    try {
+      await removeStored(p.id, p.item)
+    } catch (error) {
+      console.warn(`Krya: could not clean up ${p.id}${p.item ? ` ${p.item}` : ''}`, error)
+    }
+  }
+}
+
+/** Use recommended (the Models page): the models advised here saved, and what they need downloaded, as the page listed it. */
+function useRecommended(): void {
+  const advice = recommendedModels(appView())
+  if (Object.keys(advice.patch).length) saveSettings(advice.patch)
+  if ('translationLevel' in advice.patch) prepareTranslator(activeTranslator())
+  if (advice.model && settings.translationLevel === 'fast') prepareModel()
+  if (advice.natural) voiceStore.download().catch(error => console.warn('Krya: the natural voice did not download', error))
+  if (advice.parts.length)
+    speech.install(advice.parts).then(
+      () => (registerShortcuts(), applyKeyboard()),
+      error => console.warn('Krya: the speech engine did not install', error),
+    )
+}
 /** Move to Krya is under way: the page shows it, and a second press waits. */
 let movingToKrya = false
 
@@ -992,26 +1114,6 @@ async function moveToKrya(): Promise<void> {
 }
 
 /** A download of Krya's own deleted from the Storage page; each downloads again when it is wanted next. */
-function removeDownload(part: 'fast' | 'voice' | 'dict' | 'unused'): void {
-  switch (part) {
-    case 'fast':
-      if (translator.state(langCode(settings.native)).status === 'downloading') return
-      translator.dispose()
-      fs.rmSync(downloads('models'), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-      return
-    case 'voice':
-      natural.dispose()
-      voiceStore.remove()
-      return
-    case 'dict':
-      dictionaries.clear()
-      return
-    case 'unused':
-      llmFiles.removeUnused()
-      return
-  }
-}
-
 function appView(): AppView {
   return {
     settings,
@@ -1036,7 +1138,7 @@ function appView(): AppView {
     modelSpeed: modelSpeedView(),
     dictionary: { status: dictionaryStatus() },
     mistakes: mistakes.list(),
-    ...(storage ? { storage } : {}),
+    ...(storage ? { storage: storageView(storage) } : {}),
     layouts: keyboardLayouts(),
     ...(keyboardTrouble ? { keyboardTrouble } : {}),
     ...(lastApp ? { lastApp } : {}),
@@ -1306,13 +1408,6 @@ function onMessage(message: ToHost): void {
       saveSettings({ model: message.model })
       prepareModel()
       return
-    case 'removeModel':
-      if (settings.translationLevel === message.model) saveSettings({ translationLevel: 'fast' })
-      llmFiles
-        .remove(message.model)
-        .catch(error => console.warn('Krya: could not remove the model', error))
-        .finally(remeasure)
-      return
     case 'forgetMistake':
       mistakes.remove(message.at)
       postApp()
@@ -1334,15 +1429,6 @@ function onMessage(message: ToHost): void {
     case 'downloadSpeechModel':
       void speech.downloadModel(message.model).then(() => postApp())
       return
-    case 'removeSpeechModel':
-      void speech
-        .removeModel(message.model)
-        .catch(error => console.warn('Krya: could not remove the speech model', error))
-        .then(() => (postApp(), remeasure()))
-      return
-    case 'removeSpeech':
-      void speech.remove().then(() => (registerShortcuts(), applyKeyboard(), remeasure()))
-      return
     case 'storage':
       measureStorage()
       return
@@ -1354,13 +1440,16 @@ function onMessage(message: ToHost): void {
         remeasure()
       })
       return
-    case 'removeDownload':
-      try {
-        removeDownload(message.part)
-      } catch (error) {
-        console.warn(`Krya: could not remove ${message.part}`, error)
-      }
-      remeasure()
+    case 'removeStored':
+      void removeStored(message.id, message.item)
+        .catch(error => console.warn(`Krya: could not remove ${message.id}${message.item ? ` ${message.item}` : ''}`, error))
+        .finally(() => (postApp(), remeasure()))
+      return
+    case 'cleanUp':
+      void cleanUp().finally(() => (postApp(), remeasure()))
+      return
+    case 'useRecommended':
+      useRecommended()
       return
     case 'restartSpeech':
       speech.restart()
@@ -2619,6 +2708,12 @@ function runTrayCommand(command: TrayCommand): void {
       return
     case 'transcripts':
       openApp('transcripts')
+      return
+    case 'vocabulary':
+      openApp('vocabulary')
+      return
+    case 'kept':
+      openApp('kept')
       return
     case 'settings':
       openApp('settings')

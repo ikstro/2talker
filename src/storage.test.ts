@@ -4,7 +4,8 @@ import * as path from 'node:path'
 
 import { afterEach, expect, test } from 'vitest'
 
-import { folderSize, isUnder, markAway, measureParts } from './storage'
+import type { StoragePart } from './protocol'
+import { cleanable, folderSize, isUnder, markAway, measureParts, partPackages, speechModelDir, splitSpeech, withUse, type UseContext } from './storage'
 
 const made: string[] = []
 afterEach(() => made.splice(0).forEach(dir => fs.rmSync(dir, { recursive: true, force: true })))
@@ -68,4 +69,89 @@ test('parts are measured in the order given', async () => {
     ['llama', 5],
     ['voice', 0],
   ])
+})
+
+test("the speech engine's packages: who spoke when's and the graphics card's, the rest the program's", () => {
+  const names = ['torch', 'torchaudio', 'torch_pitch_shift', 'pyannote', 'pytorch_lightning', 'lightning_fabric', 'asteroid_filterbanks', 'nvidia', 'numpy', 'ctranslate2', 'onnx_asr']
+  expect(partPackages(names)).toEqual({ gpu: ['nvidia'], speakers: ['torch', 'torchaudio', 'torch_pitch_shift', 'pyannote', 'pytorch_lightning', 'lightning_fabric', 'asteroid_filterbanks'] })
+})
+
+test("a speech model's folder is where the engine keeps it", () => {
+  expect(speechModelDir('M', { name: 'large-v3', backend: 'whisper', repo: 'Systran/faster-whisper-large-v3' })).toBe(path.join('M', 'whisper', 'models--Systran--faster-whisper-large-v3'))
+  expect(speechModelDir('M', { name: 'parakeet-tdt-0.6b-v3', backend: 'parakeet', repo: 'istupakov/parakeet-tdt-0.6b-v3-onnx' })).toBe(path.join('M', 'parakeet-tdt-0.6b-v3'))
+})
+
+test("the program's line keeps what is neither the speakers' part nor the card's", () => {
+  const parts = splitSpeech([
+    { id: 'speech', path: 'S', bytes: 5000, shared: 3000 },
+    { id: 'speakers', path: 'S', bytes: 4200, shared: 2800 },
+    { id: 'gpu', path: 'S', bytes: 0, shared: 0 },
+  ])
+  expect(parts.map(p => [p.id, p.bytes, p.shared])).toEqual([
+    ['speech', 800, 200],
+    ['speakers', 4200, 2800],
+    ['gpu', 0, 0],
+  ])
+})
+
+const context: UseContext = {
+  level: 'accurate',
+  model: 'accurate',
+  languages: ['ru', 'en'],
+  native: 'ru',
+  naturalVoice: true,
+  build: 'vulkan',
+  speech: { dictation: 'large-v3-turbo', transcripts: 'large-v3-turbo', reserve: { dictation: 'small' } },
+}
+
+const part = (id: StoragePart['id'], item?: string, bytes = 1e6): StoragePart => ({ id, ...(item ? { item } : {}), path: 'P', bytes, shared: 0 })
+
+test('each part says what uses it; a part nothing uses is marked, a reserve for the processor is not', () => {
+  const parts = withUse(
+    [
+      part('fast', 'ru'),
+      part('fast', 'uk'),
+      part('dict', 'de'),
+      part('voice'),
+      part('accurate'),
+      part('most'),
+      part('unused'),
+      part('llama', 'vulkan'),
+      part('llama', 'cuda'),
+      part('speechModel', 'large-v3-turbo'),
+      part('speechModel', 'large-v3'),
+      part('speechModel', 'small'),
+      part('speakers'),
+      part('yours'),
+    ],
+    context,
+  )
+  const seen = parts.map(p => [p.id + (p.item ? `:${p.item}` : ''), p.users?.join(' · ') ?? '-', p.unused ? 'unused' : p.reserve ? `reserve ${p.reserve}` : ''])
+  expect(seen).toEqual([
+    ['fast:ru', 'Translate', ''],
+    ['fast:uk', '', 'unused'],
+    ['dict:de', '', 'unused'],
+    ['voice', 'Listen', ''],
+    ['accurate', 'Translate · Check', ''],
+    ['most', '', 'unused'],
+    ['unused', '', 'unused'],
+    ['llama:vulkan', 'Translate · Check', ''],
+    ['llama:cuda', '', 'unused'],
+    ['speechModel:large-v3-turbo', 'Dictate · Transcribe', ''],
+    ['speechModel:large-v3', '', 'unused'],
+    ['speechModel:small', '', 'reserve Dictate'],
+    ['speakers', 'Transcribe', ''],
+    ['yours', '-', ''],
+  ])
+})
+
+test('the model serves Check alone while Translate is on Fast; a Windows voice leaves the natural one unused', () => {
+  const parts = withUse([part('accurate'), part('llama', 'vulkan'), part('voice')], { ...context, level: 'fast', naturalVoice: false })
+  expect(parts.map(p => p.users)).toEqual([['Check'], ['Check'], []])
+  expect(parts[2]?.unused).toBe(true)
+})
+
+test('Clean up takes only what nothing uses and what takes room', () => {
+  const parts = withUse([part('fast', 'uk'), part('most', undefined, 0), part('accurate')], context)
+  expect(cleanable(parts).map(p => p.id + (p.item ? `:${p.item}` : ''))).toEqual(['fast:uk'])
 })

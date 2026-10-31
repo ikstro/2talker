@@ -120,7 +120,7 @@ export type WordHintMode = 'shift' | 'hover' | 'off'
 export type ViewConfig = { voice: string; rate: number; wordHint: WordHintMode; rareWords: boolean; oneAtATime: boolean }
 
 /** The app window's places: Home (always first), its action pages, and Words, Mistakes, Settings, About; 'howto' is the old name of Home. */
-export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'settings' | 'storage' | 'about' | 'report' | 'howto'
+export type AppTab = 'home' | 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard' | 'words' | 'mistakes' | 'transcripts' | 'vocabulary' | 'kept' | 'settings' | 'models' | 'storage' | 'about' | 'report' | 'howto'
 
 export type HostVoice = { name: string; lang: string }
 
@@ -226,15 +226,18 @@ export type AppView = {
   storage?: StorageView
 }
 
-/** A part of what Krya keeps (storage.ts): the downloads one by one, llama.cpp's builds, the speech engine, the person's own things. */
-export type StorageId = 'fast' | 'voice' | 'dict' | 'accurate' | 'most' | 'unused' | 'llama' | 'speech' | 'yours' | 'transcripts'
-/** Its place, its bytes, and how many of them are files linked from elsewhere too (a developer's uv cache), which a removal does not free. */
-export type StoragePart = { id: StorageId; path: string; bytes: number; shared: number; away?: boolean }
 /**
- * The downloads' folder and the free space on its drive (MB); `measuring` while the parts are walked again.
- * A download outside it (`away`: a move from the old Altype folder that could not finish) brings `old`:
- * that folder, why the last move left the part there, and Move to Krya under way.
+ * A part of what Krya keeps (storage.ts): Firefox's models and the word dictionaries by language, the natural voice, the
+ * two language models and an older Krya's, llama.cpp's builds, each speech model, the speech engine's program and its
+ * graphics card's and speakers' parts, the person's own things.
  */
+export type StorageId = 'fast' | 'dict' | 'voice' | 'accurate' | 'most' | 'unused' | 'llama' | 'speechModel' | 'speech' | 'gpu' | 'speakers' | 'yours' | 'transcripts'
+/**
+ * Its place, its bytes, and how many of them are files linked from elsewhere too (a developer's uv cache), which a removal does not free.
+ * `item`: the language's code (fast, dict), the speech model's name, the build (llama: vulkan, cuda). `users`: the actions it serves now;
+ * `unused`: nothing uses it, Clean up removes it; `reserve`: kept for when the graphics card fails ("Dictate"), not cleaned up.
+ */
+export type StoragePart = { id: StorageId; item?: string; path: string; bytes: number; shared: number; away?: boolean; users?: string[]; unused?: boolean; reserve?: string }
 export type StorageView = { measuring: boolean; root: string; drive: string; freeMb: number; parts: StoragePart[]; old?: OldFolder }
 export type OldFolder = { dir: string; why?: string; moving: boolean }
 
@@ -262,7 +265,7 @@ export type TrayView = {
 }
 
 /** What the tray's panel can do; each puts the panel away first. */
-export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'checkEnglish' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'settings' | 'report' | 'open' | 'quit'
+export type TrayCommand = 'listenCopied' | 'translateCopied' | 'typeToTranslate' | 'checkEnglish' | 'listenScreen' | 'translateScreen' | 'note' | 'transcripts' | 'vocabulary' | 'kept' | 'settings' | 'report' | 'open' | 'quit'
 
 /**
  * Why a word has no meanings: no dictionary exists for the person's language,
@@ -382,8 +385,6 @@ export type ToHost =
   | { type: 'translationLevel'; level: TranslationLevel }
   /** The one model picked on the Check page (translation too, when it is not Fast): saved and downloaded. */
   | { type: 'useModel'; model: LlmModel }
-  /** A model deleted (Fast in its place when it translated). */
-  | { type: 'removeModel'; model: LlmModel }
   /** Forget one kept mistake (by its time), or all of them. */
   | { type: 'forgetMistake'; at: string }
   | { type: 'clearMistakes' }
@@ -393,9 +394,6 @@ export type ToHost =
   | { type: 'declineSpeechTest' }
   /** A speech model downloaded now, ahead of its use. */
   | { type: 'downloadSpeechModel'; model: string }
-  /** A speech model nothing uses, off the disk (it downloads again when picked). */
-  | { type: 'removeSpeechModel'; model: string }
-  | { type: 'removeSpeech' }
   | { type: 'restartSpeech' }
   | { type: 'showInFolder'; path: string }
   | { type: 'openPath'; path: string }
@@ -414,9 +412,15 @@ export type ToHost =
   /** Report a problem (report.ts): the zip made and shown in its folder, then the email or the GitHub issue opened with `text` in it; or Krya's folder with the logs opened. */
   | { type: 'reportProblem'; via: 'email' | 'github'; text: string }
   | { type: 'openLogs' }
-  /** Measure what Krya keeps (the Storage page opened); remove a download of its own, which downloads again when needed. */
+  /**
+   * Measure what Krya keeps (the Models or Storage page opened). Remove one part (a language model: Fast in its place
+   * when it translated; the speech engine whole, or its graphics card's or speakers' part); each downloads again when
+   * wanted. Clean up removes every part nothing uses. Use recommended: the models advised for this computer, and their downloads.
+   */
   | { type: 'storage' }
-  | { type: 'removeDownload'; part: 'fast' | 'voice' | 'dict' | 'unused' }
+  | { type: 'removeStored'; id: StorageId; item?: string }
+  | { type: 'cleanUp' }
+  | { type: 'useRecommended' }
   /** What is left in the old Altype folder moved into Krya's: the engine and the model's server stopped first, Krya started again after. */
   | { type: 'moveToKrya' }
   // The dictation badge.

@@ -1,10 +1,15 @@
 // The first-run setup's advice: what to download on this computer, and what
-// the person's choice costs. Pure, so the window and the tests share it. The
-// numbers come from the app's snapshot: the speech plan (speechplan.ts), the
-// parts' sizes (speechhost.ts view), the voice's and the translator's size.
+// the person's choice costs; and the Models page's Use recommended, the models
+// advised here in place of the ones picked. Pure, so the window and the tests
+// share it. The numbers come from the app's snapshot: the speech plan
+// (speechplan.ts), the parts' sizes (speechhost.ts view), the voice's and the
+// translator's size.
 
+import { translationAdvice } from './hardware'
 import { scriptFor } from './languages'
+import { NATURAL_PREFIX } from './natural'
 import type { AppView } from './protocol'
+import { LEVEL_NAMES, type Settings, type TranslationLevel } from './settings'
 import type { SpeechPart } from './speechpack'
 import { minutes, seconds } from './speechplan'
 
@@ -161,6 +166,80 @@ export function cost(c: Choice, v: AppView): Cost {
   const download = items.reduce((n, i) => n + i.mb, 0)
   const free = s.disk.freeMb
   return { items, download, disk, parts, models: models.filter(m => !(s.health?.downloaded ?? []).includes(m)), fits: free <= 0 || free >= disk * 1.1 }
+}
+
+// ---------------------------------------------------------------- Use recommended
+
+/** One change Use recommended makes, in words: what, from and to, and the MB it downloads. */
+export type ModelChange = { what: string; from: string; to: string; mb: number }
+
+/**
+ * Use recommended on this computer: the settings to save, each change in words,
+ * what it downloads in all (MB), and what to fetch: the language model a change
+ * gives Translate or Check, the natural voice, the speech engine's parts (the
+ * graphics card's; the speakers' moved to where they are advised).
+ */
+export type ModelAdvice = { patch: Partial<Settings>; changes: ModelChange[]; download: number; model: boolean; natural: boolean; parts: SpeechPart[] }
+
+const PLACE = { cuda: 'graphics card', cpu: 'processor' } as const
+
+/** The models advised here in place of the ones picked; nothing changes what already is as advised. */
+export function recommendedModels(v: AppView): ModelAdvice {
+  const s = v.settings
+  const sp = v.speech
+  const r = recommend(v)
+  const patch: Partial<Settings> = {}
+  const changes: ModelChange[] = []
+  const parts: SpeechPart[] = []
+  const change = (what: string, from: string, to: string, mb = 0) => changes.push({ what, from, to, mb })
+
+  // Translate and Check: the level the graphics card holds; without one Fast translates and Check keeps its model.
+  const level: TranslationLevel = translationAdvice(sp.device).advised
+  const model = level === 'fast' ? s.model : level
+  if (level !== s.translationLevel) (patch.translationLevel = level), change('Translate', LEVEL_NAMES[s.translationLevel], LEVEL_NAMES[level])
+  if (model !== s.model) (patch.model = model), change('Check my English', LEVEL_NAMES[s.model], LEVEL_NAMES[model])
+  // A model given to Translate or Check comes with Apply, on the first line that names it.
+  const fetchModel = (level !== 'fast' && patch.translationLevel !== undefined) || patch.model !== undefined ? v.models[model].status !== 'ready' && v.models[model].status !== 'downloading' : false
+  const named = changes.find(c => c.to === LEVEL_NAMES[model])
+  if (fetchModel && named) named.mb = v.models[model].size
+  const fast = changes.find(c => c.what === 'Translate' && level === 'fast')
+  if (fast && v.translation.fast.status !== 'ready' && v.translation.fast.status !== 'downloading') fast.mb = v.translation.fast.size
+
+  // Listen: the natural voice from four cores, else a Windows voice, which is instant.
+  const ready = v.natural.status === 'ready'
+  const natural = s.voice === '' ? ready : s.voice.startsWith(NATURAL_PREFIX)
+  const windows = v.hostVoices.find(h => /^en\b/i.test(h.lang))?.name
+  const voiceName = natural ? 'Natural voice' : s.voice || 'Windows voice'
+  let fetchNatural = false
+  if (r.voice.on && !natural) {
+    // Automatic reads with the natural voice once it is here.
+    if (s.voice) patch.voice = ''
+    fetchNatural = !ready && v.natural.status !== 'downloading'
+    change('Listen voice', voiceName, 'Natural voice', fetchNatural ? v.natural.size : 0)
+  } else if (!r.voice.on && natural && windows) {
+    patch.voice = windows
+    change('Listen voice', voiceName, windows)
+  }
+
+  // Dictate and Transcribe: Automatic, accuracy first, on the graphics card when it can take them; who spoke when where advised.
+  if (sp.pack.parts.includes('core')) {
+    const features = [
+      ['dictationModel', 'Dictate', sp.plan.dictation],
+      ['transcriptsModel', 'Transcribe', sp.plan.transcripts],
+    ] as const
+    for (const [key, what, plan] of features) if (s[key]) (patch[key] = ''), change(what, plan.chosen.label, 'Automatic')
+    if (s.speechPrefer !== 'accuracy') (patch.speechPrefer = 'accuracy'), change('Automatic speech models', 'Speed first', 'Accuracy first')
+    if (r.gpu.on && sp.pack.nvidia && !sp.pack.parts.includes('gpu')) parts.push('gpu'), change('Dictate and Transcribe', 'processor', 'graphics card', sp.download.gpu)
+    if (s.speakersDevice !== 'auto') {
+      patch.speakersDevice = 'auto'
+      const now = sp.plan.offers.speakersGpu && s.speakersDevice !== 'cpu' ? 'cuda' : 'cpu'
+      const then = sp.plan.offers.speakersGpu ? 'cuda' : 'cpu'
+      const moving = sp.pack.parts.includes('speakers') && (sp.pack.speakersOn ?? 'cpu') !== then
+      if (moving) parts.push('speakers')
+      if (now !== then) change('Who spoke when', PLACE[now], PLACE[then], moving ? sp.speakers.sizes[then].download : 0)
+    }
+  }
+  return { patch, changes, download: changes.reduce((n, c) => n + c.mb, 0), model: fetchModel, natural: fetchNatural, parts }
 }
 
 /** 480 MB, 2.9 GB. */

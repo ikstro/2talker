@@ -184,6 +184,16 @@ export class SpeechPack {
     return this.running
   }
 
+  /** A part off the disk (the speakers', the graphics card's): the packages synced without it; the program and the models stay. */
+  drop(part: SpeechPart): Promise<void> {
+    if (this.running) return this.running
+    const m = this.marker()
+    if (!m || part === 'core' || !m.parts.includes(part)) return Promise.resolve()
+    const parts = m.parts.filter(p => p !== part)
+    this.running = this.installAll(parts, extrasFor(parts, this.o.gpuSpeakers?.() ?? true)).finally(() => (this.running = undefined))
+    return this.running
+  }
+
   private async installAll(parts: SpeechPart[], extras: string[]): Promise<void> {
     this.installing = parts
     this.message = undefined

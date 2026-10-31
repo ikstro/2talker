@@ -299,11 +299,16 @@
       group(
         "Quick settings",
         toggle("autoFix", "spell-check", "Fix the layout as I type", v.autoFix),
-        v.keep.on ? keepRow(v) : null,
         v.keys.switch ? toggle("switchOn", "keyboard", `Switch layouts with ${hotkeyLabel(v.keys.switch)}`, v.switchOn) : null,
         toggle("layoutBadge", "text-cursor", "Show the layout by the cursor", v.layoutBadge),
         toggle("trayLayout", "panel-bottom", "Show the layout in the tray", v.trayLayout),
         toggle("doubleCopy", "copy", "Ctrl+C twice listens", v.doubleCopy)
+      ),
+      group(
+        "Your words",
+        v.keep.on ? keepRow(v) : null,
+        v.speech.installed ? command("vocabulary", "mic", "Add a word to spell\u2026", "vocabulary") : null,
+        command("kept", "list", "Words kept as typed", "kept")
       ),
       el(
         "footer",

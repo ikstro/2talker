@@ -361,6 +361,23 @@ export class SpeechHost {
     await this.pack.remove()
   }
 
+  /** A part off the disk (the speakers', the graphics card's); the engine starts again without it. */
+  async removePart(part: SpeechPart): Promise<void> {
+    this.service.stop()
+    try {
+      await this.pack.drop(part)
+    } finally {
+      if (this.installed) {
+        await this.service.start()
+        void this.whenReady().then(async ready => {
+          if (!ready) return
+          this.replan()
+          await this.push()
+        })
+      }
+    }
+  }
+
   restart(): void {
     if (this.installed) this.service.restart()
   }

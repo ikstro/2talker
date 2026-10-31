@@ -40,26 +40,41 @@ export function navCard(name: LucideName | null, title: string, note: Note | Not
   )
 }
 
-/** An action's mark on a model's line: lit, with a check, when the action uses the model; a tap on an unlit one gives it the model. */
-export function useMark(name: string, on: boolean, pick?: () => void, why = ''): HTMLButtonElement {
-  return el(
-    'button',
+/**
+ * One choice of a few (an action's model on the Models page): a ring before
+ * the line, filled in the one in use; a tap anywhere on the line but its own
+ * buttons picks it. No `pick`: it cannot be picked here.
+ */
+export function radioRow(label: string | HTMLElement, notes: Note[], on: boolean, pick: (() => void) | undefined, ...controls: (HTMLElement | null)[]): HTMLElement {
+  const node = el(
+    'div',
     {
-      class: on ? 'chip use lit' : 'chip use',
-      'aria-pressed': String(on),
-      disabled: !on && !pick,
-      title: why || (on ? `${name} uses it` : `Use it for ${name}`),
-      onclick: () => {
-        if (!on) pick?.()
-      },
+      class: `row radio${on ? ' on' : ''}${pick ? '' : ' off'}`,
+      role: 'radio',
+      'aria-checked': String(on),
+      'aria-disabled': pick ? undefined : 'true',
+      tabindex: pick && !on ? '0' : undefined,
     },
-    on ? lucide('check', 's') : null,
-    name,
+    el('span', { class: 'ring', 'aria-hidden': 'true' }),
+    el('div', { class: 'l' }, label, ...notesOf(notes)),
+    ...controls,
   )
+  const choose = (event: Event) => {
+    if (on || !pick || (event.target as Element).closest('button, a, input, select')) return
+    node.classList.add('on')
+    pick()
+  }
+  node.addEventListener('click', choose)
+  node.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    choose(event)
+  })
+  return node
 }
 
-/** The actions' marks on a model's line, side by side. */
-export const uses = (...marks: (HTMLElement | null)[]) => el('span', { class: 'uses' }, ...marks)
+/** The advice for this computer, after a line's title. */
+export const recommended = () => el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended')
 
 /** A small round-cornered icon button: remove, earlier, later. */
 export function ib(name: LucideName, label: string, onclick: () => void, disabled = false): HTMLButtonElement {

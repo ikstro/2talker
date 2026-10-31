@@ -4,7 +4,7 @@ import type { DeviceProfile } from './hardware'
 import type { AppView } from './protocol'
 import { DEFAULTS } from './settings'
 import { planSpeech } from './speechplan'
-import { cost, recommend, recommendedChoice } from './setup'
+import { cost, recommend, recommendedChoice, recommendedModels } from './setup'
 
 const i9: DeviceProfile = {
   cpu: { name: 'Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz', cores: 8, threads: 16 },
@@ -154,5 +154,61 @@ describe('cost', () => {
     const c = cost({ ...recommendedChoice(v), speakers: false }, v)
     expect(c.items.find(i => i.key === 'translator')?.mb).toBe(0)
     expect(c.parts).toEqual([])
+  })
+})
+
+describe('recommendedModels', () => {
+  /** The engine installed here, with these parts. */
+  const withEngine = (v: AppView, parts: AppView['speech']['pack']['parts'], speakersOn?: 'cuda' | 'cpu'): AppView => ({
+    ...v,
+    speech: { ...v.speech, pack: { ...v.speech.pack, status: 'ready', parts, ...(speakersOn ? { speakersOn } : {}) } },
+  })
+
+  it('an RTX 2080 SUPER of 8 GB: Accurate for Translate and Check, downloaded once; Automatic speech; the natural voice', () => {
+    const base = view(i9)
+    const v = withEngine({ ...base, settings: { ...base.settings, dictationModel: 'large-v3', speechPrefer: 'speed' } }, ['core', 'gpu'])
+    const a = recommendedModels(v)
+    expect(a.patch).toEqual({ translationLevel: 'accurate', dictationModel: '', speechPrefer: 'accuracy' })
+    expect(a.changes.map(c => `${c.what}: ${c.from} → ${c.to} ${c.mb}`)).toEqual([
+      'Translate: Fast → Accurate 5155',
+      'Listen voice: Windows voice → Natural voice 170',
+      `Dictate: ${v.speech.plan.dictation.chosen.label} → Automatic 0`,
+      'Automatic speech models: Speed first → Accuracy first 0',
+    ])
+    expect(a.download).toBe(5155 + 170)
+    expect(a.model).toBe(true)
+    expect(a.natural).toBe(true)
+    expect(a.parts).toEqual([])
+  })
+
+  it('a laptop without a card: Fast, a Windows voice in place of the natural one, the model left as it is', () => {
+    const base = view(laptop)
+    const v = {
+      ...base,
+      settings: { ...base.settings, translationLevel: 'accurate' as const, model: 'accurate' as const },
+      natural: { ...base.natural, status: 'ready' as const },
+      hostVoices: [{ name: 'Microsoft Zira Desktop', lang: 'en-US' }],
+    }
+    const a = recommendedModels(v)
+    expect(a.patch).toEqual({ translationLevel: 'fast', voice: 'Microsoft Zira Desktop' })
+    expect(a.changes.map(c => `${c.what}: ${c.from} → ${c.to} ${c.mb}`)).toEqual(['Translate: Accurate → Fast 84', 'Listen voice: Natural voice → Microsoft Zira Desktop 0'])
+    expect(a.model).toBe(false)
+  })
+
+  it('what is as advised already changes nothing', () => {
+    const base = view(i9)
+    const v = { ...base, settings: { ...base.settings, translationLevel: 'accurate' as const }, natural: { ...base.natural, status: 'ready' as const }, models: { ...base.models, accurate: { status: 'ready' as const, progress: 1, size: 5155 } } }
+    expect(recommendedModels(v)).toEqual({ patch: {}, changes: [], download: 0, model: false, natural: false, parts: [] })
+  })
+
+  it('the graphics card\'s part added, and who spoke when moved to the card', () => {
+    const base = view(i9)
+    const v = withEngine({ ...base, settings: { ...base.settings, speakersDevice: 'cpu' } }, ['core', 'speakers'], 'cpu')
+    const a = recommendedModels(v)
+    expect(a.parts).toEqual(['gpu', 'speakers'])
+    expect(a.changes.filter(c => c.what !== 'Translate' && c.what !== 'Listen voice').map(c => `${c.what}: ${c.from} → ${c.to} ${c.mb}`)).toEqual([
+      'Dictate and Transcribe: processor → graphics card 1150',
+      'Who spoke when: processor → graphics card 3000',
+    ])
   })
 })

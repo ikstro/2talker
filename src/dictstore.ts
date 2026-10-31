@@ -94,6 +94,14 @@ export class DictionaryStore {
     this.options.onChange?.('')
   }
 
+  /** One language's downloaded dictionary deleted; its next word downloads it again (a bundled one stays). */
+  remove(code: string): void {
+    if (this.states.get(code)?.status === 'downloading' || BUNDLED.has(code)) return
+    this.states.delete(code)
+    fs.rmSync(this.cacheFile(code), { force: true, maxRetries: 10, retryDelay: 200 })
+    this.options.onChange?.(code)
+  }
+
   private async download(code: string): Promise<void> {
     try {
       const gz = await this.options.fetchGz(dictionaryUrl(code))

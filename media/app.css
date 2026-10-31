@@ -1687,39 +1687,86 @@ button.chip:hover {
   opacity: 0.55;
 }
 
-/* The actions a model serves, on its line (Models): lit with a check when one uses it, a tap gives it to another. */
-.uses {
-  display: inline-flex;
-  flex: none;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.chip.use {
-  gap: 4px;
+/* One choice of a few (an action's model on Models): a ring before the line, filled in the one in use; the whole line picks it. */
+.row.radio {
+  align-items: flex-start;
   cursor: pointer;
 }
 
-.chip.use .lu {
-  width: 13px;
-  height: 13px;
-  stroke-width: 2.5;
+.row.radio:not(.on, .off):hover {
+  background: var(--hover);
 }
 
-.chip.use.lit {
+.row.radio:not(.on, .off):hover::before,
+.row.radio:not(.on, .off):hover + .row::before {
+  opacity: 0;
+}
+
+.row.radio.on,
+.row.radio.off {
   cursor: default;
 }
 
-button.chip.use.lit:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--raised));
+.row.radio:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
-.chip.use:disabled:not(.lit) {
+.row.radio > .ring {
+  flex: none;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+
+.row.radio:not(.on, .off):hover > .ring {
+  border-color: var(--strong);
+}
+
+.row.radio.on > .ring {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--on-accent) 0 3px, var(--accent) 3.5px);
+}
+
+.row.radio.off > .ring {
   border-style: dashed;
+  opacity: 0.6;
+}
+
+.row.radio > .pct,
+.row.radio > .link,
+.row.radio > .ib {
+  align-self: center;
+}
+
+/* A part nothing uses (Storage, Clean up): a quiet chip with an amber dot, as what waits for the person. */
+.chip.unused {
+  gap: 6px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 8px;
   background: transparent;
   color: var(--muted);
-  cursor: default;
+  font: 600 11px / 1 var(--font);
+  vertical-align: 2px;
+}
+
+.chip.unused::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+/* Use recommended's changes, one to a line. */
+.row.total .l small b {
+  font-weight: 600;
+  color: var(--strong);
 }
 
 .warn .codicon,

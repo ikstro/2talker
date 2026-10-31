@@ -646,23 +646,34 @@
       lucide("chevron-right", "chev")
     );
   }
-  function useMark(name, on, pick, why = "") {
-    return el(
-      "button",
+  function radioRow(label, notes, on, pick, ...controls) {
+    const node = el(
+      "div",
       {
-        class: on ? "chip use lit" : "chip use",
-        "aria-pressed": String(on),
-        disabled: !on && !pick,
-        title: why || (on ? `${name} uses it` : `Use it for ${name}`),
-        onclick: () => {
-          if (!on) pick?.();
-        }
+        class: `row radio${on ? " on" : ""}${pick ? "" : " off"}`,
+        role: "radio",
+        "aria-checked": String(on),
+        "aria-disabled": pick ? void 0 : "true",
+        tabindex: pick && !on ? "0" : void 0
       },
-      on ? lucide("check", "s") : null,
-      name
+      el("span", { class: "ring", "aria-hidden": "true" }),
+      el("div", { class: "l" }, label, ...notesOf(notes)),
+      ...controls
     );
+    const choose = (event) => {
+      if (on || !pick || event.target.closest("button, a, input, select")) return;
+      node.classList.add("on");
+      pick();
+    };
+    node.addEventListener("click", choose);
+    node.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      choose(event);
+    });
+    return node;
   }
-  var uses = (...marks) => el("span", { class: "uses" }, ...marks);
+  var recommended = () => el("span", { class: "chip good" }, lucide("check", "s"), "Recommended");
   function ib(name, label, onclick, disabled = false) {
     return el("button", { class: "ib", title: label, "aria-label": label, disabled, onclick }, lucide(name));
   }
@@ -1134,6 +1145,56 @@
     const free = s.disk.freeMb;
     return { items, download, disk, parts, models: models.filter((m) => !(s.health?.downloaded ?? []).includes(m)), fits: free <= 0 || free >= disk * 1.1 };
   }
+  var PLACE = { cuda: "graphics card", cpu: "processor" };
+  function recommendedModels(v) {
+    const s = v.settings;
+    const sp = v.speech;
+    const r = recommend(v);
+    const patch2 = {};
+    const changes = [];
+    const parts = [];
+    const change = (what, from, to, mb = 0) => changes.push({ what, from, to, mb });
+    const level = translationAdvice(sp.device).advised;
+    const model = level === "fast" ? s.model : level;
+    if (level !== s.translationLevel) patch2.translationLevel = level, change("Translate", LEVEL_NAMES[s.translationLevel], LEVEL_NAMES[level]);
+    if (model !== s.model) patch2.model = model, change("Check my English", LEVEL_NAMES[s.model], LEVEL_NAMES[model]);
+    const fetchModel = level !== "fast" && patch2.translationLevel !== void 0 || patch2.model !== void 0 ? v.models[model].status !== "ready" && v.models[model].status !== "downloading" : false;
+    const named = changes.find((c) => c.to === LEVEL_NAMES[model]);
+    if (fetchModel && named) named.mb = v.models[model].size;
+    const fast = changes.find((c) => c.what === "Translate" && level === "fast");
+    if (fast && v.translation.fast.status !== "ready" && v.translation.fast.status !== "downloading") fast.mb = v.translation.fast.size;
+    const ready = v.natural.status === "ready";
+    const natural = s.voice === "" ? ready : s.voice.startsWith(NATURAL_PREFIX);
+    const windows = v.hostVoices.find((h) => /^en\b/i.test(h.lang))?.name;
+    const voiceName = natural ? "Natural voice" : s.voice || "Windows voice";
+    let fetchNatural = false;
+    if (r.voice.on && !natural) {
+      if (s.voice) patch2.voice = "";
+      fetchNatural = !ready && v.natural.status !== "downloading";
+      change("Listen voice", voiceName, "Natural voice", fetchNatural ? v.natural.size : 0);
+    } else if (!r.voice.on && natural && windows) {
+      patch2.voice = windows;
+      change("Listen voice", voiceName, windows);
+    }
+    if (sp.pack.parts.includes("core")) {
+      const features = [
+        ["dictationModel", "Dictate", sp.plan.dictation],
+        ["transcriptsModel", "Transcribe", sp.plan.transcripts]
+      ];
+      for (const [key, what, plan] of features) if (s[key]) patch2[key] = "", change(what, plan.chosen.label, "Automatic");
+      if (s.speechPrefer !== "accuracy") patch2.speechPrefer = "accuracy", change("Automatic speech models", "Speed first", "Accuracy first");
+      if (r.gpu.on && sp.pack.nvidia && !sp.pack.parts.includes("gpu")) parts.push("gpu"), change("Dictate and Transcribe", "processor", "graphics card", sp.download.gpu);
+      if (s.speakersDevice !== "auto") {
+        patch2.speakersDevice = "auto";
+        const now = sp.plan.offers.speakersGpu && s.speakersDevice !== "cpu" ? "cuda" : "cpu";
+        const then = sp.plan.offers.speakersGpu ? "cuda" : "cpu";
+        const moving = sp.pack.parts.includes("speakers") && (sp.pack.speakersOn ?? "cpu") !== then;
+        if (moving) parts.push("speakers");
+        if (now !== then) change("Who spoke when", PLACE[now], PLACE[then], moving ? sp.speakers.sizes[then].download : 0);
+      }
+    }
+    return { patch: patch2, changes, download: changes.reduce((n, c) => n + c.mb, 0), model: fetchModel, natural: fetchNatural, parts };
+  }
   function sizeText(mb) {
     return mb >= 1e3 ? `${(Math.round(mb / 100) / 10).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
   }
@@ -1229,6 +1290,7 @@
     const p = v.speech.pack;
     if (p.status === "removing") return row("Removing the speech engine\u2026", [], null);
     if (p.status !== "installing") return void 0;
+    if (p.installing && p.installing.length < p.parts.length) return row("Removing a part of the speech engine\u2026", ["the speech engine is back in a moment", bar(p.progress ?? 0)], el("span", { class: "pct" }, `${Math.round((p.progress ?? 0) * 100)}%`));
     const what = p.step === "tool" ? "the Python manager" : "the packages";
     const pct2 = Math.round((p.progress ?? 0) * 100);
     const parts = (p.installing ?? []).filter((x) => !p.parts.includes(x));
@@ -1284,51 +1346,70 @@
     ["transcripts", "Transcribe"]
   ];
   var pin = (feature, model) => post({ type: "saveSettings", patch: { [feature === "dictation" ? "dictationModel" : "transcriptsModel"]: model } });
-  function speechModelRows(v) {
+  function speechChoiceRows(v, feature) {
     const plan = v.speech.plan;
-    const plans = { dictation: plan.dictation, transcripts: plan.transcripts };
+    const p = plan[feature];
+    const other = feature === "dictation" ? "transcripts" : "dictation";
+    const otherName = FEATURES.find(([f]) => f === other)?.[1] ?? "";
     const spare = plan.device === "cuda" ? plan.engine.cpu : void 0;
+    const budget = feature === "dictation" ? `a phrase in \u2248${seconds(p.budget)}` : `an hour in \u2248${minutes(p.budget)}`;
+    const live = (name) => [liveModel(v, "dictation"), liveModel(v, "transcripts")].find((m) => m?.name === name && m.state === "downloading");
     const out = [
-      row(
-        "Automatic",
-        [`for each action, the most accurate model that is quick enough here: a phrase in \u2248${seconds(plan.dictation.budget)}, an hour in \u2248${minutes(plan.transcripts.budget)}`],
-        uses(...FEATURES.map(([f, name]) => useMark(name, !plans[f].pinned, () => pin(f, ""))))
+      radioRow(
+        el("span", {}, "Automatic", recommended()),
+        [`the most accurate model that is quick enough here: ${budget}`, p.pinned ? null : `uses ${p.chosen.label} now`],
+        !p.pinned,
+        () => pin(feature, "")
       )
     ];
-    const names = [...new Set([...plan.dictation.choices, ...plan.transcripts.choices].map((c) => c.model))];
-    for (const name of names) {
-      const of = (f) => plans[f].choices.find((c) => c.model === name);
-      const any = of("dictation") ?? of("transcripts");
-      const usable = FEATURES.filter(([f]) => of(f) && !of(f)?.why);
-      const serving = FEATURES.filter(([f]) => plans[f].chosen.model === name);
-      const live = [liveModel(v, "dictation"), liveModel(v, "transcripts")].find((m) => m?.name === name && m.state === "downloading");
-      const backup = spare ? FEATURES.filter(([f]) => spare[f]?.model === name).map(([, n]) => n) : [];
-      const why = usable.length === 0 ? of("dictation")?.why ?? of("transcripts")?.why ?? "" : "";
-      const slow = serving.some(([f]) => plans[f].pinned && !of(f)?.fits);
-      const notes = why ? [`${any.about} \xB7 ${why}`] : [
-        `${usable.map(([f, n]) => `${n} ${estimateText(f, of(f))}`).join(" \xB7 ")} \xB7 on the ${where(any)} \xB7 ${BASIS_TEXT[any.basis]}${slow ? " \xB7 slower than usual here" : ""}`,
-        `${any.about}${of("transcripts") ? "" : " \xB7 Dictate only"} \xB7 ${size(any.mb)}${any.downloaded ? " on this computer" : serving.length ? ", downloads with its first use" : ", downloads when picked"}`,
-        serving.length === 2 ? "Dictate and Transcribe share it: downloaded once, loaded once" : null,
-        live ? bar(live.progress ?? 0) : null
+    for (const c of p.choices) {
+      const on = p.pinned && p.chosen.model === c.model;
+      const here = p.chosen.model === c.model;
+      const shared = plan[other].chosen.model === c.model;
+      const backup = spare && !here && !shared ? FEATURES.filter(([f]) => spare[f]?.model === c.model).map(([, n]) => n) : [];
+      const loading = live(c.model);
+      const notes = c.why ? [`${c.about} \xB7 ${c.why}`] : [
+        `${estimateText(feature, c)} \xB7 on the ${where(c)} \xB7 ${BASIS_TEXT[c.basis]}${on && !c.fits ? " \xB7 slower than usual here" : ""}`,
+        `${c.about} \xB7 ${size(c.mb)}${c.downloaded ? " on this computer" : ", downloads when picked"}`,
+        here && !p.pinned ? "Automatic uses it now" : null,
+        shared ? `${otherName} uses it too: downloaded once, loaded once` : null,
+        loading ? bar(loading.progress ?? 0) : null
       ];
-      if (!serving.length && any.downloaded) notes.push(backup.length ? `kept for ${backup.join(" and ")} on the processor, if the graphics card fails` : "not used now");
-      const marks = uses(
-        ...FEATURES.map(([f, n]) => {
-          const c = of(f);
-          if (!c) return null;
-          const pick = () => {
-            if (!c.downloaded) post({ type: "downloadSpeechModel", model: name });
-            pin(f, name);
-          };
-          return useMark(n, plans[f].chosen.model === name, c.why ? void 0 : pick, c.why);
-        })
-      );
-      const remove2 = any.downloaded && !serving.length && !live ? ib("x", `Remove ${any.label} (${size(any.mb)}); it downloads again when picked`, () => post({ type: "removeSpeechModel", model: name })) : null;
-      const node = row(any.label, notes, marks, live ? el("span", { class: "pct" }, `${Math.round((live.progress ?? 0) * 100)}%`) : null, remove2);
-      if (why) node.classList.add("dim");
+      if (!here && !shared && c.downloaded) notes.push(backup.length ? `kept for ${backup.join(" and ")} on the processor, if the graphics card fails` : "not used now");
+      const pick = c.why ? void 0 : () => {
+        if (!c.downloaded) post({ type: "downloadSpeechModel", model: c.model });
+        pin(feature, c.model);
+      };
+      const remove2 = c.downloaded && !here && !shared && !backup.length && !loading ? ib("x", `Remove ${c.label} (${size(c.mb)}); it downloads again when picked`, () => post({ type: "removeStored", id: "speechModel", item: c.model })) : null;
+      const node = radioRow(c.label, notes, on, pick, loading ? el("span", { class: "pct" }, `${Math.round((loading.progress ?? 0) * 100)}%`) : null, remove2);
+      if (c.why) node.classList.add("dim");
       out.push(node);
     }
     return out;
+  }
+  function preferRow(v) {
+    return row(
+      "Automatic prefers",
+      [v.settings.speechPrefer === "speed" ? "quicker models, a little less accurate" : "the most accurate models this computer runs in time"],
+      seg(
+        v.settings.speechPrefer,
+        [
+          ["accuracy", "Accuracy"],
+          ["speed", "Speed"]
+        ],
+        (speechPrefer) => post({ type: "saveSettings", patch: { speechPrefer } })
+      )
+    );
+  }
+  function gpuRow(v) {
+    const p = v.speech.pack;
+    if (!p.nvidia || !installed(v)) return null;
+    if (hasPart(v, "gpu")) return row("Speech on the graphics card", [el("small", { class: "ok" }, "Installed"), cardNote(v)]);
+    return row(
+      "Speech on the graphics card",
+      [`${size(v.speech.download.gpu)} to download; Dictate and Transcribe get several times quicker`, cardNote(v)],
+      Object.assign(btn("Add", () => post({ type: "installSpeech", parts: ["gpu"] })), { disabled: p.status !== "ready" })
+    );
   }
   function testWork(v) {
     const t = v.speech.health?.calibration;
@@ -1365,8 +1446,8 @@
     const t = testWork(v);
     return [
       row(
-        "This computer",
-        [cpu, cards, tested],
+        cpu,
+        [cards, tested],
         running(v) && !t ? linkBtn(v.speech.test.agreed && plan.measured ? "Test again" : "Test", () => post({ type: "testSpeech" }), v.speech.test.runs === 0 && !plan.dictation.choices.some((c) => c.downloaded)) : null
       ),
       ...t ? [t] : []
@@ -2778,9 +2859,7 @@
     layouts: "Layouts",
     settings: "Settings",
     models: "Models",
-    engine: "Speech engine",
     storage: "Storage",
-    computer: "This computer",
     about: "About",
     report: "Report a problem",
     search: "Search"
@@ -2927,9 +3006,7 @@
       items: [
         { page: "settings", icon: "settings", title: "Settings" },
         { page: "models", icon: "boxes", title: "Models" },
-        { page: "engine", icon: "hard-drive", title: "Speech engine" },
         { page: "storage", icon: "database", title: "Storage", value: (v) => v.storage?.parts.length ? size(downloadsMb(v.storage)) : "" },
-        { page: "computer", icon: "cpu", title: "This computer" },
         { page: "about", icon: "info", title: "About" },
         { page: "report", icon: "bug", title: "Report a problem" }
       ]
@@ -3376,7 +3453,9 @@
     findField.value = place?.name === "search" ? finding : "";
     if (place?.name === "transcripts" && was?.name !== "transcripts") enterTranscripts();
     if (place?.name === "programs" && !place.sub) askRunningApps();
-    if (place?.name === "storage" && was?.name !== "storage") post({ type: "storage" });
+    if ((place?.name === "storage" || place?.name === "models") && was?.name !== place.name) post({ type: "storage" });
+    if (place?.name !== "models") recommending = false;
+    asking2 = "";
     root.classList.toggle("page-open", !!place);
     fillHeader();
     updateNav();
@@ -3410,7 +3489,12 @@
     speakers: { title: "Who spoke when", cap: () => "the voices told apart", body: speakerRows, valid: installed },
     fixing: { title: "Fixing as I type", cap: () => "what else Krya sets right while you type", body: fixingPage },
     program: { title: () => programOpen, body: programPage, valid: () => !!programOpen },
-    languages: { title: "Languages you use", body: languagesPage }
+    languages: { title: "Languages you use", body: languagesPage },
+    forTranslate: { title: "Translate", cap: () => "the model that translates", body: translateChoicePage },
+    forCheck: { title: "Check my English", cap: () => "the model that finds your mistakes", body: checkChoicePage },
+    forDictate: { title: "Dictate", cap: () => "the model that writes what you say", body: (v) => speechChoicePage(v, "dictation") },
+    forTranscribe: { title: "Transcribe", cap: () => "the model that writes recordings down", body: (v) => speechChoicePage(v, "transcripts") },
+    forVoice: { title: "Listen voice", cap: () => "the voice that reads English aloud", body: voiceChoicePage }
   };
   var subTitle = (id) => {
     const t = SUBS[id].title;
@@ -3427,7 +3511,7 @@
     learned: () => "on this computer only",
     programs: () => "left out of parts, or with a layout of their own",
     layouts: () => "in the order the keys go through them",
-    models: () => "what each action runs on \xB7 one model for two actions is downloaded once",
+    models: () => "what each action uses, and what this computer runs best",
     storage: (v) => v.storage?.measuring ? "measuring\u2026" : v.storage ? `${size(v.storage.freeMb)} free on ${v.storage.drive}` : "what Krya keeps on this computer",
     about: (v) => `Krya ${v.version}`,
     report: () => "with Krya\u2019s logs, sent by you"
@@ -3567,12 +3651,8 @@
         return settingsPage(v);
       case "models":
         return modelsPage(v);
-      case "engine":
-        return enginePage(v);
       case "storage":
         return storagePage(v);
-      case "computer":
-        return computerPage(v);
       case "about":
         return aboutPage(v);
       case "report":
@@ -3594,9 +3674,12 @@
     { name: "settings" },
     { name: "settings", sub: "languages" },
     { name: "models" },
-    { name: "engine" },
+    { name: "models", sub: "forTranslate" },
+    { name: "models", sub: "forCheck" },
+    { name: "models", sub: "forDictate" },
+    { name: "models", sub: "forTranscribe" },
+    { name: "models", sub: "forVoice" },
     { name: "storage" },
-    { name: "computer" },
     { name: "report" }
   ];
   var lineTitle = (row2) => (row2.querySelector(":scope > .l")?.firstChild?.textContent ?? "").trim();
@@ -3858,7 +3941,7 @@
       ),
       keyRow("snipKey", "Listen to text on the screen", "for text you can\u2019t select: draw a box around it", !v.keysOk.snip, "scan"),
       grp("Voice"),
-      navCard("volume-2", "Voice", "the voice that reads", voiceValue(v), () => go("models", void 0, "Voice"), "models"),
+      navCard("volume-2", "Voice", "the voice that reads", voiceValue(v), () => go("models", "forVoice"), "models"),
       speedCard(v),
       grp("The card"),
       toggleCard("volume-2", "Read aloud when a card opens", s.autoRead, (autoRead) => save({ autoRead })),
@@ -3952,86 +4035,169 @@
     return `${slow ? "slow here" : "here"}: ${times}, ${FIT_WHERE[fit.where]}${startText(speed.start)}`;
   }
   var pct = (progress) => el("span", { class: "pct" }, `${Math.round(progress * 100)}%`);
-  function languageModelRows(v) {
+  function llmSizeNote(v, model, inUse) {
+    const t = v.models[model];
+    if (t.status === "failed") return bad("the download failed; Try again downloads it again");
+    if (t.status === "ready") return `${size(t.size)} on this computer`;
+    if (t.status === "downloading") return `${size(t.size)}, downloading`;
+    return `${size(t.size)} to download ${inUse ? "at its first use" : "when picked"}${translationAdvice(v.speech.device)[model].cuda ? ` (${CUDA_SIZE})` : ""}`;
+  }
+  function llmChoice(v, model, on, pick, share) {
+    const s = v.settings;
+    const t = v.models[model];
+    const advice = translationAdvice(v.speech.device);
+    const fit = advice[model];
+    const fetching = t.status === "downloading";
+    const used = s.model === model || s.translationLevel === model;
+    const notes = [
+      `${MODEL_ABOUT[model]} (${LEVEL_MODEL[model]})`,
+      llmFitText(fit, v.modelSpeed[model]),
+      llmSizeNote(v, model, on),
+      share,
+      t.status === "ready" ? cardText2(fit, v.modelSpeed[model]?.card) : null,
+      fetching ? bar(t.progress) : null
+    ];
+    const label = el("span", {}, LEVEL_NAMES[model], advice.advised === model ? recommended() : null);
+    const control = fetching ? pct(t.progress) : on && t.status !== "ready" ? linkBtn(t.status === "failed" ? "Try again" : "Download", () => post({ type: "useModel", model })) : null;
+    const remove2 = t.status === "ready" && !used ? ib("x", `Remove ${LEVEL_NAMES[model]} (${size(t.size)}); it downloads again when picked`, () => post({ type: "removeStored", id: model })) : null;
+    return radioRow(label, notes, on, pick, control, remove2);
+  }
+  function translateChoicePage(v) {
     const s = v.settings;
     const advice = translationAdvice(v.speech.device);
     const fast = v.translation.fast;
-    const fastFetching = fast.status === "downloading";
-    const fastRow = row(
-      LEVEL_NAMES.fast,
+    const fetching = fast.status === "downloading";
+    const fastRow = radioRow(
+      el("span", {}, LEVEL_NAMES.fast, advice.advised === "fast" ? recommended() : null),
       [
-        `${LEVEL_ABOUT.fast} (${LEVEL_MODEL.fast}) \xB7 translates only`,
-        fast.status === "failed" ? bad("the download failed; the next translation tries again") : fast.status === "ready" || fastFetching || fast.status === "unsupported" ? null : `${size(fast.size)} for your language, ${s.translationLevel === "fast" ? "downloads with the next translation" : "downloads when picked"}`,
-        fastFetching ? bar(fast.progress) : null
+        `${LEVEL_ABOUT.fast} (${LEVEL_MODEL.fast})`,
+        fast.status === "failed" ? bad("the download failed; the next translation tries again") : fast.status === "ready" ? "on this computer" : fetching || fast.status === "unsupported" ? null : `${size(fast.size)} for your language, ${s.translationLevel === "fast" ? "downloads with the next translation" : "downloads when picked"}`,
+        "also shows a quick draft while Accurate or Most accurate translates",
+        fetching ? bar(fast.progress) : null
       ],
-      uses(useMark("Translate", s.translationLevel === "fast", () => post({ type: "translationLevel", level: "fast" }))),
-      fastFetching ? pct(fast.progress) : null
+      s.translationLevel === "fast",
+      () => post({ type: "translationLevel", level: "fast" }),
+      fetching ? pct(fast.progress) : null
     );
-    const llm = ["accurate", "most"].map((model) => {
-      const t = v.models[model];
-      const fit = advice[model];
-      const fetching = t.status === "downloading";
-      const both = s.translationLevel === model && s.model === model;
-      const notes = [
-        `${MODEL_ABOUT[model]} (${LEVEL_MODEL[model]})`,
-        llmFitText(fit, v.modelSpeed[model]),
-        t.status === "failed" ? bad("the download failed; Download tries again") : t.status === "ready" || fetching ? `${size(t.size)}${t.status === "ready" ? " on this computer" : ""}` : `${size(t.size)} to download ${s.model === model ? "with Download or at the first use" : "when picked"}${fit.cuda ? ` (${CUDA_SIZE})` : ""}`,
-        both ? "Translate and Check share it: downloaded once, loaded once" : null,
-        t.status === "ready" ? cardText2(fit, v.modelSpeed[model]?.card) : null,
-        fetching ? bar(t.progress) : null
-      ];
-      const label = el("span", {}, LEVEL_NAMES[model], advice.advised === model ? el("span", { class: "chip good" }, lucide("check", "s"), "Recommended") : null);
-      const marks = uses(
-        useMark("Translate", s.translationLevel === model, () => post({ type: "translationLevel", level: model })),
-        useMark("Check", s.model === model, () => post({ type: "useModel", model }))
-      );
-      const control = fetching ? pct(t.progress) : s.model === model && t.status !== "ready" ? linkBtn("Download", () => post({ type: "useModel", model })) : null;
-      const remove2 = t.status === "ready" ? ib("x", `Remove ${LEVEL_NAMES[model]} (${size(t.size)})`, () => post({ type: "removeModel", model })) : null;
-      return row(label, notes, marks, control, remove2);
-    });
-    return [fastRow, ...llm];
+    const share = (model) => s.model !== model ? "Check my English moves to it too: one model does both" : s.translationLevel === model ? "Check my English uses it too: downloaded once, loaded once" : "Check my English uses it already";
+    return [
+      grp("Translate with"),
+      fastRow,
+      ...["accurate", "most"].map((model) => llmChoice(v, model, s.translationLevel === model, () => post({ type: "translationLevel", level: model }), share(model)))
+    ];
   }
-  function speechModelsPart(v) {
-    if (!running(v)) return engineRows(v, "Dictate and Transcribe");
+  function checkChoicePage(v) {
+    const s = v.settings;
+    const share = (model) => s.translationLevel === model ? "Translate uses it too: downloaded once, loaded once" : s.translationLevel === "fast" ? "Translate stays on Fast" : "Translate moves to it too: one model does both";
+    return [
+      grp("Check with"),
+      ...["accurate", "most"].map((model) => llmChoice(v, model, s.model === model, () => post({ type: "useModel", model }), share(model))),
+      aside("info", "Fast only translates; checking needs one of these.")
+    ];
+  }
+  function speechChoicePage(v, feature) {
+    const name = feature === "dictation" ? "Dictate" : "Transcribe";
+    const offer = engineRows(v, name);
+    if (offer.length) return [grp("Speech engine"), ...offer];
     return [
       testOffer(v),
-      row(
-        "Automatic prefers",
-        [v.settings.speechPrefer === "speed" ? "quicker models, a little less accurate" : "the most accurate models this computer runs in time"],
-        seg(
-          v.settings.speechPrefer,
-          [
-            ["accuracy", "Accuracy"],
-            ["speed", "Speed"]
-          ],
-          (speechPrefer) => save({ speechPrefer })
-        )
-      ),
-      ...speechModelRows(v)
+      grp(`${name} with`),
+      ...speechChoiceRows(v, feature),
+      grp("Options"),
+      preferRow(v),
+      gpuRow(v),
+      feature === "transcripts" ? speakersCard(v, () => go("transcribe", "speakers")) : null
+    ].filter((n) => n !== null);
+  }
+  function voiceChoicePage(v) {
+    const s = v.settings;
+    const natural = recommend(v).voice.on;
+    const rtf = v.natural.rtf;
+    const slow = naturalOn(v) && rtf !== void 0 && rtf > 1;
+    const windows = v.hostVoices.find((h) => /^en\b/i.test(h.lang))?.name;
+    const noteOf = (value) => value === "" ? v.natural.status === "ready" ? "the natural voice" : "the natural voice once it is downloaded, a Windows voice until then" : value.startsWith(NATURAL_PREFIX) ? `natural, made on this computer (Kokoro)${rtf && rtf <= 1 ? ` \xB7 prepares speech ${Math.max(1, Math.round(1 / rtf))}\xD7 faster than it plays` : ""}` : "a Windows voice: instant, less natural";
+    const rows = voiceOptions(v).map(([value, label]) => {
+      const advised2 = value === "" ? natural : !natural && value === windows;
+      return radioRow(el("span", {}, label, advised2 ? recommended() : null), [noteOf(value)], s.voice === value, () => save({ voice: value }));
+    });
+    return [
+      grp("Read with"),
+      ...rows,
+      naturalRow(v),
+      slow ? warn("The natural voice prepares speech slower than it plays here, so it pauses between sentences; a Windows voice is instant.") : null
+    ].filter((n) => n !== null);
+  }
+  var recommending = false;
+  function recommendRows(v) {
+    const close = () => (recommending = false, renderBody());
+    if (!recommending)
+      return [row("Use the recommended models", ["what runs best on this computer, for every action; you see what changes first"], btn("Use recommended", () => (recommending = true, renderBody()), "primary"))];
+    const advice = recommendedModels(v);
+    if (!advice.changes.length)
+      return [el("div", { class: "row total" }, el("div", { class: "l" }, "Already as recommended", el("small", {}, "every action uses what this computer runs best")), linkBtn("OK", close))];
+    const free = v.storage?.freeMb ?? v.speech.disk.freeMb;
+    const needs = advice.download * 1.1;
+    const short = advice.download > 0 && free > 0 && free < needs;
+    const apply = btn("Apply", () => (recommending = false, post({ type: "useRecommended" }), renderBody()), "primary");
+    apply.disabled = short;
+    return [
+      el(
+        "div",
+        { class: "row total" },
+        el(
+          "div",
+          { class: "l" },
+          "Use recommended changes",
+          ...advice.changes.map((c) => el("small", {}, el("b", {}, c.what), `: ${c.from} \u2192 ${c.to}${c.mb ? ` \xB7 ${size(c.mb)} to download` : ""}`)),
+          el("small", {}, `${advice.download ? `${size(advice.download)} to download in all` : "Nothing to download"}${free > 0 ? ` \xB7 ${size(free)} free` : ""} \xB7 nothing is removed`),
+          short ? bad(`Needs ${size(needs)} free`) : null
+        ),
+        el("span", { class: "kchg" }, linkBtn("Cancel", close), apply)
+      )
     ];
+  }
+  var cleaning;
+  function unusedNotice(v) {
+    const parts = (v.storage?.parts ?? []).filter((p) => p.unused && p.bytes > 0);
+    if (!parts.length) return null;
+    const mb = parts.reduce((n, p) => n + p.bytes / 1e6, 0);
+    return el(
+      "div",
+      { class: "row notice old" },
+      lucide("trash-2"),
+      el("div", { class: "l" }, `${size(mb)} that nothing uses`, el("small", {}, `${parts.map((p) => storedName(v, p)).join(", ")}; each downloads again if you pick it later`)),
+      cleaning ? el("span", { class: "v" }, "Cleaning up\u2026") : btn("Clean up", () => (cleaning = "asked", post({ type: "cleanUp" }), renderBody()), "primary")
+    );
   }
   function modelsPage(v) {
     return [
-      grp("Translate and Check"),
-      ...languageModelRows(v),
-      aside("info", "One language model serves both: Check always uses it, Translate unless it is on Fast."),
-      grp("Dictate and Transcribe"),
-      ...speechModelsPart(v),
+      grp("This computer"),
+      ...computerRows(v),
+      testOffer(v),
+      ...recommendRows(v),
+      unusedNotice(v),
+      grp("What each action uses"),
+      navCard("languages", "Translate", "how well and how quickly texts are translated", levelValue(v), () => go("models", "forTranslate"), "forTranslate"),
+      navCard("graduation-cap", "Check my English", "the model that finds your mistakes", checkValue(v), () => go("models", "forCheck"), "forCheck"),
+      navCard("mic", "Dictate", "writes what you say", speechValue(v, "dictation"), () => go("models", "forDictate"), "forDictate"),
+      navCard("audio-lines", "Transcribe", "writes recordings and meetings down", speechValue(v, "transcripts"), () => go("models", "forTranscribe"), "forTranscribe"),
       speakersCard(v, () => go("transcribe", "speakers")),
-      grp("Listen"),
-      ...voiceModelRows(v)
+      navCard("volume-2", "Listen voice", "the voice that reads English aloud", voiceValue(v), () => go("models", "forVoice"), "forVoice"),
+      aside("info", "A model two actions use is downloaded and loaded once: Translate and Check share the language model, Dictate and Transcribe a speech model where that costs nothing.")
     ].filter((n) => n !== null);
+  }
+  function stateText(t) {
+    if (t.status === "downloading") return ` \xB7 downloading ${Math.round(t.progress * 100)}%`;
+    if (t.status === "failed") return " \xB7 download failed";
+    if (t.status === "ready") return ` \xB7 ${size(t.size)}`;
+    return t.status === "unsupported" ? "" : " \xB7 downloads once";
   }
   function levelValue(v) {
     const level = v.settings.translationLevel;
-    const t = v.translation[level];
-    const state = t.status === "downloading" ? ` \xB7 downloading ${Math.round(t.progress * 100)}%` : t.status === "failed" ? " \xB7 download failed" : t.status === "absent" ? " \xB7 downloads once" : "";
-    return `${LEVEL_NAMES[level]}${state}`;
+    return `${LEVEL_NAMES[level]}${stateText(v.translation[level])}`;
   }
   function checkValue(v) {
-    const t = v.models[v.settings.model];
-    const state = t.status === "downloading" ? ` \xB7 downloading ${Math.round(t.progress * 100)}%` : t.status === "failed" ? " \xB7 download failed" : t.status === "ready" ? "" : " \xB7 downloads once";
-    return `${LEVEL_NAMES[v.settings.model]}${state}`;
+    return `${LEVEL_NAMES[v.settings.model]}${stateText(v.models[v.settings.model])}`;
   }
   function translatePage(v) {
     const s = v.settings;
@@ -4046,7 +4212,7 @@
       keyRow("textKey", "Translate text on the screen", "for text you can\u2019t select: draw a box around it", !v.keysOk.text, "scan"),
       fixedKey("In the card: paste the translation back", "Enter"),
       grp("Translation"),
-      navCard("boxes", "Translation model", "how well and how quickly it translates; the same model can check your English", levelValue(v), () => go("models", void 0, LEVEL_NAMES[s.translationLevel]), "models"),
+      navCard("boxes", "Translation model", "how well and how quickly it translates; the same model can check your English", levelValue(v), () => go("models", "forTranslate"), "models"),
       grp("Languages"),
       card("globe", pairOf(v), [note], state),
       languagesCard(v),
@@ -4095,7 +4261,7 @@ ${e.translation}` }, e.translation),
       fixedKey("In the card: paste the corrected text back", "Enter"),
       aside("info", "Speech recognition fixes some mistakes as it writes, so typing shows more of them."),
       grp("Model"),
-      navCard("boxes", "Model", "the language model that checks; Translate can use the same one", checkValue(v), () => go("models", void 0, LEVEL_NAMES[s.model]), "models"),
+      navCard("boxes", "Model", "the language model that checks; Translate can use the same one", checkValue(v), () => go("models", "forCheck"), "models"),
       grp("History"),
       navCard("list-checks", "Mistakes", "what Check found in your texts, repeated ones first", v.mistakes.length ? String(v.mistakes.length) : "none", () => go("mistakes"), "mistakes"),
       tryIt(TRY_CHECK, how)
@@ -4204,13 +4370,18 @@ ${e.translation}` }, e.translation),
     const n = v.settings.vocabulary.length;
     return navCard("spell-check", "Words to spell", "names and terms, written the way you want them", n ? `${n} ${n === 1 ? "word" : "words"}` : "none yet", () => go("vocabulary"), "vocabulary");
   }
-  function modelCard(v, feature) {
-    if (!running(v)) return null;
-    const p = feature === "dictation" ? v.speech.plan.dictation : v.speech.plan.transcripts;
-    const how = feature === "dictation" ? `about ${seconds(p.chosen.estimate)} per phrase` : `about ${minutesText(p.chosen.estimate)} per hour of recording`;
+  function speechValue(v, feature) {
+    if (!installed(v)) return "needs the speech engine";
+    const p = v.speech.plan[feature];
     const live = v.speech.health?.models[feature];
     const state = live?.name === p.chosen.model && live.state === "downloading" ? ` \xB7 downloading ${Math.round((live.progress ?? 0) * 100)}%` : "";
-    return navCard("boxes", "Speech model", `${how} on this computer`, `${p.pinned ? p.chosen.label : `Automatic \xB7 ${p.chosen.label}`}${state}`, () => go("models", void 0, p.chosen.label), "models");
+    return `${p.pinned ? p.chosen.label : `Automatic \xB7 ${p.chosen.label}`}${state}`;
+  }
+  function modelCard(v, feature) {
+    if (!running(v)) return null;
+    const p = v.speech.plan[feature];
+    const how = feature === "dictation" ? `about ${seconds(p.chosen.estimate)} per phrase` : `about ${minutesText(p.chosen.estimate)} per hour of recording`;
+    return navCard("boxes", "Speech model", `${how} on this computer`, speechValue(v, feature), () => go("models", feature === "dictation" ? "forDictate" : "forTranscribe"), "models");
   }
   var minutesText = (m) => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.max(1, Math.round(m))} min`;
   function dictatePage(v) {
@@ -4412,6 +4583,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   }
   function transcribePage(v) {
     const offer = engineRows(v, "Transcribe");
+    const dataDir = v.speech.health?.dataDir;
     return [
       ...offer.length ? [grp("Speech engine"), ...offer] : [],
       testOffer(v),
@@ -4421,6 +4593,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       vocabularyCard(v),
       meetCard(v),
       modelCard(v, "transcripts"),
+      dataDir ? card("folder", "Transcripts are kept in", [pathNote(dataDir)], linkBtn("Open", () => post({ type: "openPath", path: dataDir }))) : null,
       grp("Library"),
       navCard("file-text", "Transcripts", "every transcript, searched by its words", null, () => go("transcripts"))
     ].filter((n) => n !== null);
@@ -4730,143 +4903,129 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
         return null;
     }
   }
-  var removingSpeech = false;
-  function enginePage(v) {
-    const sp = v.speech;
-    const p = sp.pack;
-    const h = sp.health;
-    if (!installed(v)) {
-      const offer = engineRows(v, "Dictate and Transcribe");
-      if (p.status === "installing" || p.status === "removing") return [grp("Download"), ...offer];
-      return [grp("Download"), ...offer];
-    }
-    const out = [grp("On this computer")];
-    const busy3 = p.status !== "ready";
-    const here = (text) => el("small", { class: "ok" }, text);
-    const speakersOnCard2 = p.speakersOn === "cuda";
-    out.push(
-      card("mic", "Speech to text", [here(`Installed \xB7 \u2248${size(sp.installed.core)}`), "the program that runs the speech models; the models themselves are on the Models page"], null),
-      p.nvidia ? card(
-        "monitor",
-        "The graphics card\u2019s part",
-        [
-          hasPart(v, "gpu") ? here(speakersOnCard2 ? "Installed \xB7 inside the speakers\u2019 PyTorch" : `Installed \xB7 \u2248${size(sp.installed.gpu)}`) : `Not installed \xB7 \u2248${size(sp.download.gpu)} download`,
-          "speech on the NVIDIA card, several times quicker"
-        ],
-        hasPart(v, "gpu") ? null : Object.assign(btn("Add", () => post({ type: "installSpeech", parts: ["gpu"] })), { disabled: busy3 })
-      ) : null,
-      navCard(
-        "users",
-        "Who spoke when",
-        sp.speakers.model ? "PyTorch and pyannote \xB7 the voices\u2019 model is here already" : "PyTorch and pyannote \xB7 the voices\u2019 model comes with a free Hugging Face key",
-        hasPart(v, "speakers") ? `Installed \xB7 ${DEVICE_NAMES[p.speakersOn ?? "cpu"]}` : `Not installed \xB7 \u2248${size(sp.speakers.sizes[sp.speakers.on].download)}`,
-        () => go("transcribe", "speakers"),
-        "speakers",
-        hasPart(v, "speakers")
-      ),
-      ...engineRows(v, ""),
-      card("monitor", "Graphics card", [cardNote(v)], null),
-      navCard("boxes", "Speech models", "which ones Dictate and Transcribe use, and what they take", `${v.settings.speechPrefer === "speed" ? "Speed" : "Accuracy"} first`, () => go("models", void 0, "Automatic"), "models"),
-      grp("Service")
-    );
-    const service = { off: "off", starting: "starting\u2026", ready: h?.busy ? "running \xB7 transcribing now" : "running", down: "stopped" }[sp.service];
-    out.push(card("play", "Service", [`${service} \xB7 127.0.0.1:${sp.port}`, sp.trouble ? bad(sp.trouble) : null], linkBtn("Restart", () => post({ type: "restartSpeech" }), p.status !== "ready")));
-    if (h) {
-      out.push(
-        card("folder", "Transcripts are kept in", [pathNote(h.dataDir)], linkBtn("Open", () => post({ type: "openPath", path: h.dataDir }))),
-        card("folder", "Notes go to", [h.kbDir ? pathNote(h.kbDir) : "no knowledge base folder yet"], linkBtn(h.kbDir ? "Change" : "Choose\u2026", () => void pickKb()))
-      );
-    }
-    out.push(
-      grp("Remove"),
-      card(
-        "trash-2",
-        "Remove the speech engine",
-        [removingSpeech ? "its parts and models go; transcripts and notes stay. Remove?" : "gives the space back \xB7 transcripts and notes stay"],
-        removingSpeech ? el(
-          "span",
-          { class: "kchg" },
-          linkBtn("Keep", () => (removingSpeech = false, renderBody())),
-          btn("Remove", () => (removingSpeech = false, post({ type: "removeSpeech" })), "danger")
-        ) : linkBtn("Remove\u2026", () => (removingSpeech = true, renderBody()), p.status !== "ready")
-      )
-    );
-    return out.filter((n) => n !== null);
-  }
-  function computerPage(v) {
-    const rows = computerRows(v);
-    const first = rows[0];
-    if (first) first.prepend(lucide("monitor"));
-    return [grp("Hardware"), ...rows, testOffer(v), card("cpu", "Graphics card", [cardNote(v)], null)].filter((n) => n !== null);
-  }
   var STORED = {
-    fast: { icon: "languages", title: "Fast translation", note: "the models for your languages (Firefox Translations)" },
-    voice: { icon: "volume-2", title: "Natural voice", note: "reads English aloud (Kokoro)" },
-    dict: { icon: "book-open", title: "Word meanings", note: "the dictionary for your language (Wiktionary)" },
-    accurate: { icon: "languages", title: "Accurate model", note: "translates and checks your English (Gemma 4 E4B)" },
-    most: { icon: "languages", title: "Most accurate model", note: "translates and checks your English (Gemma 4 12B)" },
-    unused: { icon: "database", title: "Models no longer used", note: "an older Krya\u2019s translation models; nothing uses them now (TranslateGemma)" },
-    llama: { icon: "cpu", title: "The models\u2019 runner", note: "runs the models above; goes with the last of them (llama.cpp)" },
-    speech: { icon: "audio-lines", title: "Speech engine", note: "Dictate and Transcribe: the program and its speech models" },
-    yours: { icon: "file-text", title: "Your settings and lists", note: "words, mistakes, what Krya learned, logs" },
-    transcripts: { icon: "folder", title: "Transcripts", note: "yours: the text and a small copy of the sound" }
+    fast: { title: "Fast translation", note: "translates this language both ways (Firefox Translations)" },
+    dict: { title: "Word meanings", note: "what a word card shows (Wiktionary)" },
+    voice: { title: "Natural voice", note: "reads English aloud (Kokoro)" },
+    accurate: { title: "Accurate", note: "the language model that translates and checks your English (Gemma 4 E4B)" },
+    most: { title: "Most accurate", note: "the language model that translates and checks your English (Gemma 4 12B)" },
+    unused: { title: "Models no longer used", note: "an older Krya\u2019s translation models (TranslateGemma)" },
+    llama: { title: "The language models\u2019 runner", note: "runs Accurate and Most accurate on any graphics card or the processor (llama.cpp)" },
+    speechModel: { title: "Speech model", note: "writes down what is said" },
+    speech: { title: "Speech recognition", note: "the program that runs the speech models (Python, faster-whisper)" },
+    gpu: { title: "Graphics card support", note: "speech on the NVIDIA card, several times quicker (CUDA)" },
+    speakers: { title: "Who spoke when", note: "tells the voices of a recording apart (PyTorch, pyannote)" },
+    yours: { title: "Your settings and lists", note: "words, mistakes, what Krya learned, logs" },
+    transcripts: { title: "Transcripts", note: "yours: the text and a small copy of the sound" }
   };
-  var DOWNLOADED = ["fast", "voice", "dict", "accurate", "most", "unused", "llama", "speech"];
+  var MODEL_PARTS = ["fast", "dict", "voice", "accurate", "most", "unused", "speechModel"];
+  var PROGRAM_PARTS = ["llama", "speech", "gpu", "speakers"];
+  var DOWNLOADED = [...MODEL_PARTS, ...PROGRAM_PARTS];
   var downloadsMb = (s) => s.parts.filter((p) => DOWNLOADED.includes(p.id)).reduce((mb, p) => mb + p.bytes / 1e6, 0);
+  var speechChoice = (v, name) => [...v.speech.plan.dictation.choices, ...v.speech.plan.transcripts.choices].find((c) => c.model === name);
+  function storedName(v, p) {
+    const title = STORED[p.id].title;
+    if ((p.id === "fast" || p.id === "dict") && p.item) return `${title} \xB7 ${languageName(p.item)}`;
+    if (p.id === "speechModel") return speechChoice(v, p.item ?? "")?.label ?? p.item ?? title;
+    if (p.id === "llama" && p.item === "cuda") return `${title} \xB7 NVIDIA`;
+    return title;
+  }
+  function storedNote(v, p) {
+    if (p.id === "speechModel") return `${speechChoice(v, p.item ?? "")?.about ?? STORED.speechModel.note} \xB7 speech to text`;
+    if (p.id === "llama" && p.item === "cuda") return "NVIDIA\u2019s build, for a model that does not fit the graphics card (llama.cpp CUDA)";
+    return STORED[p.id].note;
+  }
+  function lossOf(p) {
+    switch (p.id) {
+      case "accurate":
+      case "most":
+        return p.users?.includes("Translate") ? "Translate goes back to Fast, and Check my English downloads it again at its next check" : "Check my English downloads it again at its next check";
+      case "speech":
+        return "Dictate and Transcribe stop until it is downloaded again; transcripts and notes stay";
+      case "gpu":
+        return "speech goes back to the processor, several times slower";
+      case "speakers":
+        return "transcripts stop telling the voices apart until it is added again";
+      default:
+        return "it downloads again at its next use";
+    }
+  }
+  function removable(v, p) {
+    const pack = v.speech.pack.status === "installing" || v.speech.pack.status === "removing";
+    const live = (name) => [v.speech.health?.models.dictation, v.speech.health?.models.transcripts].some((m) => !!m && m.name === name && m.state === "downloading");
+    switch (p.id) {
+      case "fast":
+        return v.translation.fast.status !== "downloading";
+      case "dict":
+        return v.dictionary.status !== "downloading";
+      case "voice":
+        return v.natural.status !== "downloading";
+      case "accurate":
+      case "most":
+        return v.models[p.id].status !== "downloading";
+      case "unused":
+        return true;
+      case "llama":
+        return v.models.accurate.status !== "downloading" && v.models.most.status !== "downloading";
+      case "speechModel":
+        return !p.users?.length && !p.reserve && running(v) && !live(p.item);
+      case "speech":
+      case "gpu":
+      case "speakers":
+        return !pack && installed(v);
+      default:
+        return false;
+    }
+  }
+  var asking2 = "";
+  function storedLine(v, p) {
+    const key = `${p.id}:${p.item ?? ""}`;
+    const label = el("span", {}, storedName(v, p), p.unused ? el("span", { class: "chip unused" }, "Not used") : null);
+    const size2 = el("span", { class: "v num" }, size(p.bytes / 1e6));
+    const where2 = p.away ? pathNote(p.path) : null;
+    if (p.id === "yours" || p.id === "transcripts") return row(label, [storedNote(v, p), where2], el("span", { class: "kchg" }, size2, linkBtn("Open", () => post({ type: "openPath", path: p.path }))));
+    const remove2 = () => {
+      asking2 = "";
+      post({ type: "removeStored", id: p.id, item: p.item });
+    };
+    if (asking2 === key) return row(label, [storedNote(v, p), bad(`${lossOf(p)}. Remove it?`)], el("span", { class: "kchg" }, size2, linkBtn("Keep", () => (asking2 = "", renderBody())), btn("Remove", remove2, "danger")));
+    const used = p.users?.length ? `used by ${p.users.join(" and ")}` : p.reserve ? `kept for ${p.reserve} on the processor, if the graphics card fails` : null;
+    const shared = p.shared / 1e6;
+    const freed = p.id === "speech" && shared >= 100 ? `removing it frees ${size(p.bytes / 1e6 - shared)}: ${size(shared)} of its files are shared with other Python tools here` : null;
+    const ask = !!p.users?.length || p.id === "speech";
+    const x = removable(v, p) ? ib("x", ask ? "Remove\u2026" : "Remove; it downloads again if you pick it later", () => ask ? (asking2 = key, renderBody()) : remove2()) : null;
+    return row(label, [storedNote(v, p), used, freed, where2], el("span", { class: "kchg" }, size2, x));
+  }
   function storagePage(v) {
     const s = v.storage;
     if (!s?.parts.length) return [aside("loader", "Measuring what Krya keeps\u2026")];
-    const busy3 = {
-      fast: v.translation.fast.status === "downloading",
-      voice: v.natural.status === "downloading",
-      dict: v.dictionary.status === "downloading",
-      accurate: v.models.accurate.status === "downloading",
-      most: v.models.most.status === "downloading"
-    };
-    const remove2 = {
-      fast: () => post({ type: "removeDownload", part: "fast" }),
-      voice: () => post({ type: "removeDownload", part: "voice" }),
-      dict: () => post({ type: "removeDownload", part: "dict" }),
-      accurate: () => post({ type: "removeModel", model: "accurate" }),
-      most: () => post({ type: "removeModel", model: "most" }),
-      unused: () => post({ type: "removeDownload", part: "unused" })
-    };
-    const mb = (p) => p.bytes / 1e6;
-    const where2 = (p) => p.away ? pathNote(p.path) : null;
-    const line = (p) => {
-      const { icon: name, title, note } = STORED[p.id];
-      if (p.id === "speech") {
-        const shared = p.shared / 1e6;
-        const freed = shared >= 100 ? `; removing it frees ${size(mb(p) - shared)}, as ${size(shared)} of its files are shared with other Python tools here` : "";
-        return navCard(name, title, [`${note}${freed}`, where2(p)], size(mb(p)), () => go("engine"), "storage-speech");
-      }
-      const x = remove2[p.id];
-      const control = x && !busy3[p.id] ? ib("x", `Remove; it downloads again when needed`, x) : null;
-      const open2 = DOWNLOADED.includes(p.id) ? null : linkBtn("Open", () => post({ type: "openPath", path: p.path }));
-      return card(name, title, [note, where2(p)], el("span", { class: "kchg" }, el("span", { class: "v num" }, size(mb(p))), control, open2));
-    };
-    const got = s.parts.filter((p) => DOWNLOADED.includes(p.id) && p.bytes > 0);
+    const of = (ids) => s.parts.filter((p) => ids.includes(p.id) && p.bytes > 0).sort((a, b) => b.bytes - a.bytes);
+    const models = of(MODEL_PARTS);
+    const programs = of(PROGRAM_PARTS);
     const own = s.parts.filter((p) => p.id === "yours" || p.id === "transcripts");
+    const away = [...models, ...programs].some((p) => p.away);
     return [
-      oldNotice(s),
+      oldNotice(v, s),
+      unusedNotice(v),
       grp("Downloads"),
-      card(
-        "database",
+      row(
         `Everything Krya downloads: ${size(downloadsMb(s))}`,
-        [`${got.some((p) => p.away) ? "in Krya\u2019s folder, but for the parts that say where they are" : "in one folder"} \xB7 ${size(s.freeMb)} free on ${s.drive}`, pathNote(s.root)],
+        [`${away ? "in Krya\u2019s folder, but for the parts that say where they are" : "in one folder"} \xB7 ${size(s.freeMb)} free on ${s.drive}`, pathNote(s.root)],
         linkBtn("Open folder", () => post({ type: "openPath", path: s.root }))
       ),
-      ...got.length ? got.map(line) : [aside("info", "Nothing downloaded yet: each part downloads when you first use it.")],
+      grp("Models and voices"),
+      ...models.length ? models.map((p) => storedLine(v, p)) : [aside("info", "Nothing downloaded yet: each model downloads when you first use it.")],
+      ...programs.length ? [grp("Programs that run them"), ...programs.map((p) => storedLine(v, p))] : [],
       grp("Yours"),
-      ...own.map(line)
+      ...own.map((p) => storedLine(v, p))
     ].filter((n) => n !== null);
   }
-  function oldNotice(s) {
+  function oldNotice(v, s) {
     const away = s.parts.filter((p) => p.away);
     if (!s.old || !away.length) return null;
     const total = size(away.reduce((sum, p) => sum + p.bytes / 1e6, 0));
     const inOld = away.every((p) => p.path.toLowerCase().startsWith(s.old.dir.toLowerCase()));
-    const names = away.map((p) => STORED[p.id].title).join(", ");
+    const names = away.map((p) => storedName(v, p)).join(", ");
     return el(
       "div",
       { class: "row notice old" },
@@ -4902,17 +5061,6 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       card("globe", languageName(used[0] ?? ""), ["your language \xB7 changed in Settings"], null),
       card("globe", "English", ["always: the language Krya teaches"], null),
       ...s.languages.map((code) => card("globe", languageName(code), [], ib("x", `Remove ${languageName(code)}`, () => save({ languages: mine().filter((c) => c !== code) }))))
-    ];
-  }
-  function voiceModelRows(v) {
-    const s = v.settings;
-    const rtf = v.natural.rtf;
-    const windows = v.hostVoices.find((h) => /^en/i.test(h.lang));
-    const slow = naturalOn(v) && rtf !== void 0 && rtf > 1;
-    const voiceNote = !naturalOn(v) ? ["reads with a Windows voice"] : slow ? [`natural voice, ${v.natural.size} MB on this computer`, bad("it prepares speech slower than it plays, so it pauses between sentences; a Windows voice is instant")] : [`natural voice, ${v.natural.size} MB on this computer${rtf ? ` \xB7 prepares speech ${Math.max(1, Math.round(1 / rtf))}\xD7 faster than it plays` : ""}`];
-    return [
-      card("volume-2", "Voice", voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, "").replace(/ Desktop$/, "")}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), (voice) => save({ voice }))),
-      naturalRow(v)
     ];
   }
   function speedCard(v) {
@@ -5025,7 +5173,7 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
   }
   var reported;
   var reportText = () => pBody.querySelector('textarea[data-live="report"]')?.value ?? "";
-  function reportPage(_v) {
+  function reportPage(v) {
     const send = (via) => {
       reported = void 0;
       post({ type: "reportProblem", via, text: reportText() });
@@ -5052,11 +5200,21 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
       row("This computer and Krya", ["Processor, memory, graphics card, Windows and Krya\u2019s versions"]),
       row("Your settings", ["Your own lists only counted: words kept as typed, words to spell, programs"]),
       aside("shield-check", "Never in it: your texts, words, mistakes, translations, phrases, transcripts or Hugging Face key. Your Windows name and the computer\u2019s are replaced. Nothing is sent until you send it."),
-      row("Krya\u2019s folder", ["Where the logs are, to look at them yourself"], linkBtn("Open", () => post({ type: "openLogs" })))
+      row("Krya\u2019s folder", ["Where the logs are, to look at them yourself"], linkBtn("Open", () => post({ type: "openLogs" }))),
+      ...installed(v) ? [grp("If something stopped working"), restartRow(v)] : []
     ].filter((n) => n !== null);
   }
+  function restartRow(v) {
+    const sp = v.speech;
+    const state = { off: "off", starting: "starting\u2026", ready: sp.health?.busy ? "running \xB7 transcribing now" : "running", down: "stopped" }[sp.service];
+    return row("Restart the speech engine", [`Dictate and Transcribe run in it \xB7 ${state}`, sp.trouble ? bad(sp.trouble) : null], linkBtn("Restart", () => post({ type: "restartSpeech" }), sp.pack.status !== "ready"));
+  }
   function showTab(tab) {
-    if (tab !== "home" && tab !== "howto") return go(tab);
+    if (tab !== "home" && tab !== "howto") {
+      go(tab);
+      if (tab === "vocabulary" || tab === "kept") pBody.querySelector("input[data-live]")?.focus();
+      return;
+    }
     visited.length = 0;
     closePage();
     fillHeader();
@@ -5093,6 +5251,8 @@ Said: ${e.heard}` : e.text }, e.text), el("small", {}, whenSaid(e.at, Date.now()
     if (m.type !== "app") return;
     const first = view === void 0;
     view = m.view;
+    if (cleaning === "asked" && m.view.storage?.measuring) cleaning = "measuring";
+    else if (cleaning === "measuring" && !m.view.storage?.measuring) cleaning = void 0;
     if (m.view.speech.service !== "ready") forgetEngine();
     updateNav();
     if (!m.view.settings.setupDone) {
