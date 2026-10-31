@@ -929,8 +929,33 @@ async function playStage(sound) {
   stepState(0);
   setTimeout(() => { if (alive()) words.forEach((w) => w.classList.remove('read')); }, 1600);
 }
-$('#replay').addEventListener('click', () => { quietCard(); playStage(true); });
-if (!reduce) playStage(false);
+// The chain plays again and again while the stage is on screen, silent, resting on its last frame between runs;
+// Replay plays it at once with sound, and the loop goes on silent after it.
+let stageOn = false;
+let stageGen = 0;
+const STAGE_REST = 3800;
+function stageLoop(soundFirst) {
+  const g = ++stageGen;
+  stageOn = true;
+  (async () => {
+    let sound = soundFirst;
+    while (stageOn && g === stageGen) {
+      await playStage(sound);
+      sound = false;
+      if (!stageOn || g !== stageGen) break;
+      await sleep(STAGE_REST);
+    }
+  })();
+}
+$('#replay').addEventListener('click', () => { quietCard(); if (reduce) playStage(true); else stageLoop(true); });
+if (!reduce) {
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((es) => es.forEach((e) => {
+      if (e.isIntersecting && !stageOn) stageLoop(false);
+      else if (!e.isIntersecting) stageOn = false;
+    }), { threshold: 0.35 }).observe($('#stage'));
+  } else playStage(false);
+}
 
 /* ---------- The duck story and Krya's card ---------- */
 const STORY = [
