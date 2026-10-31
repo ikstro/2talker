@@ -74,7 +74,7 @@ Packaging (`electron-builder.yml`): workers and `vendor/` are `asarUnpack`ed, an
 - A click on an English word shows its dictionary meanings, says it and saves it with a small star (the notebook, exported for Anki); a click on a sentence marks its other side. A dotted line under less common words, on by default.
 - Interface in English only (the app is for English learners; no localization). English is the only learned language; the native language is any of the 31.
 - Distribution: public GitHub repository and releases, unsigned installer, auto-update. macOS: not now.
-- The repository is private for now (owner, 2026-10-28): until it is public again, installed copies get no updates and nobody can download the installer.
+- The repository is public, open source under MIT, since 2026-10-31 (the owner: "Репозиторий сделай публичной, с открытым кодом"); it was private from 2026-10-28.
 - The author is shown: About tab and tray item, "Made by Yevhen Peshynskyi · Design automation engineer" with ikstro.com; the installer's publisher is the same name.
 - The card: resizable by its edges, size kept; a remote with "one by one" for listening sentence by sentence; ▶ per paragraph in the margin, never on the words (a click on a word is its meanings). Speeds up to 1.5. Theme: as Windows, light or dark. Shortcuts: Ctrl+C twice (can be turned off), a selection shortcut, the snip shortcut, all changeable.
 - Trigger for a selection: Ctrl+C twice; screenshot: Windows' snipping overlay behind a shortcut.
@@ -231,7 +231,7 @@ Packaging (`electron-builder.yml`): workers and `vendor/` are `asarUnpack`ed, an
 - A person reports a problem by hand: Krya saves one zip of its logs and opens an email to ikstro.design@gmail.com or a GitHub issue, the person's pick, with their text in it; they attach the zip and send it. No server: Krya sends nothing itself.
 - Reached from the sidebar (Krya › Report a problem), the tray panel's footer (Report) and About.
 - The zip never holds what the person wrote or said (texts, words, mistakes, translations, phrases, transcripts) nor the Hugging Face key; their own lists are only counted; their Windows name and the computer's are replaced. The page says all of this before anything is made.
-- The repository goes public as open source (the owner, 2026-10-31), so the GitHub button shows; going public is a step of its own, after the history is checked for secrets.
+- The repository is public as open source (the owner, 2026-10-31), so the GitHub button shows; its whole history was checked first (no keys, no personal data, nothing rewritten).
 
 ## Product rules (owner decisions, 2026-10-30): before a public release
 
