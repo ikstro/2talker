@@ -1278,6 +1278,12 @@ function onMessage(message: ToHost): void {
     case 'downloadSpeechModel':
       void speech.downloadModel(message.model).then(() => postApp())
       return
+    case 'removeSpeechModel':
+      void speech
+        .removeModel(message.model)
+        .catch(error => console.warn('Krya: could not remove the speech model', error))
+        .then(() => (postApp(), remeasure()))
+      return
     case 'removeSpeech':
       void speech.remove().then(() => (registerShortcuts(), applyKeyboard(), remeasure()))
       return

@@ -43,6 +43,7 @@ const APP_ONLY: ReadonlySet<ToHost['type']> = new Set<ToHost['type']>([
   'removeModel',
   'testSpeech',
   'downloadSpeechModel',
+  'removeSpeechModel',
   'removeSpeech',
   'moveToKrya',
   'removeDownload',

@@ -13,8 +13,10 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import threading
 import uuid
+from contextlib import closing
 from pathlib import Path
 
 from vocab import split_items
@@ -65,9 +67,15 @@ def documents_dir() -> Path:
 
 
 def default_data_dir() -> Path:
-    r"""New users' transcripts: Documents\Krya\Transcripts; Altype's, when its transcripts are there already."""
-    old = documents_dir() / "Altype" / "Transcripts"
-    return old if old.is_dir() else documents_dir() / "Krya" / "Transcripts"
+    r"""The transcripts' folder unless the person chose another: Documents\Krya\Transcripts.
+
+    Altype's (Documents\Altype\Transcripts) moves there at a real start (move_transcripts)."""
+    return documents_dir() / "Krya" / "Transcripts"
+
+
+def old_data_dir() -> Path:
+    r"""Altype's default transcripts folder, until 0.11."""
+    return documents_dir() / "Altype" / "Transcripts"
 
 
 def defaults() -> dict:
@@ -121,6 +129,116 @@ def adopt_altscribe(file: Path = SETTINGS_FILE) -> None:
             log.info("adopted Altscribe's models")
         except OSError as error:
             log.warning("could not adopt Altscribe's models: %s", error)
+
+
+# A transcript still being made: the worker holds its folder and its job's paths (jobs.py finish_recording).
+UNFINISHED = ("queued", "working", "recording")
+
+
+def _same(a: Path, b: Path) -> bool:
+    return os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+
+
+def _unfinished(folder: Path) -> str:
+    """Why the library cannot move now, or "" when nothing in it is being made."""
+    db = folder / "index.db"
+    if db.exists():
+        try:
+            with closing(sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)) as con:
+                found = con.execute(
+                    f"select count(*) from transcripts where status in ({','.join('?' * len(UNFINISHED))})", UNFINISHED
+                ).fetchone()[0]
+        except sqlite3.Error as error:
+            return f"its index could not be read ({error})"
+        if found:
+            return f"{found} transcript(s) not finished yet"
+    return ""
+
+
+def _prefixes(folder: Path) -> set[str]:
+    """How a path into the folder may be written: as given and resolved, in the file system's case."""
+    return {os.path.normcase(os.path.abspath(folder)), os.path.normcase(str(folder.resolve()))}
+
+
+def _moved(path, prefixes: set[str], new: Path):
+    """The path as it is after the move, or None when it does not point into the old folder."""
+    if not isinstance(path, str) or not path:
+        return None
+    full = os.path.abspath(path)
+    key = os.path.normcase(full)
+    for prefix in prefixes:
+        if key == prefix or key.startswith(prefix.rstrip(os.sep) + os.sep):
+            return str(new) + full[len(prefix.rstrip(os.sep)):]
+    return None
+
+
+def _repoint(new: Path, prefixes: set[str]) -> int:
+    """Jobs keep absolute paths to their sound (a failed one's inputs, for Retry): pointed into the new folder.
+
+    Nothing else in the library is absolute: transcript.json names its audio relatively, a note's path is in the knowledge base."""
+    db = new / "index.db"
+    if not db.exists():
+        return 0
+    changed = 0
+    with closing(sqlite3.connect(str(db))) as con, con:
+        for id, raw in con.execute("select id, job from transcripts").fetchall():
+            job = json.loads(raw or "{}")
+            inputs = job.get("inputs") if isinstance(job, dict) else None
+            touched = False
+            for item in inputs if isinstance(inputs, list) else []:
+                path = _moved(item.get("path"), prefixes, new) if isinstance(item, dict) else None
+                if path is not None:
+                    item["path"] = path
+                    touched = True
+            if touched:
+                con.execute("update transcripts set job=? where id=?", (json.dumps(job, ensure_ascii=False), id))
+                changed += 1
+    return changed
+
+
+def move_transcripts(settings: "Settings", old: Path | None = None, new: Path | None = None) -> bool:
+    r"""Altype's library (Documents\Altype\Transcripts) becomes Krya's (Documents\Krya\Transcripts), once, by a rename.
+
+    Only the old default moves, never a folder the person chose; only into a Krya folder that is
+    missing or empty; only when no transcript is being made (a failed one's leftover chunks do not
+    hold it; its job's paths are pointed into the new folder). Anything in the way: nothing moves,
+    dataDir stays, and the next start tries again. Run before the library is opened."""
+    if TEST_HOME and old is None:
+        return False
+    old = old or old_data_dir()
+    new = new or default_data_dir()
+    current = Path(settings["dataDir"])
+    # dataDir naming Krya's own default (a speech.json without dataDir) counts too: the old default showed Altype's there.
+    if not old.is_dir() or not (_same(current, old) or _same(current, new)):
+        return False
+    if new.exists():
+        if not new.is_dir() or any(new.iterdir()):
+            log.info("transcripts stay in %s: %s already holds files", old, new)
+            return False
+    why = _unfinished(old)
+    if why:
+        log.info("transcripts stay in %s for now: %s", old, why)
+        return False
+    prefixes = _prefixes(old)
+    try:
+        if new.exists():
+            new.rmdir()
+        new.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(old, new)
+    except OSError as error:
+        log.warning("transcripts stay in %s for now, the move failed: %s", old, error)
+        return False
+    settings.update({"dataDir": str(new)})
+    try:
+        _repoint(new, prefixes)
+    except (sqlite3.Error, ValueError, OSError) as error:
+        log.warning("moved the transcripts, but their jobs still name %s: %s", old, error)
+    try:
+        old.parent.rmdir()  # Documents\Altype, when nothing else is in it
+    except OSError:
+        pass
+    log.info("moved the transcripts from %s to %s", old, new)
+    return True
 
 
 def clean_plan(plan: dict) -> dict:

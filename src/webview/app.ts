@@ -27,10 +27,10 @@ import { el, icon, setIcon } from './dom'
 import { glyph } from './glyphs'
 import { caps, COPY_TWICE } from './keycaps'
 import { lucide, type LucideName } from './lucide'
-import { aside, bad, bar, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, warn } from './ui'
+import { aside, bad, bar, btn, card, chip, grp, ib, link, linkBtn, listPage, liveField, navCard, post, row, seg, select, toggle, toggleCard, toggleKnob, useMark, uses, warn } from './ui'
 import { seconds } from '../speechplan'
 import { resetSetup, setupNodes } from './setup'
-import { api, cardNote, computerRows, DEVICE_NAMES, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, modelRows, onRedraw, pickKb, running, saveEngine, size as speechSize, speakerRows, testOffer, toast } from './speech'
+import { api, cardNote, computerRows, DEVICE_NAMES, diarizationOf, engineRows, engineSettings, fault, forgetEngine, hasPart, installed, onRedraw, pickKb, running, saveEngine, size as speechSize, speakerRows, speechModelRows, testOffer, toast } from './speech'
 import { backToList, enterTranscripts, leaveTranscripts, newRows, openTranscript, setTranscriptHooks, transcriptsBody, transcriptsCap } from './transcripts'
 
 declare global {
@@ -44,7 +44,7 @@ const save = (patch: Partial<Settings>) => post({ type: 'saveSettings', patch })
 const RELEASES = 'https://github.com/ikstro/krya/releases'
 
 type Action = 'listen' | 'translate' | 'check' | 'screen' | 'dictate' | 'transcribe' | 'keyboard'
-type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'engine' | 'storage' | 'computer' | 'about' | 'search'
+type Page = Action | 'words' | 'mistakes' | 'transcripts' | 'translations' | 'phrases' | 'vocabulary' | 'kept' | 'learned' | 'programs' | 'layouts' | 'settings' | 'models' | 'engine' | 'storage' | 'computer' | 'about' | 'search'
 
 const ACTIONS: readonly Action[] = ['listen', 'translate', 'check', 'screen', 'dictate', 'transcribe', 'keyboard']
 const isAction = (name: Page): name is Action => (ACTIONS as readonly string[]).includes(name)
@@ -69,6 +69,7 @@ const TITLES: Record<Page, string> = {
   programs: 'Programs',
   layouts: 'Layouts',
   settings: 'Settings',
+  models: 'Models',
   engine: 'Speech engine',
   storage: 'Storage',
   computer: 'This computer',
@@ -279,6 +280,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
     label: 'Krya',
     items: [
       { page: 'settings', icon: 'settings', title: 'Settings' },
+      { page: 'models', icon: 'boxes', title: 'Models' },
       { page: 'engine', icon: 'hard-drive', title: 'Speech engine' },
       { page: 'storage', icon: 'database', title: 'Storage', value: v => (v.storage?.parts.length ? speechSize(downloadsMb(v.storage)) : '') },
       { page: 'computer', icon: 'cpu', title: 'This computer' },
@@ -807,7 +809,7 @@ function finishMoment(): void {
 // was scrolled to, as a browser does.
 
 /** A page of a page: a long part of it, opened from a card with a chevron. */
-type SubId = 'model' | 'meet' | 'speakers' | 'fixing' | 'program' | 'languages'
+type SubId = 'meet' | 'speakers' | 'fixing' | 'program' | 'languages'
 
 type Place = { name: Page; sub?: SubId }
 
@@ -895,7 +897,8 @@ function fade(node: HTMLElement): void {
 
 /** A line found by the search, lit for a moment where it is. */
 function flashRow(title: string): void {
-  const row = [...pBody.querySelectorAll<HTMLElement>('.row')].find(r => lineTitle(r) === title)
+  const rows = [...pBody.querySelectorAll<HTMLElement>('.row')]
+  const row = rows.find(r => lineTitle(r) === title) ?? rows.find(r => lineTitle(r).startsWith(title))
   if (!row) return
   row.scrollIntoView({ block: 'center' })
   row.classList.add('flash')
@@ -905,7 +908,6 @@ function flashRow(title: string): void {
 type Sub = { title: string | (() => string); cap?: (v: AppView) => string; body: (v: AppView) => HTMLElement[]; valid?: (v: AppView) => boolean }
 
 const SUBS: Record<SubId, Sub> = {
-  model: { title: 'Speech model', body: modelPage, valid: running },
   meet: { title: 'Google Meet', cap: () => 'the Krya extension for Chrome', body: meetPage },
   speakers: { title: 'Who spoke when', cap: () => 'the voices told apart', body: speakerRows, valid: installed },
   fixing: { title: 'Fixing as I type', cap: () => 'what else Krya sets right while you type', body: fixingPage },
@@ -929,6 +931,7 @@ const CAPS: Partial<Record<Page, (v: AppView) => string>> = {
   learned: () => 'on this computer only',
   programs: () => 'left out of parts, or with a layout of their own',
   layouts: () => 'in the order the keys go through them',
+  models: () => 'what each action runs on · one model for two actions is downloaded once',
   storage: v => (v.storage?.measuring ? 'measuring…' : v.storage ? `${speechSize(v.storage.freeMb)} free on ${v.storage.drive}` : 'what Krya keeps on this computer'),
   about: v => `Krya ${v.version}`,
 }
@@ -1084,6 +1087,8 @@ function bodyOf(v: AppView): HTMLElement[] {
       return layoutsPage(v)
     case 'settings':
       return settingsPage(v)
+    case 'models':
+      return modelsPage(v)
     case 'engine':
       return enginePage(v)
     case 'storage':
@@ -1106,8 +1111,6 @@ function bodyOf(v: AppView): HTMLElement[] {
 const SEARCHED: Place[] = [
   ...ACTIONS.map(name => ({ name })),
   { name: 'keyboard', sub: 'fixing' },
-  { name: 'dictate', sub: 'model' },
-  { name: 'transcribe', sub: 'model' },
   { name: 'transcribe', sub: 'speakers' },
   { name: 'transcribe', sub: 'meet' },
   { name: 'vocabulary' },
@@ -1117,6 +1120,7 @@ const SEARCHED: Place[] = [
   { name: 'layouts' },
   { name: 'settings' },
   { name: 'settings', sub: 'languages' },
+  { name: 'models' },
   { name: 'engine' },
   { name: 'storage' },
   { name: 'computer' },
@@ -1466,7 +1470,9 @@ function listenPage(v: AppView): HTMLElement[] {
       el('span', { class: 'kchg' }, caps(COPY_TWICE), el('span', { class: 'tgwrap' }, toggleKnob(s.doubleCopy, doubleCopy => save({ doubleCopy }), 'Ctrl + C twice'))),
     ),
     keyRow('snipKey', 'Listen to text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.snip, 'scan'),
-    ...voiceRows(v),
+    grp('Voice'),
+    navCard('volume-2', 'Voice', 'the voice that reads', voiceValue(v), () => go('models', undefined, 'Voice'), 'models'),
+    speedCard(v),
     grp('The card'),
     toggleCard('volume-2', 'Read aloud when a card opens', s.autoRead, autoRead => save({ autoRead })),
     toggleCard('spell-check', 'Dotted line under less common words', s.rareWords, rareWords => save({ rareWords })),
@@ -1522,12 +1528,6 @@ const LEVEL_ABOUT: Record<TranslationLevel, string> = {
   most: 'The best wording, and the slowest',
 }
 
-/** What each model is like as a checker. */
-const CHECK_ABOUT: Record<LlmModel, string> = {
-  accurate: 'Catches nearly every mistake, quickly',
-  most: 'A little more careful, and slower',
-}
-
 /** The model behind a level, named last. */
 const LEVEL_MODEL: Record<TranslationLevel, string> = {
   fast: 'Firefox Translations',
@@ -1566,41 +1566,130 @@ function levelFitText(fit: LevelFit, speed: AppView['modelSpeed'][LlmModel]): st
   return `${measured.sentence > SLOW_SENTENCE_S ? 'slow here' : 'here'}: ${seconds(measured.sentence)} per sentence, ${where}${startText(measured.start)}`
 }
 
+// ---------------------------------------------------------------- models
+// Every model Krya runs, on one page, each once, with the actions it serves:
+// one used by two actions is downloaded and loaded once (the language model
+// for Translate and Check, a speech model for Dictate and Transcribe). Each
+// action's page names its model in one line that opens this page at it.
+
+/** What each language model is like, translating and checking. */
+const MODEL_ABOUT: Record<LlmModel, string> = {
+  accurate: 'Understands the whole sentence and catches nearly every mistake',
+  most: 'The best wording, a little more careful, and slower',
+}
+
+/** Where a language model runs here and how long it takes, translating and checking: measured, once it has been, else expected. */
+function llmFitText(fit: LevelFit, speed: AppView['modelSpeed'][LlmModel]): string {
+  if (!speed || (speed.sentence === undefined && speed.text === undefined)) return levelFitText(fit, speed)
+  const times = [speed.sentence !== undefined ? `${seconds(speed.sentence)} per sentence` : '', speed.text !== undefined ? `${seconds(speed.text)} per text checked` : ''].filter(Boolean).join(', ')
+  const slow = (speed.sentence ?? 0) > SLOW_SENTENCE_S || (speed.text ?? 0) > SLOW_CHECK_S
+  return `${slow ? 'slow here' : 'here'}: ${times}, ${FIT_WHERE[fit.where]}${startText(speed.start)}`
+}
+
+const pct = (progress: number) => el('span', { class: 'pct' }, `${Math.round(progress * 100)}%`)
+
 /**
- * The three translators, one in use: Fast (Firefox's models), Accurate and
- * Most accurate (Gemma 4 E4B and 12B, run by llama.cpp on this computer: the
- * one model, which checks English too). Picking one downloads it; nothing
- * downloads before. The advice comes from this computer's graphics card
+ * Translate and Check: Fast (Firefox's models, which only translate) and the
+ * language model, Accurate or Most accurate, one at a time for both (main.ts
+ * keeps them in step): Check always uses it, Translate unless it is on Fast.
+ * A mark picks a model for its action and downloads it; nothing downloads
+ * before. The advice comes from this computer's graphics card
  * (hardware.ts translationAdvice).
  */
-function levelRows(v: AppView): HTMLElement[] {
+function languageModelRows(v: AppView): HTMLElement[] {
+  const s = v.settings
   const advice = translationAdvice(v.speech.device)
-  const inUse = v.settings.translationLevel
-  return (['fast', 'accurate', 'most'] as const).map(level => {
-    const t = v.translation[level]
-    const fit = level === 'fast' ? undefined : advice[level]
-    const fetching = t.status === 'downloading'
-    // What it is, then how it runs here, then what it downloads: a line each.
-    const notes: (string | HTMLElement | null)[] = [
-      `${LEVEL_ABOUT[level]} (${LEVEL_MODEL[level]})`,
-      fit && level !== 'fast' ? levelFitText(fit, v.modelSpeed[level]) : null,
-      level !== 'fast' && inUse === 'fast' && level === v.settings.model ? 'Check my English uses it' : null,
-      t.status === 'failed'
-        ? bad('the download failed; Use tries again')
-        : t.status === 'ready' || fetching
+  const fast = v.translation.fast
+  const fastFetching = fast.status === 'downloading'
+  const fastRow = row(
+    LEVEL_NAMES.fast,
+    [
+      `${LEVEL_ABOUT.fast} (${LEVEL_MODEL.fast}) · translates only`,
+      fast.status === 'failed'
+        ? bad('the download failed; the next translation tries again')
+        : fast.status === 'ready' || fastFetching || fast.status === 'unsupported'
           ? null
-          : `${speechSize(t.size)} to download ${level === inUse ? 'with the next translation' : 'when you pick it'}${fit?.cuda ? ` (${CUDA_SIZE})` : ''}`,
+          : `${speechSize(fast.size)} for your language, ${s.translationLevel === 'fast' ? 'downloads with the next translation' : 'downloads when picked'}`,
+      fastFetching ? bar(fast.progress) : null,
+    ],
+    uses(useMark('Translate', s.translationLevel === 'fast', () => post({ type: 'translationLevel', level: 'fast' }))),
+    fastFetching ? pct(fast.progress) : null,
+  )
+  const llm = (['accurate', 'most'] as const).map(model => {
+    const t = v.models[model]
+    const fit = advice[model]
+    const fetching = t.status === 'downloading'
+    const both = s.translationLevel === model && s.model === model
+    const notes: (string | HTMLElement | null)[] = [
+      `${MODEL_ABOUT[model]} (${LEVEL_MODEL[model]})`,
+      llmFitText(fit, v.modelSpeed[model]),
+      t.status === 'failed'
+        ? bad('the download failed; Download tries again')
+        : t.status === 'ready' || fetching
+          ? `${speechSize(t.size)}${t.status === 'ready' ? ' on this computer' : ''}`
+          : `${speechSize(t.size)} to download ${s.model === model ? 'with Download or at the first use' : 'when picked'}${fit.cuda ? ` (${CUDA_SIZE})` : ''}`,
+      both ? 'Translate and Check share it: downloaded once, loaded once' : null,
       fetching ? bar(t.progress) : null,
     ]
-    const label = el('span', {}, LEVEL_NAMES[level], advice.advised === level ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
-    const control = fetching
-      ? el('span', { class: 'pct' }, `${Math.round(t.progress * 100)}%`)
-      : level === inUse
-        ? chip('in use', 'lit')
-        : linkBtn('Use', () => post({ type: 'translationLevel', level }))
-    const remove = level !== 'fast' && t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[level]} (${speechSize(t.size)})`, () => post({ type: 'removeModel', model: level })) : null
-    return row(label, notes, control, remove)
+    const label = el('span', {}, LEVEL_NAMES[model], advice.advised === model ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
+    const marks = uses(
+      useMark('Translate', s.translationLevel === model, () => post({ type: 'translationLevel', level: model })),
+      useMark('Check', s.model === model, () => post({ type: 'useModel', model })),
+    )
+    const control = fetching ? pct(t.progress) : s.model === model && t.status !== 'ready' ? linkBtn('Download', () => post({ type: 'useModel', model })) : null
+    const remove = t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[model]} (${speechSize(t.size)})`, () => post({ type: 'removeModel', model })) : null
+    return row(label, notes, marks, control, remove)
   })
+  return [fastRow, ...llm]
+}
+
+/** Dictate and Transcribe: the test offer, accuracy or speed, Automatic and each speech model; the engine's offer until it runs. */
+function speechModelsPart(v: AppView): (HTMLElement | null)[] {
+  if (!running(v)) return engineRows(v, 'Dictate and Transcribe')
+  return [
+    testOffer(v),
+    row(
+      'Automatic prefers',
+      [v.settings.speechPrefer === 'speed' ? 'quicker models, a little less accurate' : 'the most accurate models this computer runs in time'],
+      seg(
+        v.settings.speechPrefer,
+        [
+          ['accuracy', 'Accuracy'],
+          ['speed', 'Speed'],
+        ],
+        speechPrefer => save({ speechPrefer }),
+      ),
+    ),
+    ...speechModelRows(v),
+  ]
+}
+
+function modelsPage(v: AppView): HTMLElement[] {
+  return [
+    grp('Translate and Check'),
+    ...languageModelRows(v),
+    aside('info', 'One language model serves both: Check always uses it, Translate unless it is on Fast.'),
+    grp('Dictate and Transcribe'),
+    ...speechModelsPart(v),
+    speakersCard(v, () => go('transcribe', 'speakers')),
+    grp('Listen'),
+    ...voiceModelRows(v),
+  ].filter((n): n is HTMLElement => n !== null)
+}
+
+/** A level in a few words, for Translate's line to the Models page: its name and its download. */
+function levelValue(v: AppView): string {
+  const level = v.settings.translationLevel
+  const t = v.translation[level]
+  const state = t.status === 'downloading' ? ` · downloading ${Math.round(t.progress * 100)}%` : t.status === 'failed' ? ' · download failed' : t.status === 'absent' ? ' · downloads once' : ''
+  return `${LEVEL_NAMES[level]}${state}`
+}
+
+/** The checker in a few words, for Check's line to the Models page. */
+function checkValue(v: AppView): string {
+  const t = v.models[v.settings.model]
+  const state = t.status === 'downloading' ? ` · downloading ${Math.round(t.progress * 100)}%` : t.status === 'failed' ? ' · download failed' : t.status === 'ready' ? '' : ' · downloads once'
+  return `${LEVEL_NAMES[v.settings.model]}${state}`
 }
 
 function translatePage(v: AppView): HTMLElement[] {
@@ -1616,8 +1705,7 @@ function translatePage(v: AppView): HTMLElement[] {
     keyRow('textKey', 'Translate text on the screen', 'for text you can’t select: draw a box around it', !v.keysOk.text, 'scan'),
     fixedKey('In the card: paste the translation back', 'Enter'),
     grp('Translation'),
-    ...levelRows(v),
-    aside('info', 'Accurate and Most accurate also check your English: the one you pick here is the one Check uses.'),
+    navCard('boxes', 'Translation model', 'how well and how quickly it translates; the same model can check your English', levelValue(v), () => go('models', undefined, LEVEL_NAMES[s.translationLevel]), 'models'),
     grp('Languages'),
     card('globe', pairOf(v), [note], state),
     languagesCard(v),
@@ -1658,53 +1746,11 @@ const TRY_CHECK = 'I want to learn English and can we made tutor option? I dicta
 /** A text slower than this to check reads as slow. */
 const SLOW_CHECK_S = 4
 
-/** Where the checker runs here and how long a text takes: measured, once it has been, else expected. */
-function checkFitText(fit: LevelFit, speed: AppView['modelSpeed'][LlmModel]): string {
-  const where = FIT_WHERE[fit.where]
-  if (speed?.text === undefined) return fit.where === 'card' ? `about 1 s per text ${where}` : `possible, but slow here: several seconds per text, ${where}`
-  return `${speed.text > SLOW_CHECK_S ? 'slow here' : 'here'}: ${seconds(speed.text)} per text, ${where}${startText(speed.start)}`
-}
-
 /** What the checker does, for the bar and Home: the language it checks, or its model's download. */
 function checkCap(v: AppView): string {
   const t = v.models[v.settings.model]
   if (t.status === 'downloading') return `downloading ${Math.round(t.progress * 100)}%`
   return t.status === 'ready' ? `English · notes in ${v.settings.native}` : 'downloads once'
-}
-
-/**
- * The two models, one in use (the settings' `model`, which translates too
- * unless Translate is on Fast): Use picks one and downloads it, the one in use
- * downloads now with Download or at the first check; a cross removes one;
- * Recommended on a card that holds it, its time here.
- */
-function checkModelRows(v: AppView): HTMLElement[] {
-  const advice = translationAdvice(v.speech.device)
-  const inUse = v.settings.model
-  return (['accurate', 'most'] as const).map(model => {
-    const t = v.models[model]
-    const fetching = t.status === 'downloading'
-    const notes: (string | HTMLElement | null)[] = [
-      `${CHECK_ABOUT[model]} (${LEVEL_MODEL[model]})`,
-      checkFitText(advice[model], v.modelSpeed[model]),
-      t.status === 'failed'
-        ? bad('the download failed; Use tries again')
-        : t.status === 'ready' || fetching
-          ? null
-          : `${speechSize(t.size)} to download ${model === inUse ? 'with Download or at your first check' : 'when you pick it'}${advice[model].cuda ? ` (${CUDA_SIZE})` : ''}`,
-      fetching ? bar(t.progress) : null,
-    ]
-    const label = el('span', {}, LEVEL_NAMES[model], advice.advised === model ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
-    const control = fetching
-      ? el('span', { class: 'pct' }, `${Math.round(t.progress * 100)}%`)
-      : model !== inUse
-        ? linkBtn('Use', () => post({ type: 'useModel', model }))
-        : t.status === 'ready'
-          ? chip('in use', 'lit')
-          : linkBtn('Download', () => post({ type: 'useModel', model }))
-    const remove = t.status === 'ready' ? ib('x', `Remove ${LEVEL_NAMES[model]} (${speechSize(t.size)})`, () => post({ type: 'removeModel', model })) : null
-    return row(label, notes, control, remove)
-  })
 }
 
 function checkPage(v: AppView): HTMLElement[] {
@@ -1719,8 +1765,7 @@ function checkPage(v: AppView): HTMLElement[] {
     fixedKey('In the card: paste the corrected text back', 'Enter'),
     aside('info', 'Speech recognition fixes some mistakes as it writes, so typing shows more of them.'),
     grp('Model'),
-    ...checkModelRows(v),
-    aside('info', 'The same model translates when Translate is set to Accurate or Most accurate.'),
+    navCard('boxes', 'Model', 'the language model that checks; Translate can use the same one', checkValue(v), () => go('models', undefined, LEVEL_NAMES[s.model]), 'models'),
     grp('History'),
     navCard('list-checks', 'Mistakes', 'what Check found in your texts, repeated ones first', v.mistakes.length ? String(v.mistakes.length) : 'none', () => go('mistakes'), 'mistakes'),
     tryIt(TRY_CHECK, how),
@@ -1864,12 +1909,14 @@ function vocabularyCard(v: AppView): HTMLElement {
   return navCard('spell-check', 'Words to spell', 'names and terms, written the way you want them', n ? `${n} ${n === 1 ? 'word' : 'words'}` : 'none yet', () => go('vocabulary'), 'vocabulary')
 }
 
-/** The card that opens a feature's speech models: the one in use. */
+/** The line to the Models page at a feature's speech model: the one in use, and its download. */
 function modelCard(v: AppView, feature: 'dictation' | 'transcripts'): HTMLElement | null {
   if (!running(v)) return null
   const p = feature === 'dictation' ? v.speech.plan.dictation : v.speech.plan.transcripts
   const how = feature === 'dictation' ? `about ${seconds(p.chosen.estimate)} per phrase` : `about ${minutesText(p.chosen.estimate)} per hour of recording`
-  return navCard('cpu', 'Speech model', `${how} on this computer`, p.pinned ? p.chosen.label : `Automatic · ${p.chosen.label}`, () => openSub('model'), 'model')
+  const live = v.speech.health?.models[feature]
+  const state = live?.name === p.chosen.model && live.state === 'downloading' ? ` · downloading ${Math.round((live.progress ?? 0) * 100)}%` : ''
+  return navCard('boxes', 'Speech model', `${how} on this computer`, `${p.pinned ? p.chosen.label : `Automatic · ${p.chosen.label}`}${state}`, () => go('models', undefined, p.chosen.label), 'models')
 }
 
 /** "3 min", "1 h 10 min": an estimate of minutes. */
@@ -1972,16 +2019,6 @@ function recentPage(v: AppView): HTMLElement[] {
           ),
         )
       : [aside('info', 'Nothing yet. Dictated phrases (not notes) are kept here 30 days, 200 at most.')]),
-  ]
-}
-
-/** The speech models of the open action's feature: Dictate's, or Transcribe's. */
-function modelPage(v: AppView): HTMLElement[] {
-  const feature = open?.name === 'dictate' ? 'dictation' : 'transcripts'
-  return [
-    grp(feature === 'dictation' ? 'For dictation' : 'For transcripts'),
-    ...modelRows(v, feature),
-    aside('info', feature === 'dictation' ? 'Transcripts have a model of their own, on the Transcribe page.' : 'Dictation has a model of its own, on the Dictate page.'),
   ]
 }
 
@@ -2106,11 +2143,10 @@ function meetPage(v: AppView): HTMLElement[] {
 }
 
 /** The card that opens who spoke when: where it runs, whether it is here, its model's state. */
-function speakersCard(v: AppView): HTMLElement | null {
+function speakersCard(v: AppView, open = () => openSub('speakers')): HTMLElement | null {
   if (!installed(v)) return null
   const s = v.speech
   const note = 'the words are recognized already; this tells the voices apart'
-  const open = () => openSub('speakers')
   const work = s.pack.status === 'installing' && s.pack.installing?.includes('speakers')
   if (work) return navCard('users', 'Who spoke when', note, 'downloading…', open, 'speakers')
   if (!hasPart(v, 'speakers')) {
@@ -2521,7 +2557,7 @@ function enginePage(v: AppView): HTMLElement[] {
   const here = (text: string) => el('small', { class: 'ok' }, text)
   const speakersOnCard = p.speakersOn === 'cuda'
   out.push(
-    card('mic', 'Speech to text', [here(`Installed · ≈${speechSize(sp.installed.core)}`), 'Whisper and Parakeet on the processor: Dictate and Transcribe'], null),
+    card('mic', 'Speech to text', [here(`Installed · ≈${speechSize(sp.installed.core)}`), 'the program that runs the speech models; the models themselves are on the Models page'], null),
     p.nvidia
       ? card(
           'monitor',
@@ -2544,19 +2580,7 @@ function enginePage(v: AppView): HTMLElement[] {
     ),
     ...engineRows(v, ''),
     card('monitor', 'Graphics card', [cardNote(v)], null),
-    card(
-      'cpu',
-      'Speech models',
-      [v.settings.speechPrefer === 'speed' ? 'quicker ones, a little less accurate' : 'the most accurate ones this computer runs in time'],
-      seg(
-        v.settings.speechPrefer,
-        [
-          ['accuracy', 'Accuracy'],
-          ['speed', 'Speed'],
-        ],
-        speechPrefer => post({ type: 'saveSettings', patch: { speechPrefer } }),
-      ),
-    ),
+    navCard('boxes', 'Speech models', 'which ones Dictate and Transcribe use, and what they take', `${v.settings.speechPrefer === 'speed' ? 'Speed' : 'Accuracy'} first`, () => go('models', undefined, 'Automatic'), 'models'),
     grp('Service'),
   )
   const service = { off: 'off', starting: 'starting…', ready: h?.busy ? 'running · transcribing now' : 'running', down: 'stopped' }[sp.service]
@@ -2719,7 +2743,8 @@ function languagesPage(v: AppView): HTMLElement[] {
 }
 
 /** The voice that reads, the natural one's download, and the speed: Listen's, as the card reads with them. */
-function voiceRows(v: AppView): (HTMLElement | null)[] {
+/** The voice that reads, the natural voice's download, and how it does here: the Models page's Listen part. */
+function voiceModelRows(v: AppView): (HTMLElement | null)[] {
   const s = v.settings
   const rtf = v.natural.rtf
   const windows = v.hostVoices.find(h => /^en/i.test(h.lang))
@@ -2731,21 +2756,33 @@ function voiceRows(v: AppView): (HTMLElement | null)[] {
       ? [`natural voice, ${v.natural.size} MB on this computer`, bad('it prepares speech slower than it plays, so it pauses between sentences; a Windows voice is instant')]
       : [`natural voice, ${v.natural.size} MB on this computer${rtf ? ` · prepares speech ${Math.max(1, Math.round(1 / rtf))}× faster than it plays` : ''}`]
   return [
-    grp('Voice'),
     card('volume-2', 'Voice', voiceNote, slow && windows ? linkBtn(`Use ${windows.name.replace(/^Microsoft /, '').replace(/ Desktop$/, '')}`, () => save({ voice: windows.name })) : null, select(s.voice, voiceOptions(v), voice => save({ voice }))),
     naturalRow(v),
-    card(
-      'play',
-      'Speed',
-      ['how fast it reads'],
-      seg(
-        s.rate,
-        RATES.map(r => [r, String(r)]),
-        rate => save({ rate }),
-        true,
-      ),
-    ),
   ]
+}
+
+/** How fast Listen reads. */
+function speedCard(v: AppView): HTMLElement {
+  const s = v.settings
+  return card(
+    'play',
+    'Speed',
+    ['how fast it reads'],
+    seg(
+      s.rate,
+      RATES.map(r => [r, String(r)]),
+      rate => save({ rate }),
+      true,
+    ),
+  )
+}
+
+/** The voice in a few words, for Listen's line to the Models page. */
+function voiceValue(v: AppView): string {
+  const n = v.natural
+  if (n.status === 'downloading') return `natural · downloading ${Math.round(n.progress * 100)}%`
+  if (v.settings.voice === '') return `Automatic · ${naturalOn(v) ? 'natural' : 'Windows'}`
+  return voiceOptions(v).find(([value]) => value === v.settings.voice)?.[1] ?? 'Automatic'
 }
 
 function settingsPage(v: AppView): HTMLElement[] {

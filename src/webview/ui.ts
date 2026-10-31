@@ -40,6 +40,27 @@ export function navCard(name: LucideName | null, title: string, note: Note | Not
   )
 }
 
+/** An action's mark on a model's line: lit, with a check, when the action uses the model; a tap on an unlit one gives it the model. */
+export function useMark(name: string, on: boolean, pick?: () => void, why = ''): HTMLButtonElement {
+  return el(
+    'button',
+    {
+      class: on ? 'chip use lit' : 'chip use',
+      'aria-pressed': String(on),
+      disabled: !on && !pick,
+      title: why || (on ? `${name} uses it` : `Use it for ${name}`),
+      onclick: () => {
+        if (!on) pick?.()
+      },
+    },
+    on ? lucide('check', 's') : null,
+    name,
+  )
+}
+
+/** The actions' marks on a model's line, side by side. */
+export const uses = (...marks: (HTMLElement | null)[]) => el('span', { class: 'uses' }, ...marks)
+
 /** A small round-cornered icon button: remove, earlier, later. */
 export function ib(name: LucideName, label: string, onclick: () => void, disabled = false): HTMLButtonElement {
   return el('button', { class: 'ib', title: label, 'aria-label': label, disabled, onclick }, lucide(name))

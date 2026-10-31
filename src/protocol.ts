@@ -387,6 +387,8 @@ export type ToHost =
   | { type: 'declineSpeechTest' }
   /** A speech model downloaded now, ahead of its use. */
   | { type: 'downloadSpeechModel'; model: string }
+  /** A speech model nothing uses, off the disk (it downloads again when picked). */
+  | { type: 'removeSpeechModel'; model: string }
   | { type: 'removeSpeech' }
   | { type: 'restartSpeech' }
   | { type: 'showInFolder'; path: string }

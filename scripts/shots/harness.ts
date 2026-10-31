@@ -240,13 +240,14 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
   if (narrow) {
     await page('keyboard', ['fixing'])
     await page('settings')
+    await page('models')
   } else if (theme === 'dark') {
     await page('listen')
     await page('translate')
     await page('check')
     await page('screen')
-    await page('dictate', ['model'])
-    await page('transcribe', ['meet', 'model', 'speakers'])
+    await page('dictate')
+    await page('transcribe', ['meet', 'speakers'])
     await page('keyboard', ['fixing'])
     for (const name of ['words', 'mistakes', 'transcripts', 'translations', 'phrases', 'vocabulary', 'kept', 'learned', 'programs', 'layouts']) await page(name)
     await page('settings', ['languages'])
@@ -256,6 +257,13 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     await js(w, `document.querySelector('.pbody')?.scrollTo(0, 1e6)`)
     await sleep(200)
     await shot(w, tag('settings-end'))
+    // Every model on one page: its middle (the speech models) and its end (the voice, who spoke when).
+    await page('models')
+    for (const [at, name] of [[560, 'models-speech'], [1e6, 'models-end']] as const) {
+      await js(w, `document.querySelector('.pbody')?.scrollTo(0, ${at})`)
+      await sleep(200)
+      await shot(w, tag(name))
+    }
     for (const name of ['engine', 'storage', 'computer', 'about']) await page(name)
     await focused('kept')
     // The search, and a find opened with its line lit.
@@ -294,6 +302,7 @@ async function appShots(theme: 'dark' | 'light', narrow = false): Promise<void> 
     await page('keyboard', ['fixing'])
     await focused('kept')
     await page('settings')
+    await page('models')
     await page('listen')
     await page('check')
     await page('storage')

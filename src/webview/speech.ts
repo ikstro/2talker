@@ -6,9 +6,9 @@
 
 import { cardText, mainCard, nvidiaCard, shortCpu } from '../hardware'
 import type { AppView, Choice, Feature, SpeechHealth, SpeechPart, SpeechResult } from '../protocol'
-import { BASIS_TEXT, estimateText, minutes, seconds } from '../speechplan'
+import { BASIS_TEXT, estimateText, minutes, seconds, type FeaturePlan } from '../speechplan'
 import { el, icon } from './dom'
-import { aside, bad, bar, btn, card, chip, grp, link, linkBtn, post, row, toggleKnob } from './ui'
+import { aside, bad, bar, btn, card, chip, grp, ib, link, linkBtn, post, row, toggleKnob, useMark, uses } from './ui'
 
 export type Source = 'file' | 'mic' | 'meet' | 'note'
 export type Stage = '' | 'decode' | 'words' | 'speakers' | 'save'
@@ -258,47 +258,67 @@ function liveModel(v: AppView, feature: Feature): SpeechHealth['models']['dictat
   return v.speech.health?.models[feature === 'dictation' ? 'dictation' : 'transcripts']
 }
 
+const FEATURES: [Feature, string][] = [
+  ['dictation', 'Dictate'],
+  ['transcripts', 'Transcribe'],
+]
+const pin = (feature: Feature, model: string) => post({ type: 'saveSettings', patch: { [feature === 'dictation' ? 'dictationModel' : 'transcriptsModel']: model } })
+
 /**
- * The speech models for a feature, each with its time on this computer:
- * Automatic (the most accurate one within the budget, chosen here) or one the
- * person picks, which then stays whatever it costs. A model not downloaded
- * downloads when picked.
+ * The speech models, each once, with the actions it serves here and its time
+ * for each: a model Dictate and Transcribe both use is downloaded and loaded
+ * once. Automatic picks per action (speechplan.ts: on the card dictation
+ * shares the transcripts' model; on the processor it needs one that answers in
+ * a second); a tap on a model's mark picks it for that action, whatever it
+ * costs, and downloads it when it is not here. A model on the disk that
+ * nothing uses can go (it downloads again when picked).
  */
-export function modelRows(v: AppView, feature: Feature): HTMLElement[] {
-  const p = feature === 'dictation' ? v.speech.plan.dictation : v.speech.plan.transcripts
-  const key = feature === 'dictation' ? 'dictationModel' : 'transcriptsModel'
-  const save = (model: string) => post({ type: 'saveSettings', patch: { [key]: model } })
-  const live = liveModel(v, feature)
-  const budget = feature === 'dictation' ? `answers in ≈${seconds(p.budget)}` : `writes an hour’s words in ≈${minutes(p.budget)}`
+export function speechModelRows(v: AppView): HTMLElement[] {
+  const plan = v.speech.plan
+  const plans: Record<Feature, FeaturePlan> = { dictation: plan.dictation, transcripts: plan.transcripts }
+  // The other device's plan: what runs when the card refuses a model.
+  const spare = plan.device === 'cuda' ? plan.engine.cpu : undefined
   const out: HTMLElement[] = [
     row(
       'Automatic',
-      [`the most accurate model that ${budget} on this computer · now ${p.chosen.label}`, v.settings.speechPrefer === 'speed' ? 'quicker ones preferred (Settings)' : null],
-      toggleKnob(!p.pinned, on => save(on ? '' : p.chosen.model), 'Automatic'),
+      [`for each action, the most accurate model that is quick enough here: a phrase in ≈${seconds(plan.dictation.budget)}, an hour in ≈${minutes(plan.transcripts.budget)}`],
+      uses(...FEATURES.map(([f, name]) => useMark(name, !plans[f].pinned, () => pin(f, '')))),
     ),
   ]
-  for (const c of p.choices) {
-    const chosen = c.model === p.chosen.model
-    const fetching = live && live.name === c.model && live.state === 'downloading'
-    const notes: (string | HTMLElement | null)[] = c.why
-      ? [`${c.about} · ${c.why}`]
+  const names = [...new Set([...plan.dictation.choices, ...plan.transcripts.choices].map(c => c.model))]
+  for (const name of names) {
+    const of = (f: Feature) => plans[f].choices.find(c => c.model === name)
+    const any = (of('dictation') ?? of('transcripts')) as Choice
+    const usable = FEATURES.filter(([f]) => of(f) && !of(f)?.why)
+    const serving = FEATURES.filter(([f]) => plans[f].chosen.model === name)
+    const live = [liveModel(v, 'dictation'), liveModel(v, 'transcripts')].find(m => m?.name === name && m.state === 'downloading')
+    const backup = spare ? FEATURES.filter(([f]) => spare[f]?.model === name).map(([, n]) => n) : []
+    const why = usable.length === 0 ? (of('dictation')?.why ?? of('transcripts')?.why ?? '') : ''
+    const slow = serving.some(([f]) => plans[f].pinned && !of(f)?.fits)
+    const notes: (string | HTMLElement | null)[] = why
+      ? [`${any.about} · ${why}`]
       : [
-          `${estimateText(feature, c)} · ${where(c)} · ${BASIS_TEXT[c.basis]}${!c.fits && chosen && p.pinned ? ' · slower than usual here' : ''}`,
-          `${c.about}${c.downloaded ? '' : ` · ${size(c.mb)}, ${chosen ? 'downloads with its first use' : 'downloads when picked'}`}${p.better?.model === c.model ? ' · fits this computer best' : ''}`,
-          fetching ? bar(live.progress ?? 0) : null,
+          `${usable.map(([f, n]) => `${n} ${estimateText(f, of(f) as Choice)}`).join(' · ')} · on the ${where(any)} · ${BASIS_TEXT[any.basis]}${slow ? ' · slower than usual here' : ''}`,
+          `${any.about}${of('transcripts') ? '' : ' · Dictate only'} · ${size(any.mb)}${any.downloaded ? ' on this computer' : serving.length ? ', downloads with its first use' : ', downloads when picked'}`,
+          serving.length === 2 ? 'Dictate and Transcribe share it: downloaded once, loaded once' : null,
+          live ? bar(live.progress ?? 0) : null,
         ]
-    const control = c.why
-      ? null
-      : fetching
-        ? el('span', { class: 'pct' }, `${Math.round((live.progress ?? 0) * 100)}%`)
-        : chosen
-          ? chip(p.pinned ? 'picked' : 'in use', 'lit')
-          : linkBtn('Use', () => {
-              if (!c.downloaded) post({ type: 'downloadSpeechModel', model: c.model })
-              save(c.model)
-            })
-    const node = row(c.label, notes, control)
-    if (c.why) node.classList.add('dim')
+    // A model on the disk that serves nothing here: kept for the processor when the card fails, or not used.
+    if (!serving.length && any.downloaded) notes.push(backup.length ? `kept for ${backup.join(' and ')} on the processor, if the graphics card fails` : 'not used now')
+    const marks = uses(
+      ...FEATURES.map(([f, n]) => {
+        const c = of(f)
+        if (!c) return null
+        const pick = () => {
+          if (!c.downloaded) post({ type: 'downloadSpeechModel', model: name })
+          pin(f, name)
+        }
+        return useMark(n, plans[f].chosen.model === name, c.why ? undefined : pick, c.why)
+      }),
+    )
+    const remove = any.downloaded && !serving.length && !live ? ib('x', `Remove ${any.label} (${size(any.mb)}); it downloads again when picked`, () => post({ type: 'removeSpeechModel', model: name })) : null
+    const node = row(any.label, notes, marks, live ? el('span', { class: 'pct' }, `${Math.round((live.progress ?? 0) * 100)}%`) : null, remove)
+    if (why) node.classList.add('dim')
     out.push(node)
   }
   return out

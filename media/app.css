@@ -1687,6 +1687,41 @@ button.chip:hover {
   opacity: 0.55;
 }
 
+/* The actions a model serves, on its line (Models): lit with a check when one uses it, a tap gives it to another. */
+.uses {
+  display: inline-flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.chip.use {
+  gap: 4px;
+  cursor: pointer;
+}
+
+.chip.use .lu {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.5;
+}
+
+.chip.use.lit {
+  cursor: default;
+}
+
+button.chip.use.lit:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--raised));
+}
+
+.chip.use:disabled:not(.lit) {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+
 .warn .codicon,
 .aside .codicon,
 .privacy .codicon {

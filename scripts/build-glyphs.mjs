@@ -11,7 +11,7 @@ const NAMES = [
   // the sidebar
   'list-ordered', 'message-square-text', 'arrow-left',
   // rows
-  'file-audio', 'users', 'spell-check', 'video', 'cpu', 'folder', 'copy', 'external-link', 'rotate-cw', 'rotate-ccw', 'database', 'play', 'pause', 'power', 'list', 'monitor', 'clock', 'lock', 'download', 'globe', 'type', 'message-square', 'star', 'search', 'trash-2', 'circle-alert', 'circle-check', 'check', 'link', 'memory-stick', 'hard-drive', 'laptop', 'sparkles', 'wand-sparkles', 'thumbs-up', 'loader',
+  'file-audio', 'users', 'spell-check', 'video', 'cpu', 'folder', 'copy', 'external-link', 'rotate-cw', 'rotate-ccw', 'database', 'play', 'pause', 'power', 'list', 'monitor', 'clock', 'lock', 'download', 'globe', 'type', 'message-square', 'star', 'search', 'trash-2', 'circle-alert', 'circle-check', 'check', 'link', 'memory-stick', 'hard-drive', 'boxes', 'laptop', 'sparkles', 'wand-sparkles', 'thumbs-up', 'loader',
   // the tray panel (P1, 2026-10-30): an icon of its own on every row
   'pencil-line', 'monitor-speaker', 'scan-text', 'text-cursor', 'panel-bottom',
   // controls

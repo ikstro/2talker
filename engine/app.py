@@ -28,7 +28,9 @@ What other apps may use, and keep using:
 
 Krya alone uses: PUT /settings {plan, vocabulary: [{word, heard}]} (which model runs
 where, made from this computer's measurements; the words to spell right and what they
-are heard as), POST /calibrate (the speed test), POST /models/<name>/download.
+are heard as), POST /calibrate (the speed test), POST /models/<name>/download,
+DELETE /models/<name> (its files gone -> {name, state: "missing"}; 409 while it is planned,
+loaded, downloading or being measured).
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import sys
 import threading
 import time
@@ -67,7 +70,7 @@ import vocab
 
 from bench import Calibrator
 from jobs import Worker, finish_recording
-from settings import ALL_MODELS, APP_DIR, Settings, adopt_altscribe
+from settings import ALL_MODELS, APP_DIR, Settings, adopt_altscribe, move_transcripts
 from store import Store, now_iso
 from stream import Session, Sessions
 
@@ -410,6 +413,43 @@ def download_model(name: str):
     return asr.model_state(name)
 
 
+def model_busy(name: str) -> str:
+    """Why a model's files must stay now, or "" when nothing plans, holds, fetches or measures it."""
+    for feature in ("transcripts", "dictation"):
+        if worker.entry(feature)[1]["model"] == name:
+            return f"In use: the {feature} model"
+    for t in (worker.transcriber, worker.dictator, worker.parakeet):
+        if t.loaded and t.name == name:
+            return "In use: loaded"
+    if name in asr.fetching:
+        return "In use: downloading"
+    if calibrator.running:
+        return "In use: the speed test runs"
+    return ""
+
+
+@app.delete("/models/{name}")
+def delete_model(name: str):
+    """A model's files gone from the disk (Krya's Models page); it downloads again when wanted."""
+    if name not in ALL_MODELS:
+        raise HTTPException(404, "No such model")
+    why = model_busy(name)
+    if why:
+        raise HTTPException(409, why)
+    folder = asr._cache_dir(name)
+    # Hugging Face's lock files for a Whisper repo live beside it: .locks/models--<owner>--<repo>.
+    folders = [folder] + ([asr.WHISPER_DIR / ".locks" / folder.name] if asr.backend(name) == "whisper" else [])
+    try:
+        for f in folders:
+            if f.exists():
+                shutil.rmtree(f)
+    except OSError as error:
+        log.warning("could not remove %s: %s", name, error)
+        raise HTTPException(409, f"Could not remove {name}: {error.strerror or error}")
+    log.info("removed the model %s", name)
+    return asr.model_state(name)
+
+
 # Settings -----------------------------------------------------------------
 
 def public_settings() -> dict:
@@ -731,6 +771,8 @@ def main() -> int:
     # Only a real start adopts Altscribe's folders, never an import (the tests import this module).
     adopt_altscribe()
     settings.reload()
+    # Altype's transcripts into Documents\Krya, before anything opens the library.
+    move_transcripts(settings)
     worker.start()
     if settings["hfToken"] and not diarize.downloaded():
         setup.start(settings["hfToken"])

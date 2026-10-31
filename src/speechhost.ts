@@ -265,6 +265,11 @@ export class SpeechHost {
     return this.call('POST', `/models/${encodeURIComponent(model)}/download`)
   }
 
+  /** A model nothing uses here, deleted; the engine refuses one in use. */
+  removeModel(model: string): Promise<SpeechResult> {
+    return this.call('DELETE', `/models/${encodeURIComponent(model)}`)
+  }
+
   view(keysOk: SpeechView['keysOk']): SpeechView {
     const onCard = this.speakersOnCard()
     const gpuPlan = planSpeech({ ...this.input, cuda: true }).dictation.chosen
