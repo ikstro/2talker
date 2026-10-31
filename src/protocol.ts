@@ -40,9 +40,11 @@ export type TextResult =
   /**
    * `text`: the translation as plain text (Copy, Paste); `html`: the same,
    * every sentence a `span.t` (render.ts textOutHtml); `sentences`: the
-   * text's sentences in order, as translated, for the card to find in its field.
+   * text's sentences in order, as translated, for the card to find in its field;
+   * `drafts`: how many sentences are still quick drafts (`span.t.draft`), the
+   * accurate model's translation replacing them one by one.
    */
-  | { status: 'ready'; text: string; from: string; to: string; html: string; sentences: string[] }
+  | { status: 'ready'; text: string; from: string; to: string; html: string; sentences: string[]; drafts?: number }
   | { status: 'failed'; message: string }
 
 /** Check my English's answer under the person's text (a `check` card), asked for with `checkText`. */
@@ -64,7 +66,8 @@ export type TranslationState =
   | { status: 'translating' }
   /** The translator for this language pair is downloading, once. */
   | { status: 'downloading'; progress: number; size: number }
-  | { status: 'ready'; html: string }
+  /** `drafts`: as a text's (TextResult). */
+  | { status: 'ready'; html: string; drafts?: number }
   | { status: 'failed'; message: string }
 
 /**
@@ -211,9 +214,10 @@ export type AppView = {
   models: Record<LlmModel, TranslatorState>
   /**
    * Seconds a local model takes here, each once measured a few times: a
-   * sentence translated, a text checked, and loading the model after it was let go.
+   * sentence translated, a text checked, and loading the model after it was
+   * let go; `card`: the MB of the graphics card it holds while loaded.
    */
-  modelSpeed: Partial<Record<LlmModel, { sentence?: number; text?: number; start?: number }>>
+  modelSpeed: Partial<Record<LlmModel, { sentence?: number; text?: number; start?: number; card?: number }>>
   /** The word dictionary for the person's language. */
   dictionary: { status: DictionaryStatus }
   /** The mistakes checked texts had, newest first (mistakes.ts). */

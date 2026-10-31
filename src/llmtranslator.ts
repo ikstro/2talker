@@ -70,7 +70,7 @@ export function createLlmTranslators(o: LlmOptions): LlmTranslators {
       state: native => (languages[native] ? files.state(level) : { status: 'unsupported', progress: 0, size: 0 }),
       prepare: (native, onProgress) =>
         languages[native] ? files.prepare(level, onProgress) : Promise.reject(new Error(`${models[level].name} does not translate this language`)),
-      async translate(sentences, from, to) {
+      async translate(sentences, from, to, progress) {
         const unknown = [from, to].find(code => !languages[code])
         if (unknown) throw new Error(`${models[level].name} does not translate this language (${unknown})`)
         if (sentences.length === 0) return []
@@ -78,7 +78,12 @@ export function createLlmTranslators(o: LlmOptions): LlmTranslators {
         const began = Date.now()
         return files.server.run(target, async (base, loaded) => {
           const ready = Date.now()
-          const out = await mapLimit(sentences, PARALLEL, s => one(base, s, from, to))
+          // Each sentence is heard of as it comes, so the card can show it before the rest.
+          const out = await mapLimit(sentences, PARALLEL, async (s, i) => {
+            const done = await one(base, s, from, to)
+            progress?.(i, done, false)
+            return done
+          })
           const counted = sentences.filter(s => s.trim()).length
           if (counted > 0) o.onTimed?.(level, { sentence: (Date.now() - ready) / 1000 / counted, ...(loaded ? { start: (ready - began) / 1000 } : {}) })
           return out

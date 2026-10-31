@@ -24,12 +24,22 @@ export function englishHtml(lines: readonly Line[]): string {
   return halfHtml(lines, (p: Pair, i) => `<span class="s" data-i="${i}" dir="auto">${escapeHtml(p.en)}</span>`)
 }
 
+/** A translation's sentence: `span.t`, and `span.t.draft` while it is a quick draft the accurate one will replace. */
+const outSpan = (text: string, i: number, draft?: boolean) => `<span class="t${draft ? ' draft' : ''}" data-i="${i}" dir="auto">${escapeHtml(text)}</span>`
+
 /** The lower half: the other side of every sentence, a `span.t`; a sentence without one stays as it is. */
 export function translationHtml(lines: readonly Line[]): string {
-  return halfHtml(lines, (p: Pair, i) => `<span class="t" data-i="${i}" dir="auto">${escapeHtml(p.other ?? p.en)}</span>`)
+  return halfHtml(lines, (p: Pair, i) => outSpan(p.other ?? p.en, i, p.draft))
 }
 
 /** The translator's lower half: every sentence's translation a `span.t`, numbered as the text's sentences are. */
 export function textOutHtml(lines: readonly TextLine[]): string {
-  return halfHtml(lines, (p, i) => `<span class="t" data-i="${i}" dir="auto">${escapeHtml(p.out)}</span>`)
+  return halfHtml(lines, (p, i) => outSpan(p.out, i, p.draft))
+}
+
+/** How many sentences of the lines are still drafts. */
+export function draftsIn(lines: readonly (Line | TextLine)[]): number {
+  let n = 0
+  for (const line of lines) for (const p of line.pairs) if (p.draft) n++
+  return n
 }

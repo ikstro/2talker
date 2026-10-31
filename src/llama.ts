@@ -1,7 +1,8 @@
 // llama.cpp's server (llama-server.exe of a build llmtranslator.ts
 // downloads) as a process of Krya's own: one model at a time, on a free port
-// of 127.0.0.1, started by the first request, stopped after ten idle minutes
-// and with Krya. On Vulkan llama.cpp puts as many of the model's layers on
+// of 127.0.0.1, started by the first request (or a key that will make one,
+// `warm`), stopped after three idle minutes (ten until 2026-10-31: the card's
+// memory back sooner) and with Krya. On Vulkan llama.cpp puts as many of the model's layers on
 // the graphics card as its memory holds (its own `--fit`); CUDA takes them all
 // (`allLayers`), NVIDIA's driver lending the card the computer's memory for
 // the rest, which is far quicker than splitting. A card that cannot take the
@@ -14,7 +15,7 @@ import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as path from 'node:path'
 
-const IDLE_MS = 10 * 60_000
+const IDLE_MS = 3 * 60_000
 /** The 12B model from a slow disk takes a while to load. */
 const READY_MS = 3 * 60_000
 const POLL_MS = 250
@@ -75,6 +76,8 @@ export class LlamaServer {
   private running: Running | undefined
   private busy = 0
   private idle: NodeJS.Timeout | undefined
+  /** When the last request ended, or the server was warmed. */
+  private usedAt = 0
   /** Builds and models the card could not take: on the processor until Krya starts again. */
   private readonly cpuOnly = new Set<string>()
 
@@ -82,6 +85,16 @@ export class LlamaServer {
   readonly apiKey = randomBytes(32).toString('hex')
 
   constructor(private readonly o: LlamaOptions) {}
+
+  /** How long a running server has had nothing to do (ms); undefined while it serves, or when none runs. */
+  get restingFor(): number | undefined {
+    return this.running && this.busy === 0 ? Date.now() - this.usedAt : undefined
+  }
+
+  /** The model loaded and answering now, if any (not while it starts). */
+  get loaded(): string | undefined {
+    return this.running?.isReady ? this.running.model : undefined
+  }
 
   /** The model being served now, and by which build, if any. */
   get model(): string | undefined {
@@ -104,6 +117,22 @@ export class LlamaServer {
       this.busy--
       this.touch()
     }
+  }
+
+  /**
+   * Starts the server of `target` ahead of a request (a key pressed, an empty
+   * card opened), so the model loads while the text is copied, snipped or
+   * typed; no request is made, and it stops when idle as after one. A server
+   * busy with another model is left alone.
+   */
+  warm(target: LlamaTarget): void {
+    if (this.running?.key === keyOf(target)) return this.touch()
+    if (this.busy > 0) return
+    this.usedAt = Date.now()
+    this.ready(target).then(
+      () => this.touch(),
+      () => undefined,
+    )
   }
 
   /** Stops the server; resolves once its process is gone (Windows keeps the model's file in use until then), or after a few seconds regardless. */
@@ -146,6 +175,7 @@ export class LlamaServer {
   private touch(): void {
     clearTimeout(this.idle)
     if (this.busy > 0 || !this.running) return
+    this.usedAt = Date.now()
     this.idle = setTimeout(() => {
       if (this.busy === 0) void this.stop()
     }, this.o.idleMs ?? IDLE_MS)

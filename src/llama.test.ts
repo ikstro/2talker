@@ -131,6 +131,30 @@ describe('LlamaServer', () => {
     await expect(server.run(t('a.gguf'), async b => b)).rejects.toThrow('device lost')
   })
 
+  it('warmed ahead of a request, it starts the model without one, and the request finds it loaded', async () => {
+    const { server, started } = setup()
+    server.warm(t('a.gguf'))
+    expect(server.loaded).toBeUndefined()
+    await vi.waitFor(() => expect(server.loaded).toBe('a.gguf'))
+    expect(server.restingFor).toBeGreaterThanOrEqual(0)
+    await expect(server.run(t('a.gguf'), async (_b, l) => l)).resolves.toBe(false)
+    expect(started).toHaveLength(1)
+    server.dispose()
+  })
+
+  it('a warm-up never takes the card from a model at work', async () => {
+    const { server, started } = setup()
+    let finish: () => void = () => undefined
+    const job = server.run(t('a.gguf'), () => new Promise<void>(resolve => (finish = resolve)))
+    await vi.waitFor(() => expect(server.loaded).toBe('a.gguf'))
+    expect(server.restingFor).toBeUndefined()
+    server.warm(t('b.gguf'))
+    expect(started).toHaveLength(1)
+    finish()
+    await job
+    server.dispose()
+  })
+
   it('stops after the idle time, and starts again on the next request', async () => {
     const { server, started } = setup(() => false, 20)
     await server.run(t('a.gguf'), async () => undefined)

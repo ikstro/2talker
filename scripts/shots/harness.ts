@@ -183,6 +183,36 @@ async function cardShots(theme: 'dark' | 'light'): Promise<void> {
   await fit()
   await shot(w, `card-${theme}-accurate-done`)
 
+  // Accurate after Fast's draft (2026-10-31): the draft at once, the model's sentences swept in one by one (sweep.ts), frames of the sweep.
+  const built = 'Сборка опять упала. Кнопки сундука и молнии поменять местами. Завтра проверю на ноутбуке.'
+  const srcs = ['Сборка опять упала.', chest, 'Завтра проверю на ноутбуке.']
+  const drafts = ['The assembly fell again.', 'The chest buttons and lightning change places.', 'Tomorrow I will check on a laptop.']
+  const finals = ['The build failed again.', 'Swap the chest and lightning buttons.', 'I’ll check it on the laptop tomorrow.']
+  const improving = (done: number) => {
+    const pairs = [{ prefix: '', pairs: srcs.map((src, i) => (i < done ? { src, out: finals[i]! } : { src, out: drafts[i]!, draft: true })) }]
+    const result = { status: 'ready', text: pairs[0]!.pairs.map(p => p.out).join(' '), from: 'ru', to: 'en', html: textOutHtml(pairs), sentences: srcs, drafts: srcs.length - done }
+    card(7, 'translate', { status: 'text', text: built, from: 'ru', to: 'en', languages: ['en', 'ru', 'uk', 'de'], mine: ['ru', 'en'], result, canPaste: true }, 'accurate')
+  }
+  improving(0)
+  await fit()
+  await shot(w, `card-${theme}-draft`)
+  improving(1)
+  const began = Date.now()
+  for (const at of [40, 120, 200, 300, 450, 700]) {
+    await sleep(Math.max(0, at - (Date.now() - began)))
+    await shot(w, `sweep-${theme}-${String(Date.now() - began).padStart(4, '0')}ms`)
+  }
+  improving(3)
+  await sleep(1200)
+  await fit()
+  await shot(w, `card-${theme}-draft-done`)
+  // Listen: the English read at once, the translation under it a draft.
+  const listenLines = await translateLines(splitText(english, 'Russian'), 'Russian', fake)
+  listenLines.forEach(l => l.pairs.forEach((p, i) => i % 2 === 0 && (p.draft = true)))
+  card(8, 'selection', { status: 'done', html: englishHtml(listenLines), translation: { status: 'ready', html: translationHtml(listenLines), drafts: 2 } }, 'accurate')
+  await fit()
+  await shot(w, `card-${theme}-listen-draft`)
+
   // Check my English: the owner's sentence checked, its mistakes marked and the main one said in Russian; then a right one.
   const mine = 'I want to learn English and can we made tutor option? I dictate or tupe in English and you show my my mistake.'
   const right = 'I want to learn English, and can we make a tutor option? I dictate or type in English and you show me my mistakes.'

@@ -130,6 +130,13 @@ describe('createLlmTranslators', () => {
       ['accurate', false],
     ])
     expect(timed[0]?.sentence).toBeGreaterThanOrEqual(0)
+    // Each sentence is told as it comes, never as a draft, so the card can replace its draft at once.
+    const told: [number, string | undefined, boolean][] = []
+    await llm.accurate.translate(['Да.', 'Нет.'], 'ru', 'en', (i, text, draft) => told.push([i, text, draft]))
+    expect(told.sort()).toEqual([
+      [0, '[Да.]', false],
+      [1, '[Нет.]', false],
+    ])
   })
 
   it('a level on CUDA downloads its two zips into one folder and runs every layer on the card', async () => {

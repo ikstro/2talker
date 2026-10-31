@@ -15,6 +15,7 @@ import { hotkeyLabel } from '../hotkey'
 import { findLanguage, labelCode, langCode, voiceMatches } from '../languages'
 import { chosenNatural } from '../natural'
 import { LEVEL_NAMES } from '../settings'
+import { updateSentences } from './sweep'
 import type { CardKind, CardState, CardView, CheckResult, DiffPart, HostVoice, NaturalState, TextResult, ToHost, ToView, TranslationState, TutorHost, ViewConfig } from '../protocol'
 import { dwmFlag, el, html, icon } from './dom'
 import { glyph } from './glyphs'
@@ -420,12 +421,13 @@ function failed(message: string, retry: () => void = () => post({ type: 'retry' 
   ]
 }
 
-/** The lower half; the same translation is left as it is, so a mark on it stays. */
+/** The lower half; the same translation is left as it is, so a mark on it stays, and a draft becomes the accurate one sentence by sentence (sweep.ts). */
 function renderTranslation(c: CardView, t: TranslationState): void {
   translationBar.hidden = t.status !== 'ready'
   if (t.status === 'ready') {
     if (translation.dataset.html === t.html) return
-    translation.replaceChildren(html(t.html))
+    const next = html(t.html)
+    if (!translation.dataset.html || !updateSentences(translation, next, markRareWords)) translation.replaceChildren(next)
     translation.dataset.html = t.html
     return
   }
@@ -542,7 +544,8 @@ function renderText(c: CardView, s: Extract<CardState, { status: 'text' | 'check
   if (s.status === 'check') renderCheckResult(s.result, !!s.canPaste)
   else renderTextResult(s.result, !!s.canPaste)
   hover.refresh()
-  const by = s.status === 'check' ? `Checked · ${s.model}` : `Translated · ${LEVEL_NAMES[c.level]}`
+  const improving = s.status === 'text' && s.result.status === 'ready' && !!s.result.drafts
+  const by = s.status === 'check' ? `Checked · ${s.model}` : improving ? `Improving · ${LEVEL_NAMES[c.level]}…` : `Translated · ${LEVEL_NAMES[c.level]}`
   textFoot.textContent = s.canPaste ? `${by} · Shift+Enter, a new line` : by
   // Said under a translation, or one on its way; not under nothing, or a failure.
   textFoot.hidden = s.result.status === 'none' || s.result.status === 'failed'
@@ -643,16 +646,19 @@ let lastOut: Out | undefined
 
 /**
  * The translation with Copy, ▶ Listen when it is in English, and Paste when
- * it came from a selection; `ready`: Listen and Paste may be pressed.
+ * it came from a selection; `ready`: Listen and Paste may be pressed (not
+ * while drafts are still being replaced); `stale`: the last one, faded, while
+ * a newer one comes.
  */
-function outBlock(out: Out, canPaste: boolean, ready: boolean): HTMLElement[] {
+function outBlock(out: Out, canPaste: boolean, ready: boolean, stale = !ready): HTMLElement[] {
+  return [el('div', { class: `text-out${stale ? ' stale' : ''}`, lang: out.to, dir: 'auto', 'data-words': out.to === 'en' }, html(out.html)), outBar(out, canPaste, ready)]
+}
+
+function outBar(out: Out, canPaste: boolean, ready: boolean): HTMLElement {
   // Its key, Enter, is drawn on it by card.css, so the button's name stays "Paste".
-  const pasteButton = el('button', { class: 'paste-btn', title: 'Paste over the selection (Enter)', disabled: !ready, onclick: () => paste() }, 'Paste')
-  const english = out.to === 'en'
-  return [
-    el('div', { class: `text-out${ready ? '' : ' stale'}`, lang: out.to, dir: 'auto', 'data-words': english }, html(out.html)),
-    halfBar([copyButton(() => out.text), english && ready ? listenText('out') : null], canPaste ? [pasteButton] : []),
-  ]
+  const title = ready ? 'Paste over the selection (Enter)' : 'Pastes once the accurate translation is in (Enter)'
+  const pasteButton = el('button', { class: 'paste-btn', title, disabled: !ready, onclick: () => paste() }, 'Paste')
+  return halfBar([copyButton(() => out.text), out.to === 'en' && ready ? listenText('out') : null], canPaste ? [pasteButton] : [])
 }
 
 /** Under the bar: what the translation is doing, or the translation with its own Copy and Paste. The same result is left as it is, so a selection in it stays. */
@@ -661,6 +667,19 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
   if (textResult.dataset.key === key) return
   textResult.dataset.key = key
   textResult.hidden = r.status === 'none'
+  const ready = r.status === 'ready' && !r.drafts
+  // The same translation, a sentence of it come in: only the sentences change (sweep.ts), and its marks stay.
+  const out = textResult.querySelector<HTMLElement>(':scope > .text-out:not(.stale)')
+  if (r.status === 'ready' && out && lastOut?.to === r.to && updateSentences(out, html(r.html), markRareWords)) {
+    lastOut = { text: r.text, to: r.to, html: r.html }
+    out.nextElementSibling?.replaceWith(outBar(lastOut, canPaste, ready))
+    fieldRanges = retranslate === undefined && fieldText(textField) === sentText ? sentenceRanges(textField, r.sentences) : undefined
+    if (ready && pasteWhenReady) {
+      pasteWhenReady = false
+      paste()
+    }
+    return
+  }
   // The translation read aloud is about to be replaced.
   if (player.key === 'out') player.stop()
   for (const marked of textView.querySelectorAll('.pair')) marked.classList.remove('pair')
@@ -677,10 +696,10 @@ function renderTextResult(r: TextResult, canPaste: boolean): void {
       return
     case 'ready':
       lastOut = { text: r.text, to: r.to, html: r.html }
-      textResult.replaceChildren(...outBlock(lastOut, canPaste, true))
+      textResult.replaceChildren(...outBlock(lastOut, canPaste, ready, false))
       // The translation of exactly the text in the field: its sentences are found there, to mark and to read.
       fieldRanges = retranslate === undefined && fieldText(textField) === sentText ? sentenceRanges(textField, r.sentences) : undefined
-      if (pasteWhenReady) {
+      if (ready && pasteWhenReady) {
         pasteWhenReady = false
         paste()
       }
@@ -787,9 +806,10 @@ function paste(): void {
     pasteWhenReady = true
     return translateText()
   }
-  // Check pastes the text set right.
-  if (s.result.status === 'ready') return post({ type: 'pasteText', id: c.id, text: s.status === 'check' ? s.result.corrected : s.result.text })
-  if (s.result.status === 'translating' || s.result.status === 'checking' || s.result.status === 'downloading') pasteWhenReady = true
+  // Check pastes the text set right; a translation whose drafts are still being replaced, once the accurate one is in.
+  const drafts = s.status === 'text' && s.result.status === 'ready' && !!s.result.drafts
+  if (s.result.status === 'ready' && !drafts) return post({ type: 'pasteText', id: c.id, text: s.status === 'check' ? s.result.corrected : s.result.text })
+  if (drafts || s.result.status === 'translating' || s.result.status === 'checking' || s.result.status === 'downloading') pasteWhenReady = true
 }
 
 function copyButton(text: () => string): HTMLButtonElement {

@@ -3,7 +3,24 @@ import * as fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 
 import { englishHtml, translationHtml } from './render'
-import { directionOf, englishReady, languageOf, pairText, plainText, splitText, targetFor, translateLines, translatePairs, translatePlain, type LanguageWords, type Translate } from './translate'
+import {
+  directionOf,
+  drafted,
+  englishReady,
+  languageOf,
+  pairText,
+  plainText,
+  splitText,
+  targetFor,
+  throughEnglish,
+  translateLines,
+  translatePairs,
+  translatePlain,
+  type LanguageWords,
+  type Line,
+  type TextLine,
+  type Translate,
+} from './translate'
 
 /** A translator that marks what it was asked: "[ru>en] text". */
 const fake: Translate = async (sentences, from, to) => sentences.map(s => `[${from}>${to}] ${s}`)
@@ -270,5 +287,77 @@ describe('translatePairs', () => {
 
   test('a direct translator goes from one language into the other without English between', async () => {
     expect(await translatePlain('Hallo. Wie geht es?', 'de', 'ru', translate, true)).toBe('ru(Hallo.) ru(Wie geht es?)')
+  })
+})
+
+describe('a draft first, the accurate translation sentence by sentence', () => {
+  /** An accurate translator answering its sentences one by one, in the order `order` gives, a tick apart. */
+  const accurate =
+    (order: number[] = []): Translate =>
+    async (sentences, _from, to, progress) => {
+      const out = sentences.map(s => `${to}{${s}}`)
+      for (const i of order.length ? order : sentences.map((_, i) => i)) {
+        await new Promise(resolve => setTimeout(resolve, 2))
+        progress?.(i, out[i], false)
+      }
+      return out
+    }
+  const quick: Translate = async (sentences, _from, to) => sentences.map(s => `${to}~${s}`)
+
+  test('the draft comes first, every sentence of it, and each accurate one replaces its own', async () => {
+    const seen: TextLine[][] = []
+    const lines = await translatePairs('One. Two. Three.', 'en', 'ru', drafted(accurate([1, 0, 2]), quick), true, l => seen.push(structuredClone(l)))
+    expect(seen[2]?.[0]?.pairs).toEqual([
+      { src: 'One.', out: 'ru~One.', draft: true },
+      { src: 'Two.', out: 'ru~Two.', draft: true },
+      { src: 'Three.', out: 'ru~Three.', draft: true },
+    ])
+    // The second sentence was ready first: it alone is accurate in the update after the draft.
+    expect(seen.find(l => l[0]?.pairs.some(p => !p.draft))?.[0]?.pairs.map(p => p.out)).toEqual(['ru~One.', 'ru{Two.}', 'ru~Three.'])
+    expect(seen.at(-1)?.[0]?.pairs.map(p => p.draft)).toEqual([undefined, undefined, undefined])
+    expect(lines[0]?.pairs).toEqual([
+      { src: 'One.', out: 'ru{One.}' },
+      { src: 'Two.', out: 'ru{Two.}' },
+      { src: 'Three.', out: 'ru{Three.}' },
+    ])
+  })
+
+  test('a draft later than the accurate sentence never replaces it', async () => {
+    const late: Translate = async (sentences, from, to) => (await new Promise(resolve => setTimeout(resolve, 30)), quick(sentences, from, to))
+    const seen: TextLine[][] = []
+    await translatePairs('One. Two.', 'en', 'ru', drafted(accurate(), late), true, l => seen.push(structuredClone(l)))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(seen.flat().flatMap(l => l.pairs).some(p => p.out.includes('~'))).toBe(false)
+  })
+
+  test('a draft that fails changes nothing; nobody listening, only the accurate one runs', async () => {
+    let asked = 0
+    const broken: Translate = async () => {
+      asked++
+      throw new Error('no models')
+    }
+    expect(plainText(await translatePairs('One. Two.', 'en', 'ru', drafted(accurate(), broken), true, () => undefined))).toBe('ru{One.} ru{Two.}')
+    expect(asked).toBe(1)
+    expect(await drafted(accurate(), broken)(['One.'], 'en', 'ru')).toEqual(['ru{One.}'])
+    expect(asked).toBe(1)
+  })
+
+  test("Firefox's translator goes through English when neither side is", async () => {
+    const english: Translate = async (sentences, from, to) => sentences.map(s => `${from}>${to}(${s})`)
+    expect(await throughEnglish(english)(['Hallo.'], 'de', 'ru')).toEqual(['en>ru(de>en(Hallo.))'])
+    expect(await throughEnglish(english)(['Hallo.'], 'de', 'en')).toEqual(['de>en(Hallo.)'])
+    expect(await throughEnglish(english)(['Hallo.'], 'de', 'de')).toEqual(['Hallo.'])
+  })
+
+  test('Listen: drafts only under the text, never the English on top that the voice reads', async () => {
+    const seen: Line[][] = []
+    const lines = await translateLines(splitText('Привет. Hello there.', 'Russian'), 'Russian', drafted(accurate(), quick), l => seen.push(structuredClone(l)))
+    const first = seen[0]?.[0]?.pairs
+    expect(first?.[0]).toEqual({ en: 'en{Привет.}', other: 'Привет.' })
+    expect(first?.[1]).toEqual({ en: 'Hello there.', other: 'ru~Hello there.', draft: true })
+    expect(lines[0]?.pairs).toEqual([
+      { en: 'en{Привет.}', other: 'Привет.' },
+      { en: 'Hello there.', other: 'ru{Hello there.}' },
+    ])
   })
 })

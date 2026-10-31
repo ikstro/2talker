@@ -1556,7 +1556,14 @@ const CUDA_SIZE = 'with NVIDIA’s own build, 670 MB'
 const SLOW_SENTENCE_S = 2
 
 /** The wait for a model loaded again after it was let go, measured here. */
-const startText = (start: number | undefined) => (start !== undefined ? `; it starts in ${seconds(start)} after 10 idle minutes` : '')
+const startText = (start: number | undefined) => (start !== undefined ? `; it starts in ${seconds(start)} after 3 idle minutes` : '')
+
+/** What a model on the graphics card holds of it (measured on an NVIDIA card), and when it gives it back (llama.ts, main.ts stopForFullScreen). */
+function cardText(fit: LevelFit, card: number | undefined): string | null {
+  if (fit.where === 'processor') return null
+  const held = card !== undefined ? `Takes ${speechSize(card)} of the graphics card while in use; frees it` : 'Frees the graphics card'
+  return `${held} after 3 idle minutes, or when a game or video goes full screen`
+}
 
 /** Where a level runs here and how long it takes: measured, once it has been, else expected. */
 function levelFitText(fit: LevelFit, speed: AppView['modelSpeed'][LlmModel]): string {
@@ -1629,6 +1636,7 @@ function languageModelRows(v: AppView): HTMLElement[] {
           ? `${speechSize(t.size)}${t.status === 'ready' ? ' on this computer' : ''}`
           : `${speechSize(t.size)} to download ${s.model === model ? 'with Download or at the first use' : 'when picked'}${fit.cuda ? ` (${CUDA_SIZE})` : ''}`,
       both ? 'Translate and Check share it: downloaded once, loaded once' : null,
+      t.status === 'ready' ? cardText(fit, v.modelSpeed[model]?.card) : null,
       fetching ? bar(t.progress) : null,
     ]
     const label = el('span', {}, LEVEL_NAMES[model], advice.advised === model ? el('span', { class: 'chip good' }, lucide('check', 's'), 'Recommended') : null)
@@ -2411,7 +2419,7 @@ function keyboardPage(v: AppView): HTMLElement[] {
       'keyboard',
       onOff(s.switchOn, 'switchOn', 'Switching by keys', !!s.switchKey || ownKeys > 0),
     ),
-    keyRow('fixKey', 'Fix the last words', 'retypes words that came out in the wrong layout; press again for the next one', false, 'rotate-cw', onOff(s.fixKeyOn, 'fixKeyOn', 'The fix key', !!s.fixKey)),
+    keyRow('fixKey', 'Fix the last words', 'retypes words or signs (&& → ??) that came out in the wrong layout; press again for the next one', false, 'rotate-cw', onOff(s.fixKeyOn, 'fixKeyOn', 'The fix key', !!s.fixKey)),
     grp('As you type'),
     toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} when you press space; Backspace undoes it`),
     s.autoFix ? navCard('type', 'Fixing as I type', 'capitals, short words, fixing after a pause', null, () => openSub('fixing'), 'fixing') : null,

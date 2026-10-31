@@ -235,13 +235,13 @@ export function createLlmFiles(o: LlmFilesOptions): LlmFiles {
 }
 
 /** `work` over every item, at most `limit` at a time, results in order. */
-export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
   const lane = async () => {
     while (next < items.length) {
       const i = next++
-      out[i] = await work(items[i] as T)
+      out[i] = await work(items[i] as T, i)
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane))

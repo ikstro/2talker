@@ -9,13 +9,62 @@
 import { hasScript, langCode, scriptFor, scriptOf, type Script } from './languages'
 import { lineUnits, unwrapLines } from './sentences'
 
-/** One sentence: the English side, on top, and the other side, under it. */
-export type Pair = { en: string; other?: string }
+/** One sentence: the English side, on top, and the other side, under it; `draft`: the other side is a quick draft, its accurate translation still coming. */
+export type Pair = { en: string; other?: string; draft?: boolean }
 /** One line of the text: its list marker or quote arrow, then its sentences; no pairs is an empty line. */
 export type Line = { prefix: string; pairs: Pair[] }
 
-/** Translates sentences from one language code into another; a missing answer leaves its sentence as it is. */
-export type Translate = (sentences: string[], from: string, to: string) => Promise<(string | undefined)[]>
+/**
+ * Translates sentences from one language code into another; a missing answer
+ * leaves its sentence as it is. `progress`, when given, hears of a sentence
+ * as soon as it is translated (a translator that does them all at once may
+ * never call it); `draft`: a quick translation, an accurate one still coming.
+ */
+export type Translate = (sentences: string[], from: string, to: string, progress?: Progress) => Promise<(string | undefined)[]>
+export type Progress = (index: number, text: string | undefined, draft: boolean) => void
+
+/**
+ * A translator that only goes to and from English (Firefox's) made to go
+ * between any two languages: through English when neither side is.
+ */
+export function throughEnglish(translate: Translate): Translate {
+  return async (sentences, from, to) => {
+    if (from === to) return sentences
+    if (from === 'en' || to === 'en') return translate(sentences, from, to)
+    const english = (await translate(sentences, from, 'en')).map((s, i) => s?.trim() || sentences[i] || '')
+    return translate(english, 'en', to)
+  }
+}
+
+/**
+ * The accurate translator with a quick draft before it: both start at once;
+ * each sentence the draft has is heard of as a draft until its accurate
+ * translation replaces it. Without `progress` nobody sees a draft, so only
+ * the accurate one runs. Resolves with the accurate translation; a draft that
+ * fails or comes late changes nothing.
+ */
+export function drafted(accurate: Translate, draft: Translate): Translate {
+  return async (sentences, from, to, progress) => {
+    if (!progress) return accurate(sentences, from, to)
+    const final = new Set<number>()
+    let over = false
+    draft(sentences, from, to).then(
+      out => {
+        if (!over) out.forEach((text, i) => text?.trim() && !final.has(i) && progress(i, text, true))
+      },
+      () => undefined,
+    )
+    try {
+      return await accurate(sentences, from, to, (i, text, isDraft) => {
+        if (isDraft || over) return
+        final.add(i)
+        progress(i, text, false)
+      })
+    } finally {
+      over = true
+    }
+  }
+}
 
 type Unit = { line: number; index: number; text: string; into: 'en' | 'native' | undefined }
 
@@ -55,16 +104,34 @@ export function englishReady(split: Split): boolean {
   return split.units.every(u => u.into !== 'en')
 }
 
-/** Translates a split text's sentences, each its own way, into its lines (which it returns). */
-export async function translateLines({ lines, units }: Split, native: string, translate: Translate): Promise<Line[]> {
+/**
+ * Translates a split text's sentences, each its own way, into its lines
+ * (which it returns). `onLines`: the lines as they stand each time a sentence
+ * into the person's language comes in, a draft first where the translator
+ * has one; the English on top, which the voice reads, is never a draft.
+ */
+export async function translateLines({ lines, units }: Split, native: string, translate: Translate, onLines?: (lines: Line[]) => void): Promise<Line[]> {
   const code = langCode(native)
   for (const into of ['en', 'native'] as const) {
     const group = units.filter(u => u.into === into)
     if (group.length === 0) continue
-    const done = into === 'en' ? await translate(group.map(u => u.text), code, 'en') : await translate(group.map(u => u.text), 'en', code)
+    const progress: Progress | undefined =
+      into === 'native' && onLines
+        ? (i, text, draft) => {
+            const u = group[i]
+            const pair = u && lines[u.line]?.pairs[u.index]
+            if (!pair) return
+            pair.other = text?.trim() || pair.en
+            if (draft) pair.draft = true
+            else delete pair.draft
+            onLines(lines)
+          }
+        : undefined
+    const done = into === 'en' ? await translate(group.map(u => u.text), code, 'en') : await translate(group.map(u => u.text), 'en', code, progress)
     group.forEach((u, i) => {
       const translation = done[i]?.trim()
       const pair = lines[u.line]?.pairs[u.index]
+      if (pair) delete pair.draft
       if (!pair || !translation) return
       if (into === 'en') {
         pair.en = translation
@@ -143,28 +210,50 @@ export function targetFor(from: string, native: string): string {
   return from === own ? 'en' : own
 }
 
-/** One line of a text translated as it is: its list marker, then each sentence and its translation; no pairs is an empty line. */
-export type TextLine = { prefix: string; pairs: { src: string; out: string }[] }
+/** One line of a text translated as it is: its list marker, then each sentence and its translation (`draft`: a quick one, the accurate still coming); no pairs is an empty line. */
+export type TextLine = { prefix: string; pairs: { src: string; out: string; draft?: boolean }[] }
+
+type Out = { out: string; draft?: boolean }
 
 /**
  * A text translated from one language into another, by codes, sentence by
  * sentence: through English when neither is English, as Firefox's translator
  * only goes to and from it (`direct`: one that goes between any two). Lines,
- * list markers and empty lines are kept.
+ * list markers and empty lines are kept. `onLines` (a direct translator's):
+ * the lines as they stand each time a sentence comes in, drafts marked; a
+ * sentence not in yet is its source.
  */
-export async function translatePairs(text: string, from: string, to: string, translate: Translate, direct = false): Promise<TextLine[]> {
+export async function translatePairs(
+  text: string,
+  from: string,
+  to: string,
+  translate: Translate,
+  direct = false,
+  onLines?: (lines: TextLine[]) => void,
+): Promise<TextLine[]> {
   const lines = unwrapLines(text.replace(/\r\n?/g, '\n').split('\n')).map(lineUnits)
   const all = lines.flatMap(l => l.sentences)
+  const shape = (out: (i: number, src: string) => Out): TextLine[] => {
+    let i = 0
+    return lines.map(line => ({ prefix: line.prefix, pairs: line.sentences.map(src => ({ src, ...out(i++, src) })) }))
+  }
   let done: (string | undefined)[] = all
   if (from !== to && all.length > 0 && direct) {
-    done = await translate(all, from, to)
+    const now: (Out | undefined)[] = []
+    const progress: Progress | undefined = onLines
+      ? (i, text, draft) => {
+          const src = all[i]
+          if (src === undefined) return
+          now[i] = { out: text?.trim() || src, ...(draft ? { draft } : {}) }
+          onLines(shape((j, s) => now[j] ?? { out: s, draft: true }))
+        }
+      : undefined
+    done = await translate(all, from, to, progress)
   } else if (from !== to && all.length > 0) {
     const english = from === 'en' ? all : (await translate(all, from, 'en')).map((s, i) => s?.trim() || all[i])
     done = to === 'en' ? english : await translate(english as string[], 'en', to)
   }
-  let i = 0
-  const next = (src: string) => ({ src, out: done[i++]?.trim() || src })
-  return lines.map(line => ({ prefix: line.prefix, pairs: line.sentences.map(next) }))
+  return shape((i, src) => ({ out: done[i]?.trim() || src }))
 }
 
 /** A translated text as plain text: every line its marker and its sentences' translations. */

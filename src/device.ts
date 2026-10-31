@@ -144,8 +144,22 @@ function powershell(): Promise<string> {
   })
 }
 
+const nvidiaSmiExe = () => path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'nvidia-smi.exe')
+
+/** The memory used on the NVIDIA cards now, in MB, all of them together; undefined without nvidia-smi. */
+export function cardMemoryUsed(): Promise<number | undefined> {
+  const exe = nvidiaSmiExe()
+  if (!fs.existsSync(exe)) return Promise.resolve(undefined)
+  return new Promise(resolve =>
+    execFile(exe, ['--query-gpu=memory.used', '--format=csv,noheader,nounits'], { windowsHide: true, timeout: 10_000 }, (error, stdout) => {
+      const used = error ? [] : stdout.split(/\r?\n/).map(Number).filter(n => Number.isFinite(n) && n > 0)
+      resolve(used.length ? used.reduce((a, b) => a + b, 0) : undefined)
+    }),
+  )
+}
+
 function nvidiaSmi(): Promise<string> {
-  const exe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'nvidia-smi.exe')
+  const exe = nvidiaSmiExe()
   if (!fs.existsSync(exe)) return Promise.resolve('')
   const ask = (fields: string) =>
     new Promise<string>(resolve =>
@@ -171,7 +185,8 @@ export async function probeDevice(): Promise<DeviceProfile> {
 /** How fast the natural voice makes speech here: seconds per second of sound, over `n` sentences. */
 export type VoiceSpeed = { rtf: number; n: number }
 /** How fast a local model works here, in seconds, the latest few of each: a sentence translated and a text checked on the model already loaded, and loading it. */
-export type ModelSpeed = { sentence: number[]; text: number[]; start: number[] }
+/** `card`: the MB of the graphics card the model held while loaded, measured once (nvidia-smi, before and after it was let go). */
+export type ModelSpeed = { sentence: number[]; text: number[]; start: number[]; card?: number }
 export type ModelSpeeds = Partial<Record<LlmModel, ModelSpeed>>
 /** Until 0.10.1: TranslateGemma's levels, and the checker (Gemma 4 E4B, Accurate now) with its seconds a text in `sentence`. */
 type OldSpeeds = Partial<Record<'accurate' | 'most' | 'check', { sentence: number[]; start: number[] }>>
@@ -241,7 +256,7 @@ export function loadModelSpeeds(file: string): ModelSpeeds {
   }
   for (const model of ['accurate', 'most'] as const) {
     const s = f.models[model]
-    if (s) out[model] = { sentence: numbers(s.sentence), text: numbers(s.text), start: numbers(s.start) }
+    if (s) out[model] = { sentence: numbers(s.sentence), text: numbers(s.text), start: numbers(s.start), ...(typeof s.card === 'number' ? { card: s.card } : {}) }
   }
   return out
 }
@@ -253,7 +268,8 @@ export function saveModelSpeeds(file: string, speeds: ModelSpeeds): void {
 /** A translation or a check timed: seconds a sentence or a text, and the seconds it waited for the model to load, when it did. */
 export function nextModelSpeed(old: ModelSpeed | undefined, timed: { sentence?: number; text?: number; start?: number }): ModelSpeed {
   const keep = (list: number[], value: number | undefined) => (value === undefined || value <= 0 ? list : [...list, value].slice(-LEVEL_KEPT))
-  return { sentence: keep(old?.sentence ?? [], timed.sentence), text: keep(old?.text ?? [], timed.text), start: keep(old?.start ?? [], timed.start) }
+  const card = old?.card !== undefined ? { card: old.card } : {}
+  return { sentence: keep(old?.sentence ?? [], timed.sentence), text: keep(old?.text ?? [], timed.text), start: keep(old?.start ?? [], timed.start), ...card }
 }
 
 export function median(values: readonly number[]): number | undefined {

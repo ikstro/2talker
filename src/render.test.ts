@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { englishHtml, escapeHtml, textOutHtml, translationHtml } from './render'
+import { draftsIn, englishHtml, escapeHtml, textOutHtml, translationHtml } from './render'
 import { splitText, type Line } from './translate'
 
 const line = (prefix: string, ...pairs: { en: string; other?: string }[]): Line => ({ prefix, pairs })
@@ -97,4 +97,13 @@ describe('textOutHtml', () => {
       '<p><span class="t" data-i="0" dir="auto">Hello.</span> <span class="t" data-i="1" dir="auto">How?</span></p><p>- <span class="t" data-i="2" dir="auto">a &lt; b</span></p>',
     )
   })
+})
+
+test('a draft sentence is span.t.draft until its accurate translation replaces it; drafts are counted', () => {
+  const lines = [{ prefix: '', pairs: [{ src: 'One.', out: 'Раз.', draft: true }, { src: 'Two.', out: 'Два.' }] }]
+  expect(textOutHtml(lines)).toBe('<p><span class="t draft" data-i="0" dir="auto">Раз.</span> <span class="t" data-i="1" dir="auto">Два.</span></p>')
+  expect(translationHtml([{ prefix: '', pairs: [{ en: 'One.', other: 'Раз.', draft: true }] }])).toContain('class="t draft"')
+  expect(draftsIn(lines)).toBe(1)
+  const done = [{ prefix: '', pairs: [{ src: 'One.', out: 'Раз.' }] }]
+  expect(draftsIn(done)).toBe(0)
 })

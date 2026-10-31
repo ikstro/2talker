@@ -28,6 +28,9 @@ html {
   --muted: #616161;
   /* A translation, under or beside its text: a step quieter than the text, so the two never read as one. */
   --translation: #474747;
+  /* A quick draft of a translation the accurate model is still replacing, and the soft light passing over it (card.css). */
+  --draft: #8f8f8f;
+  --shine: #474747;
   /* The accent, duck yellow: a fill (a button, a switch, a bar) with dark ink
      on it. Yellow cannot be text on a light ground, and a darker yellow reads
      brown (the owner, 2026-10-30: no dirty colour on light), so on light the
@@ -84,6 +87,8 @@ html {
     --strong: #ffffff;
     --muted: #9e9e9e;
     --translation: #b8b8b8;
+    --draft: #7a7a7a;
+    --shine: #cfcfcf;
     /* On the dark ground the yellow is text, link, focus and mark as it is (11.54:1 on --bg); a link is underlined only under the pointer. */
     --accent: #ffd60a;
     --accent-hover: #ffe14d;

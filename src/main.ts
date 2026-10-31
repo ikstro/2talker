@@ -53,7 +53,7 @@ import { createTranslator, NATIVES } from './engine'
 import { translationAdvice } from './hardware'
 import { hotkeyLabel, isAccelerator } from './hotkey'
 import { FIX_LANGUAGES, KeyboardHelper, keyboardLayouts } from './keyboard'
-import { driveOf, freeMb, loadModelSpeeds, loadVoiceSpeed, median, nextModelSpeed, nextVoiceSpeed, saveModelSpeeds, saveVoiceSpeed, type ModelSpeeds, type VoiceSpeed } from './device'
+import { cardMemoryUsed, driveOf, freeMb, loadModelSpeeds, loadVoiceSpeed, median, nextModelSpeed, nextVoiceSpeed, saveModelSpeeds, saveVoiceSpeed, type ModelSpeeds, type VoiceSpeed } from './device'
 import { defaultNative, findLanguage, langCode, scriptFor } from './languages'
 import { convertText, nextLayout, sourceLayout, type KeyTable } from './layoutfix'
 import { LearnStore } from './learning'
@@ -70,7 +70,7 @@ import { adoptLocalFolder, adoptOldFolders, freeFolder, hasToMove, leftIn, moveD
 import { paragraphsOf } from './ocrtext'
 import { placeByTray, placeNear, resize, type Point } from './placement'
 import type { AppTab, AppView, CardKind, CardState, CheckResult, DictationMode, DictionaryStatus, GlossMissing, HostCall, HostVoice, StorageId, StoragePart, StorageView, TextResult, ToHost, ToView, TranslationState, TrayCommand, TrayView, ViewConfig } from './protocol'
-import { englishHtml, textOutHtml, translationHtml } from './render'
+import { draftsIn, englishHtml, textOutHtml, translationHtml } from './render'
 import { addKept, CARD_WIDTH, DEFAULTS, keptForm, LEVEL_NAMES, myLanguages, normalize, TARGET, type LlmModel, type Settings } from './settings'
 import { Speaker, listHostVoices } from './speech'
 import { SpeechHost } from './speechhost'
@@ -78,7 +78,22 @@ import { SPEECH_PORT } from './speechservice'
 import { markAway, measureParts, type Place } from './storage'
 import { NaturalSpeaker } from './synth'
 import { system32 } from './system32'
-import { englishReady, languageOf, plainText, splitText, targetFor, translateLines, translatePairs, translatePlain, type LanguageWords } from './translate'
+import {
+  drafted,
+  englishReady,
+  languageOf,
+  plainText,
+  splitText,
+  targetFor,
+  throughEnglish,
+  translateLines,
+  translatePairs,
+  translatePlain,
+  type LanguageWords,
+  type Line,
+  type TextLine,
+  type Translate,
+} from './translate'
 import { TranslationLog } from './translationlog'
 import type { Translator } from './translator'
 import manifest from './voice-manifest.json'
@@ -97,7 +112,7 @@ import {
   writeText as writeClipboardText,
   type ClipboardSnapshot,
 } from './winclipboard'
-import { exeOf, focusWindow, foreground, installedLayouts, layoutTable, windowedApps } from './winkbd'
+import { exeOf, focusWindow, foreground, fullScreenNow, installedLayouts, layoutTable, windowedApps } from './winkbd'
 import { ankiTsv, WordStore, wordsText } from './words'
 
 const CARD_MIN = 96
@@ -528,7 +543,7 @@ function modelSpeedView(): AppView['modelSpeed'] {
   const out: AppView['modelSpeed'] = {}
   for (const model of ['accurate', 'most'] as const) {
     const s = modelSpeeds[model]
-    const view = { sentence: sure(s?.sentence), text: sure(s?.text), start: sure(s?.start) }
+    const view = { sentence: sure(s?.sentence), text: sure(s?.text), start: sure(s?.start), card: s?.card }
     const known = Object.fromEntries(Object.entries(view).filter(([, n]) => n !== undefined))
     if (Object.keys(known).length) out[model] = known
   }
@@ -1115,7 +1130,7 @@ function setState(id: number, state: CardState): void {
 function hideCard(): void {
   // A translation the translator holds as it closes is kept for the Translate page.
   const state = shown?.state
-  if (state?.status === 'text' && state.result.status === 'ready' && card?.isVisible()) logTranslation(state.text, state.result.text, state.result.from, state.result.to)
+  if (state?.status === 'text' && state.result.status === 'ready' && !state.result.drafts && card?.isVisible()) logTranslation(state.text, state.result.text, state.result.from, state.result.to)
   // A checked text with a mistake goes into Mistakes once, as the card closes.
   if (state?.status === 'check' && state.result.status === 'ready' && card?.isVisible()) logMistake(state.result)
   stopSpeaking()
@@ -1481,6 +1496,53 @@ function messageOf(error: unknown): string {
 }
 
 /**
+ * The level's translator with Fast's before it as a draft (2026-10-31): with
+ * Accurate or Most accurate, Firefox's models (on the processor, quick, no
+ * model to load) show a translation at once and the model's sentences
+ * replace it one by one. Fast's models for the pair (`codes`, besides
+ * English) download once by themselves when missing; until then there is
+ * no draft. Paste and Translate in place take the model's translation only.
+ */
+function withDraft(t: Translator, codes: readonly string[]): Translate {
+  if (t === translator) return t.translate
+  const missing = codes.filter(code => code !== 'en' && translator.state(code).status !== 'ready')
+  if (missing.length === 0) return drafted(t.translate, throughEnglish(translator.translate))
+  for (const code of missing) {
+    if (translator.state(code).status !== 'absent') continue
+    translator
+      .prepare(code, () => undefined)
+      .catch(error => console.warn('Krya: the draft translator did not download', error))
+      .finally(() => postApp())
+  }
+  return t.translate
+}
+
+/** A card's translation as it comes in, sentence by sentence: at most ten updates a second, the latest always sent; `cancel` before the last. */
+const UPDATE_MS = 100
+
+function every(ms: number, send: () => void): { ask(): void; cancel(): void } {
+  let timer: NodeJS.Timeout | undefined
+  let sent = 0
+  return {
+    ask() {
+      if (timer) return
+      timer = setTimeout(
+        () => {
+          timer = undefined
+          sent = Date.now()
+          send()
+        },
+        Math.max(0, sent + ms - Date.now()),
+      )
+    },
+    cancel() {
+      clearTimeout(timer)
+      timer = undefined
+    },
+  }
+}
+
+/**
  * Translates `text` into card `id`: the translator's download first, the
  * first time. An English text is shown, and read, at once, its translation
  * coming in under it; a text in the person's language waits for its English.
@@ -1503,8 +1565,16 @@ async function translateInto(id: number, text: string, kind: CardKind, note?: st
       })
       pending({ status: 'translating' })
     }
-    const lines = await translateLines(split, settings.native, t.translate)
-    setState(id, { status: 'done', html: englishHtml(lines), translation: { status: 'ready', html: translationHtml(lines) }, ...noted })
+    let now: Line[] = []
+    const ready = (lines: Line[]): CardState => ({ status: 'done', html: englishHtml(lines), translation: { status: 'ready', html: translationHtml(lines), drafts: draftsIn(lines) }, ...noted })
+    const update = every(UPDATE_MS, () => setState(id, ready(now)))
+    try {
+      const lines = await translateLines(split, settings.native, withDraft(t, [native]), lines => ((now = lines), update.ask()))
+      update.cancel()
+      setState(id, ready(lines))
+    } finally {
+      update.cancel()
+    }
   } catch (error) {
     pending({ status: 'failed', message: messageOf(error) })
   }
@@ -1707,9 +1777,24 @@ async function translateTextCard(id: number, text: string, from: string, to: str
       })
       if (current()) set({ status: 'translating' })
     }
-    const lines = await translatePairs(text.slice(0, MAX_TEXT_CHARS), from, to, t.translate, t.direct)
-    const sentences = lines.flatMap(line => line.pairs.map(p => p.src))
-    if (current()) set({ status: 'ready', text: plainText(lines), from, to, html: textOutHtml(lines), sentences })
+    const ready = (lines: TextLine[]): TextResult => ({
+      status: 'ready',
+      text: plainText(lines),
+      from,
+      to,
+      html: textOutHtml(lines),
+      sentences: lines.flatMap(line => line.pairs.map(p => p.src)),
+      drafts: draftsIn(lines),
+    })
+    let now: TextLine[] = []
+    const update = every(UPDATE_MS, () => current() && set(ready(now)))
+    try {
+      const lines = await translatePairs(text.slice(0, MAX_TEXT_CHARS), from, to, withDraft(t, [from, to]), t.direct, lines => ((now = lines), update.ask()))
+      update.cancel()
+      if (current()) set(ready(lines))
+    } finally {
+      update.cancel()
+    }
   } catch (error) {
     if (current()) set({ status: 'failed', message: messageOf(error) })
   }
@@ -1782,6 +1867,7 @@ function logMistake(result: Extract<CheckResult, { status: 'ready' }>): void {
 /** Opens Windows' snipping overlay; the text of the picture it puts on the clipboard is shown to listen to, or translated. */
 function snip(purpose: Purpose = 'listen', via?: string): void {
   hideCard()
+  warmModel(purpose)
   snipFor = purpose
   snipVia = via
   snipSince = Date.now()
@@ -1811,8 +1897,84 @@ async function useClipboard(purpose: Purpose): Promise<void> {
   else tray?.displayBalloon({ title: 'Krya', content: 'The clipboard holds no text. Select a text and copy it first.' })
 }
 
+/** How often a running model looks for a program on the full screen, and how long it rests before it gives the card to one. */
+const FULL_SCREEN_LOOK_MS = 5000
+const FULL_SCREEN_REST_MS = 15_000
+
+/**
+ * A game, a video or a presentation on the full screen wants the graphics
+ * card: a model resting on it is stopped (2026-10-31) and loads again with
+ * the next translation or check. One that has just answered rests a moment
+ * first, so texts translated over a full-screen reader are not reloaded each time.
+ */
+function stopForFullScreen(): void {
+  const resting = llmFiles.server.restingFor
+  if (resting === undefined || resting < FULL_SCREEN_REST_MS || !fullScreenNow()) return
+  log(`model: stopped for a program on the full screen (${path.basename(llmFiles.server.model ?? '')})`)
+  void llmFiles.server.stop()
+}
+
+/** The card's memory used while a model was loaded, to learn what it held once it is let go. */
+let cardSample: { model: LlmModel; file: string; used: number } | undefined
+let sampling = false
+
+/**
+ * What a model holds of the graphics card, measured once per computer on an
+ * NVIDIA card (the Models page says it): nvidia-smi's memory used while the
+ * model is loaded, and again once it is let go and nothing else is loaded;
+ * the difference, when it is more than a little (a model on the processor holds none).
+ */
+async function measureCard(): Promise<void> {
+  if (sampling) return
+  const server = llmFiles.server
+  const loaded = server.loaded
+  if (!cardSample) {
+    const model = (['accurate', 'most'] as const).find(m => loaded && llmFiles.target(m).model === loaded)
+    if (!model || !loaded || modelSpeeds[model]?.card !== undefined) return
+    sampling = true
+    const used = await cardMemoryUsed().finally(() => (sampling = false))
+    if (used !== undefined && server.loaded === loaded) cardSample = { model, file: loaded, used }
+    return
+  }
+  if (loaded === cardSample.file) return
+  const sample = cardSample
+  cardSample = undefined
+  // Another model loading meanwhile would spoil the difference.
+  if (server.model !== undefined) return
+  sampling = true
+  const after = await cardMemoryUsed().finally(() => (sampling = false))
+  const held = after === undefined ? 0 : sample.used - after
+  if (held < CARD_HELD_MIN_MB) return
+  log(`model: ${sample.model} held ${held} MB of the graphics card`)
+  modelSpeeds = { ...modelSpeeds, [sample.model]: { ...nextModelSpeed(modelSpeeds[sample.model], {}), card: held } }
+  saveModelSpeeds(deviceFile(), modelSpeeds)
+  postApp()
+}
+
+/** Less than this is no model on the card (one on the processor), or the noise of other programs. */
+const CARD_HELD_MIN_MB = 300
+
+/** Every few seconds while Krya runs: a model on a full screen's card let go, and what one holds measured. */
+function watchModel(): void {
+  stopForFullScreen()
+  measureCard().catch(error => console.warn('Krya: could not measure the graphics card', error))
+}
+
+/**
+ * The local model starts loading the moment a key asks for it (2026-10-31),
+ * while the text is still being copied, snipped or typed: its 3 s start after
+ * an idle stop would else come after them. Only for a purpose that uses it
+ * (the level's model, Check's always) and once its files are here.
+ */
+function warmModel(purpose: Purpose): void {
+  const model = purpose === 'check' ? settings.model : settings.translationLevel
+  if (model === 'fast' || llmFiles.state(model).status !== 'ready') return
+  llmFiles.server.warm(llmFiles.target(model))
+}
+
 /** A selection key: Krya presses Ctrl+C in the program in front and shows what it copies; the clipboard is put back after. */
 async function useSelection(purpose: Purpose, via?: string): Promise<void> {
+  warmModel(purpose)
   const at = screen.getCursorScreenPoint()
   const front = foreground()
   const window = front.hwnd
@@ -2347,6 +2509,7 @@ function hideTrayPanel(): void {
 
 /** An empty translator or checker by the pointer, to type into (the tray's rows, their keys); nothing to paste back into. */
 function typeInto(kind: 'translate' | 'check', via?: string): void {
+  warmModel(kind)
   if (kind === 'translate') translateWindow('', screen.getCursorScreenPoint(), undefined, via)
   else checkWindow('', screen.getCursorScreenPoint(), undefined, via)
 }
@@ -2604,6 +2767,7 @@ function start(): void {
     engineFor: model => (translationAdvice(speech?.profile)[model].cuda ? 'cuda' : 'vulkan'),
   })
   llm = createLlmTranslators({ files: llmFiles, onTimed: modelTimed })
+  setInterval(watchModel, FULL_SCREEN_LOOK_MS)
   checker = createChecker({ files: llmFiles, model: () => settings.model, onTimed: modelTimed })
   mistakes = new MistakeStore(path.join(userDir(), 'mistakes.json'))
   modelSpeeds = loadModelSpeeds(deviceFile())
