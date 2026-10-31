@@ -31,7 +31,7 @@ The first translation downloads the translator for your language (about 85 MB fo
 | **Ctrl+Alt+T** | translate a piece of the screen |
 | your switch key | the next keyboard layout (set it in Settings → Hotkeys) |
 | your fix key | what you just typed, or the selection, in the next layout |
-| **Backspace** right after a fix | take the fix back; the word is kept as typed |
+| your fix key right after a fix | take the fix back; the word is kept as typed. Backspace only erases, so you can set the ending right |
 | **Esc** | close the card and stop the voice |
 | **Space** · **←** **→** | play or stop · the previous or next sentence |
 | One by one | Listen reads one sentence and waits |

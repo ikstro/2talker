@@ -2373,17 +2373,17 @@ function learnedPage(v: AppView): HTMLElement[] {
   ].filter((n): n is HTMLElement => n !== null)
 }
 
-/** Words never fixed by themselves: Backspace after a fix adds one, and so can the person, before the fix ever happens. */
+/** Words never fixed by themselves: the fix key right after a fix adds one, and so can the person, before the fix ever happens. */
 function keptPage(v: AppView): HTMLElement[] {
   const s = v.settings
   const words = () => view?.settings.keepWords ?? s.keepWords
   return listPage({
     label: 'Add a word',
     placeholder: 'word, as you type it',
-    note: 'Backspace right after a fix adds the word too.',
+    note: 'The fix key right after a fix adds the word too.',
     items: s.keepWords,
     count: 'Words',
-    empty: 'None yet. Add a word above, or press Backspace right after a fix you did not want.',
+    empty: 'None yet. Add a word above, or press the fix key right after a fix you did not want.',
     normalize: keptForm,
     add: word => save({ keepWords: [...words(), word] }),
     remove: word => save({ keepWords: words().filter(w => w !== word) }),
@@ -2429,7 +2429,7 @@ function keyboardPage(v: AppView): HTMLElement[] {
     ),
     keyRow('fixKey', 'Fix the last words', 'retypes words or signs (&& → ??) that came out in the wrong layout; press again for the next one', false, 'rotate-cw', onOff(s.fixKeyOn, 'fixKeyOn', 'The fix key', !!s.fixKey)),
     grp('As you type'),
-    toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} when you press space; Backspace undoes it`),
+    toggleCard('spell-check', 'Fix words as I type', s.autoFix, autoFix => save({ autoFix }), `${typed} → ${fixed} when you press space; the fix key right after undoes it`),
     s.autoFix ? navCard('type', 'Fixing as I type', 'capitals, short words, fixing after a pause', null, () => openSub('fixing'), 'fixing') : null,
     toggleCard('type', 'Show the layout by the cursor', s.layoutBadge, layoutBadge => save({ layoutBadge }), 'a small badge appears when the layout or Caps Lock changes'),
     toggleCard('keyboard', 'Show the layout in the tray', s.trayLayout, trayLayout => save({ trayLayout }), 'the tray icon shows the current layout, such as en or ru'),

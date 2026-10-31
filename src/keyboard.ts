@@ -149,9 +149,9 @@ export class KeyboardHelper {
     if (fresh && this.dictatingNow) this.post({ type: 'dictating', on: true })
   }
 
-  /** The main process converted the selection and selected it again: the fix key goes on with it. */
-  selected(): void {
-    this.post({ type: 'selected' })
+  /** The main process is done with the selection: selected again, the fix key goes on with it. */
+  converted(selected: boolean): void {
+    this.post({ type: 'converted', selected })
   }
 
   /** A dictation started or ended: its keys then work in full screen too. */

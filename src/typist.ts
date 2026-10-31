@@ -6,8 +6,8 @@
 //     own key, to that layout;
 //   - a word typed in the wrong layout is erased and typed again in the right
 //     one when it ends, with the short words just before it that were meant
-//     there too; a stray capital is set right (Backspace at once takes the
-//     fix back);
+//     there too; a stray capital is set right (the fix key at once takes the
+//     fix back; Backspace is only Backspace);
 //   - the fix key types the words at the end of what was typed, that read as
 //     words in another layout, again in it (again: the next layout), or asks
 //     the main process to convert the selection;
@@ -131,8 +131,8 @@ export type KbdConfig = {
 export type KbdIn =
   | { type: 'config'; config: KbdConfig }
   | { type: 'switchTo'; layout: string }
-  /** The main process converted the selection and selected it again: the fix key goes on with it. */
-  | { type: 'selected' }
+  /** The main process is done with the selection: converted and selected again (`selected`), the fix key goes on with it. */
+  | { type: 'converted'; selected: boolean }
   /** A dictation started or ended: while it runs, its keys work on the full screen too, so it can always be stopped. */
   | { type: 'dictating'; on: boolean }
   | { type: 'quit' }
@@ -206,6 +206,10 @@ const VK_RETURN = 0x0d
 const VK_CAPITAL = 0x14
 const VK_DELETE = 0x2e
 const VK_A = 0x41
+/** A conversion of the selection not done by then is taken as lost (the main process answers in a second or two). */
+const CONVERT_MS = 5000
+/** Presses kept while a conversion runs: each one more layout round the cycle. */
+const AGAIN_MOST = 4
 /** Keys that move the text cursor, PageUp to Down, and Delete. */
 const MOVES = new Set([0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, VK_DELETE])
 
@@ -302,10 +306,12 @@ export class Typist {
   private ownSwitch: string | undefined
   /** What was done last: typing (the fix key fixes it), selecting (it converts the selection), or something else. */
   private last: 'typed' | 'selected' | 'none' = 'none'
-  /** The last word fixed by itself, taken back by Backspace or the fix key right after. */
+  /** The last word fixed by itself, taken back by the fix key right after. */
   private autoFixed: { start: number; end: number; from: string; word: string; typed: Typed[]; capsOff: boolean } | undefined
   /** The fix key's last conversion of typed keys: pressed again, it goes on to the next layout; typing on, it is learned. */
   private cycling: { start: number; end: number; to: string; from: string; words: Span[] } | undefined
+  /** The main process is converting the selection, since when; the fix key pressed meanwhile goes on with it once it is selected again (`again` times). */
+  private converting: { since: number; again: number } | undefined
   /** A fix waiting to be typed; keys pressed meanwhile wait for it, then are pressed again. */
   private pending: Fix | undefined
   /** Waiting for the answer about the field before typing `pending`. */
@@ -455,7 +461,7 @@ export class Typist {
     }
     this.spoilTap()
     const mods = this.heldMods()
-    const hotkey = this.hotkeyOf(vk, mods)
+    const hotkey = this.hotkeyOf(vk, mods) ?? this.fixAfterShift(vk, mods)
     if (hotkey && this.allowed(hotkey)) {
       this.swallowed.add(vk)
       if (!repeat) this.act(hotkey)
@@ -529,9 +535,31 @@ export class Typist {
     return false
   }
 
-  /** The main process selected the converted text again. */
-  selected(): void {
+  /**
+   * The main process is done with the selection: converted and selected
+   * again, the fix key goes on with it, and a press made meanwhile goes on at
+   * once; not selected again, such a press is dropped.
+   */
+  converted(selected: boolean): void {
+    const again = this.converting?.again ?? 0
+    this.converting = undefined
+    if (!selected) return
     this.last = 'selected'
+    if (again > 0) this.convertSelection(again - 1)
+  }
+
+  /** Asks the main process to convert the selection into the next layout; `again`: presses still to follow. */
+  private convertSelection(again = 0): void {
+    this.last = 'none'
+    this.converting = { since: this.env.now(), again }
+    this.env.send({ type: 'selection', cycle: this.cycle(), layout: this.layoutNow(this.env.foreground()) })
+  }
+
+  /** The fix key pressed with Shift still down from selecting with Shift (Shift+End, then Pause): it is still the fix key. */
+  private fixAfterShift(vk: number, mods: ReadonlySet<Mod>): Bound | undefined {
+    if (this.last !== 'selected' || mods.size !== 1 || !mods.has('Shift')) return undefined
+    const plain = this.hotkeyOf(vk, new Set())
+    return plain?.action === 'fix' ? plain : undefined
   }
 
   private heldMods(): Set<Mod> {
@@ -651,7 +679,9 @@ export class Typist {
   /** A key that is no hotkey and no modifier: typing, a move, a shortcut. True keeps it from the program. */
   private onTyping(vk: number, mods: ReadonlySet<Mod>): boolean {
     if (mods.has('Control') || mods.has('Alt') || mods.has('Super')) {
-      this.last = vk === VK_A && mods.size === 1 ? 'selected' : 'none'
+      // Ctrl+A, and Ctrl+Shift with a move (a word, to the line's end) select.
+      const selecting = (mods.size === 1 && mods.has('Control') && vk === VK_A) || (mods.size === 2 && mods.has('Control') && mods.has('Shift') && MOVES.has(vk) && vk !== VK_DELETE)
+      this.last = selecting ? 'selected' : 'none'
       this.resetRun()
       return false
     }
@@ -709,11 +739,8 @@ export class Typist {
     return false
   }
 
+  /** Backspace erases, a fixed word's letters too (its ending may be what is wrong); the fix key takes a fix back. */
   private onBackspace(): boolean {
-    if (this.autoFixed && this.autoFixed.end === this.run.length) {
-      this.takeBack(this.autoFixed)
-      return true
-    }
     this.candidate = undefined
     this.cycling = undefined
     const gone = this.run.pop()
@@ -913,7 +940,7 @@ export class Typist {
   }
 
   /**
-   * Backspace, or the fix key, right after a word was fixed by itself: it goes
+   * The fix key right after a word was fixed by itself: it goes
    * back as typed, case and all (Caps Lock on again, if the fix turned it off),
    * and is kept so from now on.
    */
@@ -944,12 +971,15 @@ export class Typist {
    * or the selection.
    */
   private fixKey(): void {
-    if (this.autoFixed && this.autoFixed.end === this.run.length) return this.takeBack(this.autoFixed)
-    if (this.last === 'selected') {
-      this.last = 'none'
-      this.env.send({ type: 'selection', cycle: this.cycle(), layout: this.layoutNow(this.env.foreground()) })
+    const c = this.converting
+    if (c && this.env.now() - c.since < CONVERT_MS) {
+      // Pressed again before the last conversion was selected again: it goes on once it is.
+      c.again = Math.min(c.again + 1, AGAIN_MOST)
       return
     }
+    this.converting = undefined
+    if (this.autoFixed && this.autoFixed.end === this.run.length) return this.takeBack(this.autoFixed)
+    if (this.last === 'selected') return this.convertSelection()
     if (this.last !== 'typed' || this.run.length === 0 || this.env.foreground().hwnd !== this.runWindow) return
     this.candidate = undefined
     let start: number

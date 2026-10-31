@@ -2265,18 +2265,26 @@ async function ownClipboard<T>(work: () => Promise<T>): Promise<T> {
  * it over the selection, selects it again (a second press goes on to the
  * next layout), switches the layout and puts the clipboard back. Signs
  * alone ("&&&&") go into the first layout that reads them otherwise; `now`,
- * the window's layout, says where signs both layouts have were typed.
+ * the window's layout, says where signs both layouts have were typed. The
+ * keyboard thread is told when it is done, and whether it is selected again,
+ * so the fix key pressed meanwhile goes on with it.
  */
 async function convertSelection(cycle: string[], now: string): Promise<void> {
-  // Nothing pasted (or a failure): the clipboard goes back at once.
-  await borrowClipboard(
-    () => convertOver(cycle, now),
-    restore => (restore === 'later' ? undefined : 0),
-  )
+  let selected = false
+  try {
+    // Nothing pasted (or a failure): the clipboard goes back at once.
+    const done = await borrowClipboard(
+      () => convertOver(cycle, now),
+      result => (result?.pasted ? undefined : 0),
+    )
+    selected = done.selected
+  } finally {
+    keyboard.converted(selected)
+  }
 }
 
-/** Copies the selection, pastes it converted; 'now' when nothing was pasted and the clipboard can go back at once. */
-async function convertOver(cycle: string[], now: string): Promise<'now' | 'later'> {
+/** Copies the selection and pastes it converted: whether anything was pasted (the clipboard then goes back once it is read), and whether it is selected again. */
+async function convertOver(cycle: string[], now: string): Promise<{ pasted: boolean; selected: boolean }> {
   const marker = `Krya ${Date.now()}`
   const field = focusedField()
   await clipGuard.write(marker)
@@ -2299,8 +2307,12 @@ async function convertOver(cycle: string[], now: string): Promise<'now' | 'later
   releaseField(field)
   // The copy Krya pressed is its own to take back.
   if (copied) clipGuard.claim()
+  if (!text) {
+    log(`convert: nothing copied in ${COPY_WAIT_MS} ms`)
+    return { pasted: false, selected: false }
+  }
   const layouts = cycle.map(id => ({ id, table: tableFor(id) })).filter((l): l is { id: string; table: KeyTable } => !!l.table)
-  const from = text ? sourceLayout(text, layouts, now) : undefined
+  const from = sourceLayout(text, layouts, now)
   const fromTable = from ? tableFor(from) : undefined
   const to = /\p{L}/u.test(text)
     ? nextLayout(cycle, from)
@@ -2309,19 +2321,25 @@ async function convertOver(cycle: string[], now: string): Promise<'now' | 'later
         return !!fromTable && !!table && convertText(text, fromTable, table) !== text
       })
   const toTable = to ? tableFor(to) : undefined
-  if (!fromTable || !toTable || !to || from === to) return 'now'
+  if (!fromTable || !toTable || !to || from === to) {
+    log(`convert: ${[...text].length} chars, no other layout of ${cycle.join(', ')} reads them`)
+    return { pasted: false, selected: false }
+  }
   const converted = convertText(text, fromTable, toTable)
   await pasteText(converted)
   keyboard.switchTo(to)
-  // Selected again, unless it is long or runs over lines (Shift+Left walks a line end differently in each program).
-  const chars = [...converted].length
-  if (chars <= RESELECT_MOST && !/[\r\n]/.test(converted)) {
-    await new Promise(resolve => setTimeout(resolve, 60))
-    await pressSelectBack(chars)
-    // After the thread has seen those keys (another program's to it), it is told the selection is back.
-    setTimeout(() => keyboard.selected(), 150)
+  // Selected again, the cursor at its end; a line break is one step (\r\n too), unless it is long.
+  const steps = [...converted.replace(/\r\n/g, '\n')].length
+  if (steps > RESELECT_MOST) {
+    log(`convert: ${steps} chars ${from} → ${to}, too long to select again`)
+    return { pasted: true, selected: false }
   }
-  return 'later'
+  await new Promise(resolve => setTimeout(resolve, 60))
+  await pressSelectBack(steps)
+  // Once the keyboard thread has seen those keys (another program's to it), it is told the selection is back.
+  await new Promise(resolve => setTimeout(resolve, 150))
+  log(`convert: ${steps} chars ${from} → ${to}, selected again`)
+  return { pasted: true, selected: true }
 }
 
 /** Other layout switchers running now, for the settings' warning, and the other programs that watch the keyboard. */

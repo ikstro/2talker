@@ -189,15 +189,14 @@ describe('fixing as one types', () => {
     expect(desk.layout).toBe('ru')
   })
 
-  test('Backspace right after takes the fix back and keeps the word', () => {
+  test('Backspace right after a fix only erases, so the ending can be set right', () => {
     const desk = new Desk({ autoFix: true })
     desk.keys('ghbdtn ')
     desk.tap(VK_BACK)
-    expect(desk.text).toBe('ghbdtn ')
-    expect(desk.layout).toBe('en')
-    expect(desk.sent).toContainEqual({ type: 'keep', word: 'ghbdtn' })
     desk.tap(VK_BACK)
-    expect(desk.text).toBe('ghbdtn')
+    expect(desk.text).toBe('приве')
+    expect(desk.layout).toBe('ru')
+    expect(desk.sent.find(m => m.type === 'keep')).toBeUndefined()
   })
 
   test('a word fixed by itself is told to the main process, as typed and as fixed, never from a password field', () => {
@@ -268,12 +267,12 @@ describe('fixing as one types', () => {
     expect(word.caps).toBe(false)
   })
 
-  test('Backspace after a stray capital was set right brings the word back as typed, Caps Lock on again', () => {
-    const desk = new Desk({ autoFix: true })
+  test('the fix key after a stray capital was set right brings the word back as typed, Caps Lock on again', () => {
+    const desk = new Desk({ autoFix: true, keys: { fix: 'Pause' } })
     desk.layout = 'ru'
     desk.caps = true
     desk.keys('Привет ', 'ru')
-    desk.tap(VK_BACK)
+    desk.tap(VK_PAUSE)
     expect(desk.text).toBe('пРИВЕТ ')
     expect(desk.caps).toBe(true)
   })
@@ -569,6 +568,47 @@ describe('the fix key', () => {
     desk.tap(VK_PAUSE)
     expect(desk.text).toBe('ghbdtn vbh')
     expect(desk.sent).toContainEqual({ type: 'selection', cycle: ['en', 'ru'], layout: 'en' })
+  })
+
+  test('a selection made with Ctrl+Shift and an arrow, or the fix key pressed with Shift still down, goes to the main process', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    desk.keys('ghbdtn vbh')
+    desk.event(VK_LCONTROL, true)
+    desk.event(VK_LSHIFT, true)
+    desk.tap(0x25)
+    desk.event(VK_LSHIFT, false)
+    desk.event(VK_LCONTROL, false)
+    desk.tap(VK_PAUSE)
+    expect(desk.text).toBe('ghbdtn vbh')
+    expect(desk.sent.filter(m => m.type === 'selection')).toHaveLength(1)
+    const held = new Desk({ keys: { fix: 'Pause' } })
+    held.keys('ghbdtn')
+    held.event(VK_LSHIFT, true)
+    held.tap(0x24)
+    held.tap(VK_PAUSE)
+    held.event(VK_LSHIFT, false)
+    expect(held.sent.filter(m => m.type === 'selection')).toHaveLength(1)
+  })
+
+  test('pressed again while the selection is converted, the fix key goes on once it is selected again', () => {
+    const desk = new Desk({ keys: { fix: 'Pause' } })
+    const asked = () => desk.sent.filter(m => m.type === 'selection').length
+    desk.mouse('left-down', 0)
+    desk.mouse('left-up', 80)
+    desk.tap(VK_PAUSE)
+    desk.tap(VK_PAUSE)
+    expect(asked()).toBe(1)
+    desk.typist.converted(true)
+    expect(asked()).toBe(2)
+    desk.typist.converted(true)
+    expect(asked()).toBe(2)
+    desk.tap(VK_PAUSE)
+    expect(asked()).toBe(3)
+    // Not selected again: a press made meanwhile is dropped, and so is the next.
+    desk.tap(VK_PAUSE)
+    desk.typist.converted(false)
+    desk.tap(VK_PAUSE)
+    expect(asked()).toBe(3)
   })
 
   test('right after a fix by itself, it takes the fix back', () => {

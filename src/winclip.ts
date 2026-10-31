@@ -113,14 +113,30 @@ export function pressEnter(): void {
 }
 
 const VK_LEFT = 0x25
-/** Shift+Left as many times as `chars`: the text just pasted, before the cursor, selected again. */
+const VK_RIGHT = 0x27
+const KEYEVENTF_EXTENDEDKEY = 0x0001
+
+/**
+ * An arrow, said to be the extended key: without it Windows takes it for the
+ * number pad's, and with NumLock on lets go of Shift for it (2026-10-31).
+ */
+function pressArrow(vk: number, times: number): void {
+  for (let i = 0; i < times; i++) {
+    keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, MAIN_KEYS)
+    keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, MAIN_KEYS)
+  }
+}
+
+/**
+ * The text just pasted, `chars` before the cursor, selected again: Left to
+ * its start, then Shift+Right to its end, so the cursor ends where it was,
+ * after the text, as in a selection made left to right.
+ */
 export async function pressSelectBack(chars: number, maxWaitMs = 1500): Promise<void> {
   await letGo(MODIFIERS, maxWaitMs)
+  pressArrow(VK_LEFT, chars)
   keybd_event(VK_SHIFT, 0, 0, MAIN_KEYS)
-  for (let i = 0; i < chars; i++) {
-    keybd_event(VK_LEFT, 0, 0, MAIN_KEYS)
-    keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
-  }
+  pressArrow(VK_RIGHT, chars)
   keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, MAIN_KEYS)
 }
 
